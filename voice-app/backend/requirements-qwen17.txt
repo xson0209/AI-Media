@@ -1,0 +1,33 @@
+# Minimal local runtime for Qwen TTS 1.7B on Windows.
+# This intentionally avoids optional engines that pull native build toolchains
+# or large extra model stacks.
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.0.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# torch and torchaudio are installed explicitly by scripts/setup-qwen17-e.ps1
+# from the CUDA wheel index, so this environment keeps GPU support deterministic.
+transformers==4.57.3
+accelerate==1.12.0
+huggingface_hub>=0.20.0,<1.0
+safetensors
+sentencepiece
+einops
+onnxruntime
+
+numpy>=1.24.0,<2.0
+librosa>=0.10.0
+soundfile>=0.12.0
+pedalboard>=0.9.0
+pyloudnorm
+sox
+
+httpx>=0.27.0
+fastmcp>=3.0,<4.0
+sse-starlette>=2.0
+python-multipart>=0.0.6
+Pillow>=10.0.0

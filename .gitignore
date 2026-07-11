@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+*.egg
+
+# Build outputs
+dist/
+build/
+target/
+*.app
+*.dmg
+*.exe
+*.msi
+*.deb
+*.AppImage
+
+# Runtime data and local model/cache artifacts
+data/
+voice-app-data-before-restore-*/
+voicebox-db-and-voices-*.zip
+.cache/
+tools/
+voice-app/.git.backup-before-ai-media-push/
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+logs/
+.logs/
+
+# Environment and local credentials
+.env
+.env.local
+.env.*.local
+.codex/codex-api-keys.local
+.codex/codex-api-key-state
+.codex/codex-providers.local
+.codex/codex-provider-state
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+nul

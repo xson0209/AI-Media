@@ -1,0 +1,396 @@
+---
+title: "AI Video Assistant"
+description: "Hướng dẫn dùng AI Video Assistant phase 2 để tạo kịch bản, prompt segment 10 giây, prompt video, voice, SRT và dựng nhanh MP4"
+---
+
+# AI Video Assistant
+
+AI Video Assistant phase 2 là màn tạo bộ nguyên liệu video bằng workflow Script-to-Video-Prompt Studio. Bạn nhập nhiều nguồn nội dung bằng tiếng Việt, Voicebox dùng Codex CLI local để phát triển thành story strategy, continuity bible, retention map, sound design plan, kịch bản theo ngôn ngữ video, prompt segment 10 giây và prompt video có thể copy sang công cụ tạo video bên ngoài.
+
+Sau khi bạn đã có video clip cho từng segment, Voicebox có thể dựng nhanh MP4 trong app: upload clip theo segment, dùng duration thật của voice làm timer, chuẩn hóa clip bằng FFmpeg, ghép voice và burn-in hoặc giữ phụ đề SRT rời.
+
+## Mở giao diện
+
+Frontend local thường chạy ở:
+
+```text
+http://localhost:5173/
+```
+
+AI Video Assistant có route riêng:
+
+```text
+http://localhost:5173/ai-video
+```
+
+Giao diện tạo giọng cũ vẫn ở:
+
+```text
+http://localhost:5173/generate
+```
+
+## Điều kiện cần có
+
+Backend Voicebox cần chạy ở:
+
+```text
+http://127.0.0.1:17493
+```
+
+Codex CLI cần sẵn sàng vì các bước phát triển kịch bản, chia segment và tạo prompt video gọi qua `codex exec` trên máy local. Trong màn AI Video, khung `Codex CLI local` sẽ báo trạng thái.
+
+Voice không cần setup lại. AI Video dùng lại voice profile và generation pipeline hiện có của Voicebox.
+
+Để dùng khung `Dựng nhanh MP4`, máy chạy backend cần có `ffmpeg` và `ffprobe` trong `PATH`. Nếu thiếu, checklist render sẽ báo lỗi tiếng Việt như chưa tìm thấy FFmpeg/FFprobe và chưa cho render. Cách xử lý nhanh là cài FFmpeg bằng package manager của hệ điều hành, hoặc đặt `VOICEBOX_FFMPEG_PATH` và `VOICEBOX_FFPROBE_PATH` trỏ tới hai binary này trước khi khởi động lại Voicebox.
+
+## Mục đích video và ngôn ngữ video
+
+`Mục đích video` là preset sản phẩm ở đầu workflow. Preset gợi ý `Ngôn ngữ video`, mode thoại, mật độ narration, phụ đề và tone script, nhưng `Ngôn ngữ video` (`target_language`) vẫn là nguồn sự thật cuối cùng cho voice, narration, subtitle và chữ người xem đọc.
+
+Các purpose có sẵn:
+
+- `Thị trường Việt Nam`: gợi ý tiếng Việt, voiceover tự nhiên, subtitle tiếng Việt và cách viết gần audience Việt Nam.
+- `Global / English short`: gợi ý tiếng Anh, hook nhanh, câu ngắn và subtitle tiếng Anh.
+- `Giải thích / giáo dục`: ưu tiên narration rõ nghĩa, đủ ngữ cảnh, có ví dụ và nhịp dễ nghe.
+- `Quảng cáo / bán hàng`: ưu tiên hook, lợi ích chính, nhịp cô đọng và CTA.
+- `Bản localize`: tạo project riêng từ source/config hiện có để làm bản tiếng Anh hoặc tiếng Việt độc lập.
+- `Tùy chỉnh`: giữ các control mở để bạn tự chọn language, dialogue mode và density.
+
+Bạn có thể chọn purpose trước, sau đó override `Ngôn ngữ video`. Ví dụ chọn `Thị trường Việt Nam` nhưng đặt `target_language = English` thì story, narration, voice, subtitle và package sẽ đi theo tiếng Anh. Backend không tự đổi `target_language` khi bạn chỉ update purpose.
+
+Mode thoại hiện là contract script/voice text, chưa phải multi-speaker timeline:
+
+- `Voiceover`: ưu tiên narrator/voiceover, không bắt buộc câu thoại nhân vật.
+- `Nhân vật nói`: cho phép viết câu thoại tự nhiên cho nhân vật/người nói, nhưng vẫn dùng một voice track hiện có.
+- `Mixed`: kết hợp voiceover ngắn và câu thoại khi giúp câu chuyện rõ hơn.
+
+Field `english_narration` trong API/package là tên tương thích cũ. Nội dung field này luôn là narration/voice text theo `target_language` của project; project tiếng Việt sẽ chứa lời tiếng Việt trong field đó.
+
+Nếu voice profile hoặc engine đã chọn không hỗ trợ `target_language`, UI sẽ cảnh báo sớm và backend sẽ trả lỗi rõ ràng khi tạo voice. Voicebox không fallback âm thầm từ tiếng Việt sang tiếng Anh.
+
+## Localize bản Việt và bản Anh
+
+Một project AI Video chỉ có một `target_language` và một bộ artifact voice/subtitle/package. Nếu cần cả bản Việt và bản Anh, dùng action `Localize` trong menu project để tạo project mới từ cùng source/config, chọn language mới và tạo lại story, prompt, voice, subtitle, package cho bản đó.
+
+Luồng này tránh trộn voice tiếng Việt và subtitle tiếng Anh trong cùng một ZIP hoặc MP4. Bản localize có source blocks riêng, artifact riêng và package manifest riêng.
+
+## Ví dụ đầu vào và đầu ra
+
+Bạn có thể nhập nội dung bằng tiếng Việt, sau đó dùng phần tiếng Anh mà AI tạo ra cho video quốc tế.
+
+Ví dụ source tiếng Việt:
+
+```text
+Ý tưởng chính: Một video World Cup kể về đội bóng bị dẫn trước nhưng ghi bàn quyết định ở phút cuối.
+Phong cách video: Điện ảnh, nhịp nhanh, nhiều cảnh mưa, cảm xúc căng thẳng rồi vỡ òa.
+Bắt buộc phải có: Đội trưởng, bảng tỷ số, khán giả im lặng rồi bùng nổ.
+Cần tránh: Không dùng giọng văn quảng cáo, không thêm logo hoặc chữ trên hình.
+```
+
+Ví dụ narration tiếng Anh AI có thể tạo:
+
+```text
+Down by two goals, the captain refuses to let the dream end. In the final minute, one last pass turns silence into thunder.
+```
+
+Ví dụ prompt video tiếng Anh cho một segment 10 giây:
+
+```text
+Create a 10-second vertical 9:16 cinematic video. This is segment 2 of 6 of a 60-second video. Keep the same rain-soaked football captain in a blue kit, same rainy stadium, same cinematic handheld realism, and continue the story state from the previous segment. Timeline: 0-3s tight close-up of the captain lifting his head under stadium lights; 3-7s he steps forward through rain as the crowd blurs behind him; 7-10s he nods with determination and the camera transitions toward the pitch for the next segment.
+
+Negative prompt: no text overlay, no subtitles, no watermark, no logo, no distorted face, no extra players in the foreground, no unstable camera shake.
+```
+
+## Ví dụ theo mục đích
+
+### Vietnamese market
+
+- `Mục đích video`: `Thị trường Việt Nam`
+- `Ngôn ngữ video`: `Tiếng Việt`
+- Source: câu chuyện khách hàng, sự kiện địa phương hoặc nội dung bán hàng cho audience Việt Nam.
+- Kết quả mong đợi: narration tiếng Việt tự nhiên, subtitle tiếng Việt, tone gần gũi và không giống bản dịch máy.
+
+### Global English short
+
+- `Mục đích video`: `Global / English short`
+- `Ngôn ngữ video`: `English`
+- Source: một câu chuyện thể thao, lịch sử, sản phẩm hoặc insight có thể xem quốc tế.
+- Kết quả mong đợi: hook nhanh, câu tiếng Anh ngắn, dễ hiểu, prompt video vẫn có bản giải thích tiếng Việt để bạn duyệt.
+
+### Educational explainer
+
+- `Mục đích video`: `Giải thích / giáo dục`
+- `Ngôn ngữ video`: `Tiếng Việt` hoặc `English` tùy audience.
+- Source: khái niệm, quy trình, bài học hoặc breakdown một vấn đề phức tạp.
+- Kết quả mong đợi: narration rõ nghĩa, nhiều ngữ cảnh hơn, ví dụ cụ thể và phụ đề giữ đủ ý chính.
+
+### Sales/ad video
+
+- `Mục đích video`: `Quảng cáo / bán hàng`
+- `Ngôn ngữ video`: thường là `Tiếng Việt` cho thị trường Việt Nam hoặc `English` cho landing/social quốc tế.
+- Source: pain point, lợi ích sản phẩm, bằng chứng, offer và hành động mong muốn.
+- Kết quả mong đợi: hook ở đầu, lợi ích chính, câu ngắn, CTA direct/soft/urgent theo lựa chọn.
+
+## Auto tạo nguyên liệu
+
+Khung `Auto tạo nguyên liệu` điều phối các bước phase 2 hiện có để chạy tới bộ nguyên liệu lõi: prompt video, voice và phụ đề `.srt`. Auto-run đọc trạng thái project hiện tại trước mỗi bước, nên artifact đã completed và còn mới sẽ được skip thay vì tạo lại toàn bộ.
+
+Có hai chế độ:
+
+- `Duyệt từng chặng`: tự chạy tới story, dừng để bạn duyệt, sau đó chạy tới prompt video và dừng lần nữa trước khi tạo voice/SRT.
+- `Tự chạy hết`: tự approve story/prompt trong phạm vi auto-run và chạy tiếp tới prompt + voice + SRT, nhưng vẫn dừng rõ lỗi nếu thiếu source, Codex CLI, voice profile, ngôn ngữ/engine voice hoặc input bắt buộc.
+
+Tùy chọn `Tạo ZIP khi xong` sẽ chạy thêm bước xuất package sau khi nguyên liệu lõi sẵn sàng. Nếu ZIP lỗi sau khi prompt, voice và SRT đã hoàn tất, auto-run vẫn báo summary rằng nguyên liệu lõi đã sẵn sàng để bạn retry package riêng.
+
+Auto-run không tích hợp provider tạo video bên ngoài và không tự render MP4. Phần MP4 vẫn dùng panel `Dựng nhanh MP4` sau khi bạn đã có clip video cho từng segment.
+
+## Quy trình phase 2
+
+### 1. Nhập nhiều nguồn nội dung
+
+Trong màn AI Video, nhập các nguồn bằng tiếng Việt:
+
+- `Ý tưởng chính`: nội dung video muốn làm.
+- `Kịch bản thô`: đoạn thoại, outline hoặc ghi chú dài nếu đã có.
+- `Nhân vật và bối cảnh`: chi tiết cần giữ nhất quán.
+- `Phong cách video`: mood, màu sắc, camera style, nhịp dựng.
+- `Bắt buộc phải có`: ý không được bỏ.
+- `Cần tránh`: nội dung không muốn AI đưa vào.
+
+Chọn thêm:
+
+- `Mục đích video`: preset audience/use case để gợi ý language, mode thoại, density, subtitle và tone script.
+- `Ngôn ngữ video`: mặc định English.
+- `Mode thoại` và `Mật độ thoại`: điều chỉnh voiceover, câu thoại nhân vật hoặc mức dày narration.
+- `Thời lượng`: tổng thời lượng mong muốn.
+- `Tỷ lệ`: `9:16`, `16:9` hoặc `1:1`.
+- `Prompt segment`: hệ thống tự tính số prompt theo công thức `ceil(thời lượng / 10)`. Ví dụ 60 giây = 6 prompt, 45 giây = 5 prompt và segment cuối có thể trim.
+- `Voice profile`: chọn giọng nếu muốn tạo voice trong app.
+
+Bấm `Tạo dự án phase 2`.
+
+### 2. AI phát triển kịch bản
+
+Bấm:
+
+```text
+AI phát triển kịch bản
+```
+
+Codex sẽ tạo:
+
+- `Story strategy`: hook, vấn đề chính, nhịp cảm xúc, payoff.
+- `Continuity bible`: nhân vật, trang phục, đạo cụ, bối cảnh, tone màu, camera style cần giữ nhất quán.
+- `Retention map`: hook 0-2 giây, câu hỏi trong đầu người xem, curiosity gap, beat curve, pattern interrupt, payoff và rủi ro drop-off.
+- `Sound design plan`: mood nhạc, energy curve, ambience, SFX cue, silence drop và mixing notes để voice không bị che.
+- `Kịch bản chi tiết`: narration/script tiếng Anh và mô tả tiếng Việt để bạn đọc hiểu.
+
+Nếu nội dung chưa đúng, bấm `Viết lại`. Source blocks ban đầu vẫn được giữ.
+
+### 3. Duyệt kịch bản
+
+Đọc `Story strategy`, `Continuity bible` và `Kịch bản chi tiết`. Khi đúng ý, bấm:
+
+```text
+Duyệt kịch bản
+```
+
+AI chỉ được tạo segment sau khi kịch bản đã được duyệt. Điều này tránh việc tạo prompt video từ nội dung sai.
+
+### 4. Tạo prompt segment 10 giây
+
+Bấm:
+
+```text
+Tạo segment breakdown
+```
+
+Mỗi segment có:
+
+- Mô tả tiếng Việt.
+- Narration tiếng Anh hoặc tiếng Việt theo ngôn ngữ video; mỗi segment nên là voiceover đủ dài, không chỉ một câu ngắn vài từ.
+- Thời lượng dùng trong timeline: thường 10 giây, riêng segment cuối là phần dư nếu thời lượng không chia hết cho 10.
+- 2-4 micro-scene bên trong cùng một prompt 10 giây.
+- Hành động chính hoặc mạch hành động chính.
+- Shot type, góc máy, cỡ cảnh, bố cục, camera movement.
+- Retention role, open loop, visual surprise và lý do cắt dựng.
+- Transition pack: loại chuyển cảnh, trigger, timing, edit reason, SFX và continuity risk.
+- Sound design cue: ambience, whoosh, riser, impact, silence drop hoặc ghi chú mix nếu phù hợp.
+
+Scene dài sẽ được chia thành nhiều segment 10 giây. Mỗi segment vẫn nhắc `Segment X of N`, `same character`, `same style`, `same outfit` để khi ghép các clip lại không giống nhiều câu chuyện rời.
+
+Bạn có thể `Khóa` segment đã ưng ý. Segment đã khóa sẽ không bị batch regenerate ghi đè.
+
+### 5. Tạo prompt video
+
+Bấm:
+
+```text
+Tạo prompt video
+```
+
+Mỗi prompt video được viết theo hướng dùng chung, không khóa vào Runway, Kling, Veo, Pika, Luma hoặc provider cụ thể. Với project có thời lượng mục tiêu, mỗi prompt là một clip 10 giây, có nhãn `Segment X of N`, timeline 0-3s/3-7s/7-10s, continuity notes, retention notes, transition notes, sound design notes và negative prompt.
+
+Sound design trong prompt/package là chỉ dẫn dựng. Nếu bạn chưa upload hoặc chọn file SFX/BGM thật, MP4 render trong Voicebox chưa tự mix các âm thanh đó; voice, clip và phụ đề vẫn được render như trước.
+
+Với từng segment, bạn có thể:
+
+- `Copy prompt`: copy prompt video sang clipboard.
+- `Tải prompt`: tải file `.txt` cho segment đó.
+
+### 6. Tạo voice và phụ đề
+
+AI Video phase 2 vẫn dùng voice generation hiện có của Voicebox. Sau khi có scene/kịch bản tiếng Anh và đã chọn voice profile, bấm `Tạo voice` cho từng scene có lời.
+
+Khi voice hoàn tất, bấm:
+
+```text
+Tạo phụ đề .srt
+```
+
+Phụ đề dùng duration thật của audio để dễ khớp timeline.
+
+### 7. Dựng nhanh MP4
+
+Sau khi đã copy prompt sang công cụ tạo video AI và tải clip về máy, dùng panel:
+
+```text
+Dựng nhanh MP4
+```
+
+Luồng cơ bản:
+
+- Upload hoặc thay clip video cho từng segment. Định dạng hỗ trợ trong MVP: MP4, MOV, WEBM và MKV.
+- Checklist render sẽ kiểm tra clip, voice, subtitle, timer segment và FFmpeg/FFprobe.
+- Timer của segment có narration lấy theo `audio_duration` thật của voice. Segment không lời dùng `duration_seconds` trong segment breakdown; clip 10 giây dài hơn timer sẽ được trim.
+- Chọn thiết lập render: độ phân giải, FPS, crop hoặc pad, phụ đề burn-in hoặc SRT rời.
+- Bấm `Dựng MP4`, theo dõi tiến độ, rồi bấm `Tải MP4` khi job hoàn tất.
+
+Clip dài hơn timer sẽ bị trim. Clip ngắn hơn timer mặc định được kéo đủ thời lượng bằng freeze frame cuối, nên checklist sẽ cảnh báo nếu clip lệch duration quá nhiều so với voice hoặc timer.
+
+Mặc định Voicebox mute audio gốc của clip và dùng voice Voicebox làm audio chính. Nếu chọn burn-in subtitle, phụ đề được chuyển sang ASS tạm rồi render vào video. Nếu chọn SRT rời, MP4 không có chữ burn-in và bạn vẫn dùng nút tải phụ đề hiện có.
+
+Timeline manifest của render job có kèm retention role, transition pack và sound design cue theo segment để debug hoặc dùng cho workflow dựng nâng cao sau này. Các cue SFX/BGM trong manifest vẫn là metadata nếu chưa có audio asset thật được mix vào MP4.
+
+### 8. Tạo ZIP nguyên liệu
+
+Khung `Tải nguyên liệu` hiển thị checklist. ZIP chỉ tạo được khi đủ prompt video đạt chất lượng, voice bắt buộc và phụ đề.
+
+Bấm:
+
+```text
+Tạo ZIP nguyên liệu
+Tải tất cả
+```
+
+## ZIP phase 2 gồm gì?
+
+Cấu trúc chính:
+
+```text
+AI Video - <ten-du-an>/
+  00 - Huong dan.txt
+  01 - Kich ban/
+    Kich ban tieng Anh.txt
+    Mo ta tieng Viet.txt
+    Continuity bible.txt
+    Creative direction - Retention va am thanh.txt
+    Segment list - <ten-du-an>.csv
+  02 - Prompt video/
+    Prompt video - Canh 01 - Segment 01.txt
+  03 - Giong doc/
+  04 - Phu de/
+  Manifest - <ten-du-an>.json
+```
+
+Preview image không còn là điều kiện bắt buộc của phase 2. Project phase 1 cũ vẫn giữ luồng `Prompt ảnh` legacy để không phá dữ liệu cũ.
+
+## File lưu ở đâu?
+
+Khi chạy local dev, dữ liệu nội bộ thường nằm dưới:
+
+```text
+data/
+```
+
+Artifact AI Video lưu theo project:
+
+```text
+data/video_projects/{project_id}/
+```
+
+Các thư mục thường gặp:
+
+```text
+prompts/
+video_prompts/
+preview_images/
+subtitles/
+shot_clips/
+render_intermediates/
+render_outputs/
+manifests/
+exports/
+logs/
+```
+
+`shot_clips/` lưu clip upload theo segment. `render_intermediates/` chứa file tạm khi FFmpeg chuẩn hóa clip, ghép video/audio và tạo ASS. `render_outputs/` chứa MP4 hoàn chỉnh và timeline manifest của render job.
+
+Voice audio dùng generation pipeline hiện có và thường resolve dưới:
+
+```text
+data/generations/
+```
+
+## Debug và request ID
+
+Mỗi action AI Video có `request_id`. Khi lỗi, UI hiển thị thông báo tiếng Việt và debug panel có nút `Copy debug`.
+
+Debug/status endpoint local:
+
+```text
+GET http://127.0.0.1:17493/ai-video/projects/{project_id}/debug
+```
+
+Log local dạng JSONL nằm trong:
+
+```text
+data/video_projects/{project_id}/logs/
+```
+
+Log có redaction: token, API key, bearer token, binary/audio upload và text quá dài không được ghi nguyên văn.
+
+## Lỗi thường gặp
+
+### Codex CLI chưa sẵn sàng
+
+Kiểm tra khung `Codex CLI local` trong UI hoặc chạy:
+
+```bash
+codex --version
+```
+
+### Không tạo được segment
+
+Bạn cần bấm `Duyệt kịch bản` trước. Nếu kịch bản chưa đúng, bấm `Viết lại` ở phần Story.
+
+### Không tạo được ZIP
+
+Xem checklist trong khung `Tải nguyên liệu`. Các lỗi phổ biến:
+
+- Thiếu prompt video đạt chất lượng.
+- Thiếu voice cho scene có lời.
+- Chưa tạo phụ đề `.srt`.
+- Package cũ vì source/story/segment/prompt đã thay đổi.
+
+### Voice không đúng ngôn ngữ
+
+Với video tiếng Anh, hãy dùng voice profile và engine hỗ trợ tiếng Anh. Context tham chiếu của voice clone nên cùng ngôn ngữ với nội dung cần đọc để tránh phát âm lệch.
+
+## Cần nhớ
+
+- UI và mô tả thao tác dùng tiếng Việt.
+- Narration/script và prompt video có thể xuất tiếng Anh.
+- Project có thời lượng mục tiêu mặc định chia theo prompt segment 10 giây để phù hợp giới hạn tạo clip 10s của nhiều công cụ video AI.
+- Continuity bible là nguồn giữ nhân vật, đạo cụ, bối cảnh và phong cách nhất quán.
+- Voicebox chuẩn bị nguyên liệu; công cụ dựng/video bên ngoài tạo video cuối.

@@ -1,0 +1,7 @@
+{
+  "name": "ai-media-project",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix voice-app run dev"
+  }
+}
