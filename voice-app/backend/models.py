@@ -1294,6 +1294,99 @@ class VideoAutoRunResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class VideoInspirationFrameResponse(BaseModel):
+    """Frame sampled from a video inspiration job."""
+
+    id: str
+    job_id: str
+    frame_path: str
+    timestamp_seconds: float
+    description_vi: Optional[str] = None
+    technical_metadata_json: Optional[dict[str, Any]] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class VideoInspirationJobResponse(BaseModel):
+    """State and artifacts for the video inspiration workflow."""
+
+    id: str
+    source_type: str
+    source_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    source_platform: str = "unknown"
+    source_path: Optional[str] = None
+    audio_path: Optional[str] = None
+    source_duration_seconds: Optional[float] = None
+    status: str
+    current_step: str
+    progress: float = 0.0
+    target_language: str = "vi"
+    rewrite_mode: str = "bold_remix"
+    user_direction: Optional[str] = None
+    transcript_text: Optional[str] = None
+    transcript_language: Optional[str] = None
+    transcript_status: str = "pending"
+    visual_summary: Optional[str] = None
+    analysis_json: Optional[dict[str, Any]] = None
+    rewritten_script: Optional[str] = None
+    script_title: Optional[str] = None
+    big_idea: Optional[str] = None
+    hook: Optional[str] = None
+    created_video_project_id: Optional[str] = None
+    latest_auto_run_id: Optional[str] = None
+    ai_video_url: Optional[str] = None
+    failure_reason: Optional[str] = None
+    error_code: Optional[str] = None
+    frames: List[VideoInspirationFrameResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class VideoInspirationListResponse(BaseModel):
+    items: List[VideoInspirationJobResponse]
+    total: int
+
+class VideoInspirationUrlRequest(BaseModel):
+    url: str = Field(..., min_length=8, max_length=4000)
+    target_language: str = Field(default="vi", pattern="^(vi|en)$")
+    user_direction: Optional[str] = Field(default=None, max_length=20000)
+    use_browser_cookies: bool = False
+
+class VideoInspirationAnalyzeRequest(BaseModel):
+    allow_audio_only: bool = False
+    stt_model: Optional[str] = Field(default=None, pattern="^(base|small|medium|large|turbo)$")
+
+class VideoInspirationTranscriptUpdate(BaseModel):
+    transcript_text: str = Field(..., max_length=120000)
+
+class VideoInspirationDirectionUpdate(BaseModel):
+    user_direction: Optional[str] = Field(default=None, max_length=20000)
+
+class VideoInspirationRewriteRequest(BaseModel):
+    target_language: Optional[str] = Field(default=None, pattern="^(vi|en)$")
+    user_direction: Optional[str] = Field(default=None, max_length=20000)
+
+class VideoInspirationScriptUpdate(BaseModel):
+    rewritten_script: str = Field(..., min_length=1, max_length=160000)
+    script_title: Optional[str] = Field(default=None, max_length=160)
+    big_idea: Optional[str] = Field(default=None, max_length=20000)
+    hook: Optional[str] = Field(default=None, max_length=12000)
+
+class VideoInspirationCreateProjectRequest(BaseModel):
+    start_full_materials: bool = False
+    mode: str = Field(default="full_auto", pattern="^(review_gated|full_auto)$")
+    voice_profile_id: Optional[str] = None
+
+class VideoInspirationHandoffResponse(BaseModel):
+    job: VideoInspirationJobResponse
+    project: VideoProjectResponse
+    auto_run: Optional[VideoAutoRunResponse] = None
+    ai_video_url: str
+
 class MCPClientBindingResponse(BaseModel):
     """Per-MCP-client voice binding — what voice / engine the server should
     use when a given client_id calls voicebox.speak without args, plus an

@@ -22,6 +22,7 @@ const backendPort = process.env.VOICEBOX_BACKEND_PORT || process.env.VOICEBOX_PO
 const frontendPort = process.env.VOICEBOX_FRONTEND_PORT || '5173';
 const browserBackendHost = backendHost === '0.0.0.0' ? '127.0.0.1' : backendHost;
 const backendUrl = `http://${browserBackendHost}:${backendPort}`;
+const backendReadyUrl = `${backendUrl}/health/ready`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
 const startedChildren = [];
 let shuttingDown = false;
@@ -381,7 +382,7 @@ async function main() {
   let frontendChild = null;
 
   if (!frontendOnly) {
-    if (await isUrlReady(`${backendUrl}/health`)) {
+    if (await isUrlReady(backendReadyUrl)) {
       console.log(`Backend already running: ${backendUrl}`);
     } else {
       const python = findPython();
@@ -403,7 +404,7 @@ async function main() {
         ['-m', 'backend.main', '--host', backendHost, '--port', backendPort],
         projectRoot,
       );
-      await waitForUrl('Backend', `${backendUrl}/health`, 180000, backendChild);
+      await waitForUrl('Backend', backendReadyUrl, 180000, backendChild);
     }
   }
 

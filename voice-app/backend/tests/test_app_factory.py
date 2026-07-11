@@ -7,5 +7,7 @@ def test_app_factory_registers_core_routes():
     mounted_paths = {getattr(route, "path", "") for route in app.routes}
 
     assert "/health" in paths
+    assert "/health/ready" in paths
     assert "/ai-video/projects" in paths
+    assert "/video-inspiration/jobs" in paths
     assert "/mcp" in mounted_paths

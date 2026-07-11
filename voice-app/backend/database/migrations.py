@@ -43,6 +43,7 @@ def run_migrations(engine) -> None:
     _migrate_generation_versions(engine, inspector, tables)
     _migrate_capture_settings(engine, inspector, tables)
     _migrate_ai_video_assistant(engine)
+    _migrate_video_inspiration(engine)
     _migrate_mcp_bindings(engine, inspector, tables)
     tables = set(inspect(engine).get_table_names())
     _normalize_storage_paths(engine, tables)
@@ -788,6 +789,66 @@ def _migrate_ai_video_assistant(engine) -> None:
         conn.commit()
 
 
+def _migrate_video_inspiration(engine) -> None:
+    """Create video inspiration tables for existing SQLite databases."""
+    with engine.connect() as conn:
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_jobs (
+                id VARCHAR PRIMARY KEY,
+                source_type VARCHAR NOT NULL DEFAULT 'upload',
+                source_url TEXT,
+                original_filename VARCHAR,
+                source_platform VARCHAR NOT NULL DEFAULT 'unknown',
+                source_path VARCHAR,
+                audio_path VARCHAR,
+                source_duration_seconds FLOAT,
+                status VARCHAR NOT NULL DEFAULT 'uploaded',
+                current_step VARCHAR NOT NULL DEFAULT 'source_ready',
+                progress FLOAT NOT NULL DEFAULT 0,
+                target_language VARCHAR NOT NULL DEFAULT 'vi',
+                rewrite_mode VARCHAR NOT NULL DEFAULT 'bold_remix',
+                user_direction TEXT,
+                transcript_text TEXT,
+                transcript_language VARCHAR,
+                transcript_status VARCHAR NOT NULL DEFAULT 'pending',
+                visual_summary TEXT,
+                analysis_json JSON,
+                rewritten_script TEXT,
+                script_title VARCHAR,
+                big_idea TEXT,
+                hook TEXT,
+                created_video_project_id VARCHAR,
+                latest_auto_run_id VARCHAR,
+                failure_reason TEXT,
+                error_code VARCHAR,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (created_video_project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (latest_auto_run_id) REFERENCES video_auto_runs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_frames (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                frame_path VARCHAR NOT NULL,
+                timestamp_seconds FLOAT NOT NULL DEFAULT 0,
+                description_vi TEXT,
+                technical_metadata_json JSON,
+                created_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_jobs_updated ON video_inspiration_jobs(updated_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_jobs_status ON video_inspiration_jobs(status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_frames_job_time ON video_inspiration_frames(job_id, timestamp_seconds)"))
+        job_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_inspiration_jobs)")).fetchall()}
+        if "source_duration_seconds" not in job_columns:
+            conn.execute(text("ALTER TABLE video_inspiration_jobs ADD COLUMN source_duration_seconds FLOAT"))
+        if "user_direction" not in job_columns:
+            conn.execute(text("ALTER TABLE video_inspiration_jobs ADD COLUMN user_direction TEXT"))
+        conn.commit()
+
 def _migrate_mcp_bindings(engine, inspector, tables: set[str]) -> None:
     """Drop the legacy ``default_intent`` column and add ``default_personality``.
 
@@ -859,6 +920,9 @@ def _normalize_storage_paths(engine, tables: set[str]) -> None:
         ("video_provider_sessions", "chrome_profile_path"),
         ("video_clip_generation_jobs", "download_dir"),
         ("video_clip_generation_items", "downloaded_file_path"),
+        ("video_inspiration_jobs", "source_path"),
+        ("video_inspiration_jobs", "audio_path"),
+        ("video_inspiration_frames", "frame_path"),
     ]
 
     total_fixed = 0

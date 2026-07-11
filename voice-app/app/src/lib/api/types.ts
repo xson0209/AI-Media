@@ -1027,6 +1027,102 @@ export interface VideoAutoRunResponse {
   updated_at: string;
 }
 
+export type VideoInspirationTargetLanguage = 'vi' | 'en';
+
+export interface VideoInspirationFrameResponse {
+  id: string;
+  job_id: string;
+  frame_path: string;
+  timestamp_seconds: number;
+  description_vi?: string | null;
+  technical_metadata_json?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface VideoInspirationJobResponse {
+  id: string;
+  source_type: 'upload' | 'url' | string;
+  source_url?: string | null;
+  original_filename?: string | null;
+  source_platform: string;
+  source_path?: string | null;
+  audio_path?: string | null;
+  source_duration_seconds?: number | null;
+  status: string;
+  current_step: string;
+  progress: number;
+  target_language: VideoInspirationTargetLanguage;
+  rewrite_mode: string;
+  user_direction?: string | null;
+  transcript_text?: string | null;
+  transcript_language?: string | null;
+  transcript_status: string;
+  visual_summary?: string | null;
+  analysis_json?: Record<string, unknown> | null;
+  rewritten_script?: string | null;
+  script_title?: string | null;
+  big_idea?: string | null;
+  hook?: string | null;
+  created_video_project_id?: string | null;
+  latest_auto_run_id?: string | null;
+  ai_video_url?: string | null;
+  failure_reason?: string | null;
+  error_code?: string | null;
+  frames: VideoInspirationFrameResponse[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoInspirationListResponse {
+  items: VideoInspirationJobResponse[];
+  total: number;
+}
+
+export interface VideoInspirationUrlRequest {
+  url: string;
+  target_language: VideoInspirationTargetLanguage;
+  user_direction?: string | null;
+  use_browser_cookies?: boolean;
+}
+
+export interface VideoInspirationAnalyzeRequest {
+  allow_audio_only?: boolean;
+  stt_model?: WhisperModelSize | null;
+}
+
+export interface VideoInspirationTranscriptUpdate {
+  transcript_text: string;
+}
+
+export interface VideoInspirationDirectionUpdate {
+  user_direction?: string | null;
+}
+
+export interface VideoInspirationRewriteRequest {
+  target_language?: VideoInspirationTargetLanguage;
+  user_direction?: string | null;
+}
+
+export interface VideoInspirationScriptUpdate {
+  rewritten_script: string;
+  script_title?: string | null;
+  big_idea?: string | null;
+  hook?: string | null;
+}
+
+export interface VideoInspirationCreateProjectRequest {
+  start_full_materials?: boolean;
+  mode?: VideoAutoRunMode;
+  voice_profile_id?: string | null;
+}
+
+export interface VideoInspirationHandoffResponse {
+  job: VideoInspirationJobResponse;
+  project: VideoProjectResponse;
+  auto_run?: VideoAutoRunResponse | null;
+  ai_video_url: string;
+}
+
 export interface DownloadedBlob {
   blob: Blob;
   filename: string;

@@ -701,3 +701,51 @@ class Capture(Base):
     llm_model = Column(String, nullable=True)
     refinement_flags = Column(Text, nullable=True)  # JSON blob
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class VideoInspirationJob(Base):
+    """Workflow state for turning an existing video into a new script."""
+
+    __tablename__ = "video_inspiration_jobs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_type = Column(String, nullable=False, default="upload")
+    source_url = Column(Text, nullable=True)
+    original_filename = Column(String, nullable=True)
+    source_platform = Column(String, nullable=False, default="unknown")
+    source_path = Column(String, nullable=True)
+    audio_path = Column(String, nullable=True)
+    source_duration_seconds = Column(Float, nullable=True)
+    status = Column(String, nullable=False, default="uploaded")
+    current_step = Column(String, nullable=False, default="source_ready")
+    progress = Column(Float, nullable=False, default=0.0)
+    target_language = Column(String, nullable=False, default="vi")
+    rewrite_mode = Column(String, nullable=False, default="bold_remix")
+    user_direction = Column(Text, nullable=True)
+    transcript_text = Column(Text, nullable=True)
+    transcript_language = Column(String, nullable=True)
+    transcript_status = Column(String, nullable=False, default="pending")
+    visual_summary = Column(Text, nullable=True)
+    analysis_json = Column(JSON, nullable=True)
+    rewritten_script = Column(Text, nullable=True)
+    script_title = Column(String, nullable=True)
+    big_idea = Column(Text, nullable=True)
+    hook = Column(Text, nullable=True)
+    created_video_project_id = Column(String, ForeignKey("video_projects.id"), nullable=True)
+    latest_auto_run_id = Column(String, ForeignKey("video_auto_runs.id"), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    error_code = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class VideoInspirationFrame(Base):
+    """Sampled frame extracted from a source video for visual analysis."""
+
+    __tablename__ = "video_inspiration_frames"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String, ForeignKey("video_inspiration_jobs.id"), nullable=False)
+    frame_path = Column(String, nullable=False)
+    timestamp_seconds = Column(Float, nullable=False, default=0.0)
+    description_vi = Column(Text, nullable=True)
+    technical_metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -66,6 +66,17 @@ import type {
   VideoClipGenerationRetryRequest,
   VideoEpisodeCreate,
   VideoGeneratedDataResetResponse,
+  VideoInspirationAnalyzeRequest,
+  VideoInspirationCreateProjectRequest,
+  VideoInspirationDirectionUpdate,
+  VideoInspirationHandoffResponse,
+  VideoInspirationJobResponse,
+  VideoInspirationListResponse,
+  VideoInspirationRewriteRequest,
+  VideoInspirationScriptUpdate,
+  VideoInspirationTargetLanguage,
+  VideoInspirationTranscriptUpdate,
+  VideoInspirationUrlRequest,
   VideoPackageExportResponse,
   VideoPackageReadinessResponse,
   VideoProviderSessionLabelUpdate,
@@ -519,6 +530,128 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  // Video Inspiration
+  async listVideoInspirationJobs(limit = 20, offset = 0): Promise<VideoInspirationListResponse> {
+    return this.request<VideoInspirationListResponse>(
+      `/video-inspiration/jobs?limit=${limit}&offset=${offset}`,
+    );
+  }
+
+  async getVideoInspirationJob(jobId: string): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(`/video-inspiration/jobs/${jobId}`);
+  }
+
+  getVideoInspirationFrameUrl(frameId: string): string {
+    return `${this.getBaseUrl()}/video-inspiration/frames/${frameId}`;
+  }
+
+  async uploadVideoInspirationJob(
+    file: File,
+    targetLanguage: VideoInspirationTargetLanguage,
+    userDirection?: string | null,
+  ): Promise<VideoInspirationJobResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('target_language', targetLanguage);
+    const direction = userDirection?.trim();
+    if (direction) {
+      formData.append('user_direction', direction);
+    }
+    const response = await fetch(`${this.getBaseUrl()}/video-inspiration/jobs/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.json();
+  }
+
+  async createVideoInspirationJobFromUrl(
+    data: VideoInspirationUrlRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>('/video-inspiration/jobs/from-url', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async analyzeVideoInspirationJob(
+    jobId: string,
+    data: VideoInspirationAnalyzeRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/analyze`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateVideoInspirationTranscript(
+    jobId: string,
+    data: VideoInspirationTranscriptUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/transcript`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateVideoInspirationDirection(
+    jobId: string,
+    data: VideoInspirationDirectionUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/direction`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async rewriteVideoInspirationJob(
+    jobId: string,
+    data: VideoInspirationRewriteRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(`/video-inspiration/jobs/${jobId}/rewrite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateVideoInspirationScript(
+    jobId: string,
+    data: VideoInspirationScriptUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/script`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async createAIVideoProjectFromInspiration(
+    jobId: string,
+    data: VideoInspirationCreateProjectRequest,
+  ): Promise<VideoInspirationHandoffResponse> {
+    return this.request<VideoInspirationHandoffResponse>(
+      `/video-inspiration/jobs/${jobId}/create-ai-video-project`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
   }
 
   // Captures

@@ -1,4 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouterState } from '@tanstack/react-router';
 import {
   AlertCircle,
   BookOpen,
@@ -41,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { AI_VIDEO_DRAFT_STORAGE_KEY, type AIVideoFormDraft } from '@/lib/aiVideoDraft';
 import { apiClient } from '@/lib/api/client';
 import type {
   CallToActionStyle,
@@ -605,7 +607,17 @@ function isAutoRunActiveStatus(status: VideoAutoRunStatus | string | null | unde
 }
 
 function isAutoRunBusyStatus(status: VideoAutoRunStatus | string | null | undefined): boolean {
-  return !!status && ['queued', 'running', 'waiting_planning', 'waiting_voice', 'waiting_clips', 'waiting_render'].includes(status);
+  return (
+    !!status &&
+    [
+      'queued',
+      'running',
+      'waiting_planning',
+      'waiting_voice',
+      'waiting_clips',
+      'waiting_render',
+    ].includes(status)
+  );
 }
 
 function isAutoRunActive(run: VideoAutoRunResponse | null | undefined): boolean {
@@ -713,7 +725,7 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
             ? 'prompt video trước khi upload ảnh'
             : videoClips
               ? 'prompt video trước khi gửi sang Veo'
-            : 'prompt video trước khi tạo giọng'
+              : 'prompt video trước khi tạo giọng'
           : 'nội dung vừa tạo';
     return {
       title: `Cần bạn duyệt ${reviewTarget}`,
@@ -799,7 +811,7 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
           ? 'Khi prompt sẵn sàng, bạn có thể upload ảnh hoặc để Gemini tạo thoại từ prompt.'
           : videoClips
             ? 'Khi prompt sẵn sàng, hệ thống sẽ gửi sang Veo, tải clip, tạo voice/SRT rồi render MP4.'
-          : 'Khi prompt sẵn sàng, bạn có thể duyệt trước khi hệ thống tạo voice.',
+            : 'Khi prompt sẵn sàng, bạn có thể duyệt trước khi hệ thống tạo voice.',
       };
     case 'review_story':
       return {
@@ -814,12 +826,12 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
           ? `Prompt hiện tại: ${promptCount}. Voice và phụ đề sẽ không chạy trong auto-run này.`
           : videoClips
             ? `Prompt hiện tại: ${promptCount}. Veo chưa chạy cho đến khi bạn duyệt.`
-          : `Prompt hiện tại: ${promptCount}. Voice chưa chạy cho đến khi bạn duyệt.`,
+            : `Prompt hiện tại: ${promptCount}. Voice chưa chạy cho đến khi bạn duyệt.`,
         next: promptsOnly
           ? 'Kiểm tra prompt từng segment, chỉnh nếu cần, rồi bấm tiếp tục để mở bước upload ảnh.'
           : videoClips
             ? 'Kiểm tra prompt từng segment, chỉnh nếu cần, rồi bấm tiếp tục để chạy Veo và render MP4.'
-          : 'Kiểm tra prompt từng segment, chỉnh nếu cần, rồi bấm tiếp tục.',
+            : 'Kiểm tra prompt từng segment, chỉnh nếu cần, rồi bấm tiếp tục.',
       };
     case 'generate_clips':
       return {
@@ -849,7 +861,9 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
       return {
         title: 'Đang tạo phụ đề .srt',
         detail: `Prompt ${promptCount}, voice ${voiceCount}; hệ thống đang ghép phụ đề theo audio.`,
-        next: videoClips ? 'Sau bước này hệ thống sẽ tự render MP4.' : 'Sau bước này nguyên liệu lõi sẽ sẵn sàng.',
+        next: videoClips
+          ? 'Sau bước này hệ thống sẽ tự render MP4.'
+          : 'Sau bước này nguyên liệu lõi sẽ sẵn sàng.',
       };
     case 'generate_render':
       return {
@@ -860,7 +874,9 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
     case 'waiting_render':
       return {
         title: 'Đang render MP4',
-        detail: run.summary.render_job_status ? `Render job: ${run.summary.render_job_status}.` : 'FFmpeg đang dựng video cuối cùng.',
+        detail: run.summary.render_job_status
+          ? `Render job: ${run.summary.render_job_status}.`
+          : 'FFmpeg đang dựng video cuối cùng.',
         next: 'Panel sẽ tự cập nhật khi file MP4 hoàn tất.',
       };
     default:
@@ -1356,7 +1372,32 @@ function SystemResourcePanel({
   );
 }
 
+function routeSearchValue(search: unknown, key: string): string | null {
+  if (typeof search === 'string') {
+    const text = search.startsWith('?') ? search : `?${search}`;
+    return new URLSearchParams(text).get(key);
+  }
+  if (search && typeof search === 'object') {
+    const value = (search as Record<string, unknown>)[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+  return null;
+}
+
+function sourcesFromAIVideoDraft(draft: AIVideoFormDraft): SourceDraft[] {
+  const contentByType = new Map(
+    draft.sources
+      .filter((source) => source.content.trim())
+      .map((source) => [source.block_type, source.content.trim()]),
+  );
+  return SOURCE_TEMPLATES.map((template) => ({
+    ...template,
+    content: contentByType.get(template.block_type) ?? '',
+  }));
+}
+
 export function AIVideoAssistant() {
+  const routerState = useRouterState();
   const platform = usePlatform();
   const queryClient = useQueryClient();
   const { data: profiles } = useProfiles();
@@ -1376,6 +1417,13 @@ export function AIVideoAssistant() {
   const [voiceSelectorOpen, setVoiceSelectorOpen] = useState(false);
   const [playingVoiceKey, setPlayingVoiceKey] = useState<string | null>(null);
   const voicePreviewRef = useRef<HTMLAudioElement | null>(null);
+  const appliedDraftRef = useRef<string | null>(null);
+  const requestedProjectId = useMemo(() => {
+    return routeSearchValue(routerState.location.search, 'projectId');
+  }, [routerState.location.search]);
+  const requestedDraftSource = useMemo(() => {
+    return routeSearchValue(routerState.location.search, 'draft');
+  }, [routerState.location.search]);
 
   const selectProject = (projectId: string | null) => {
     setSelectedProjectId(projectId);
@@ -1590,13 +1638,56 @@ export function AIVideoAssistant() {
   const showVoiceSelector = !hasVoiceProfile || voiceSelectorOpen;
 
   useEffect(() => {
+    if (!requestedProjectId || selectedProjectId === requestedProjectId) return;
+    setSelectedProjectId(requestedProjectId);
+    setVoiceSelectorOpen(false);
+    setProjectMenuId(null);
+  }, [requestedProjectId, selectedProjectId]);
+
+  useEffect(() => {
+    if (requestedDraftSource !== 'video-inspiration') return;
+    let rawDraft: string | null = null;
+    try {
+      rawDraft = window.sessionStorage.getItem(AI_VIDEO_DRAFT_STORAGE_KEY);
+    } catch (error) {
+      setNotice(`Chưa đọc được bản nháp từ Video Inspiration: ${getErrorMessage(error)}`);
+      return;
+    }
+    if (!rawDraft || appliedDraftRef.current === rawDraft) return;
+
+    try {
+      const draft = JSON.parse(rawDraft) as AIVideoFormDraft;
+      if (draft.source !== 'video-inspiration') return;
+      appliedDraftRef.current = rawDraft;
+      setSelectedProjectId(null);
+      setProjectMenuId(null);
+      setVoiceSelectorOpen(false);
+      setCreationMode('manual');
+      setForm((current) => ({
+        ...current,
+        title: draft.title?.trim() || '',
+        visualStyle: draft.visualStyle?.trim() || current.visualStyle,
+        sources: sourcesFromAIVideoDraft(draft),
+      }));
+      setNotice(
+        draft.notice ||
+          'Đã đưa dữ liệu từ Video Inspiration vào form. Hãy chọn cấu hình rồi mới tạo dự án.',
+      );
+      window.sessionStorage.removeItem(AI_VIDEO_DRAFT_STORAGE_KEY);
+    } catch (error) {
+      setNotice(`Bản nháp từ Video Inspiration không hợp lệ: ${getErrorMessage(error)}`);
+    }
+  }, [requestedDraftSource]);
+
+  useEffect(() => {
     if (!selectedProjectId || !projectsQuery.data) return;
+    if (requestedProjectId && selectedProjectId === requestedProjectId) return;
     if (projectsQuery.data.some((project) => project.id === selectedProjectId)) return;
     const nextProjectId = projectsQuery.data[0]?.id ?? null;
     setSelectedProjectId(nextProjectId);
     setVoiceSelectorOpen(false);
     setProjectMenuId(null);
-  }, [selectedProjectId, projectsQuery.data]);
+  }, [requestedProjectId, selectedProjectId, projectsQuery.data]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -1754,9 +1845,9 @@ export function AIVideoAssistant() {
             ? 'Đã tạo dự án và bắt đầu dựng nhanh tới prompt video. Voice và phụ đề sẽ bỏ qua.'
             : autoRun.material_target === 'video_clips'
               ? 'Đã tạo dự án và bắt đầu tự tạo prompt, gửi sang Veo, tải clip, tạo voice/SRT rồi render MP4.'
-            : autoRun.mode === 'review_gated'
-              ? 'Đã tạo dự án và bắt đầu dựng nhanh. Hệ thống sẽ dừng ở các điểm cần duyệt.'
-              : 'Đã tạo dự án và bắt đầu dựng nhanh ở chế độ tự chạy hết.',
+              : autoRun.mode === 'review_gated'
+                ? 'Đã tạo dự án và bắt đầu dựng nhanh. Hệ thống sẽ dừng ở các điểm cần duyệt.'
+                : 'Đã tạo dự án và bắt đầu dựng nhanh ở chế độ tự chạy hết.',
         );
       } else if (autoRunError) {
         setNotice(`Đã tạo dự án, nhưng chưa bắt đầu dựng nhanh: ${autoRunError}`);
@@ -2136,11 +2227,11 @@ export function AIVideoAssistant() {
       setNotice(
         run.material_target === 'prompts_only'
           ? 'Auto-run đã bắt đầu tới prompt video. Voice và phụ đề sẽ bỏ qua.'
-        : run.material_target === 'video_clips'
-          ? 'Auto-run đã bắt đầu: tạo prompt, gửi sang Veo, tải clip, tạo voice/SRT rồi render MP4.'
-          : run.mode === 'review_gated'
-            ? 'Auto-run đã bắt đầu và sẽ dừng ở các điểm cần duyệt.'
-            : 'Auto-run đã bắt đầu ở chế độ tự chạy hết.',
+          : run.material_target === 'video_clips'
+            ? 'Auto-run đã bắt đầu: tạo prompt, gửi sang Veo, tải clip, tạo voice/SRT rồi render MP4.'
+            : run.mode === 'review_gated'
+              ? 'Auto-run đã bắt đầu và sẽ dừng ở các điểm cần duyệt.'
+              : 'Auto-run đã bắt đầu ở chế độ tự chạy hết.',
       );
       refreshAfterAutoRun(run);
     },
@@ -3205,9 +3296,14 @@ export function AIVideoAssistant() {
                       latestAutoRun.status === 'completed'
                         ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
                         : null,
-                      ['queued', 'running', 'waiting_planning', 'waiting_voice', 'waiting_clips', 'waiting_render'].includes(
-                        latestAutoRun.status,
-                      )
+                      [
+                        'queued',
+                        'running',
+                        'waiting_planning',
+                        'waiting_voice',
+                        'waiting_clips',
+                        'waiting_render',
+                      ].includes(latestAutoRun.status)
                         ? 'border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300'
                         : null,
                       ['needs_review', 'needs_input'].includes(latestAutoRun.status)
@@ -3421,7 +3517,7 @@ export function AIVideoAssistant() {
                         ? 'Prompt video đã sẵn sàng. Bạn có thể upload ảnh hoặc copy prompt sang Gemini để tạo thoại theo prompt.'
                         : latestAutoRun.material_target === 'video_clips'
                           ? 'MP4 đã render xong. Bạn có thể tải video ở panel render hoặc kiểm tra clip trong panel Veo.'
-                        : 'Nguyên liệu lõi đã sẵn sàng. Render MP4 vẫn dùng panel dựng riêng.'}
+                          : 'Nguyên liệu lõi đã sẵn sàng. Render MP4 vẫn dùng panel dựng riêng.'}
                     </div>
                   ) : null}
                 </div>
@@ -4164,7 +4260,11 @@ export function AIVideoAssistant() {
                 </div>
               </section>
 
-              <AIVideoVeoChromePanel projectId={activeProjectId} shots={shots} onNotice={setNotice} />
+              <AIVideoVeoChromePanel
+                projectId={activeProjectId}
+                shots={shots}
+                onNotice={setNotice}
+              />
 
               <AIVideoRenderPanel projectId={activeProjectId} shots={shots} onNotice={setNotice} />
 
@@ -4367,8 +4467,8 @@ export function AIVideoAssistant() {
                   </div>
                   <span>
                     Dùng cấu hình hiện tại: {videoLanguageLabel(form.targetLanguage)} ·{' '}
-                    {promptSegmentCount} prompt x {promptSegmentDuration}s ·{' '}
-                    {microScenesPerPrompt} cảnh nhỏ/prompt
+                    {promptSegmentCount} prompt x {promptSegmentDuration}s · {microScenesPerPrompt}{' '}
+                    cảnh nhỏ/prompt
                   </span>
                 </div>
               ) : null}

@@ -63,6 +63,7 @@ class QwenCustomVoiceBackend:
         self.model_size = model_size
         self.device = self._get_device()
         self._current_model_size: Optional[str] = None
+        self._model_load_lock = asyncio.Lock()
 
     def _get_device(self) -> str:
         return get_torch_device(allow_xpu=True, allow_directml=True)
@@ -86,10 +87,14 @@ class QwenCustomVoiceBackend:
         if self.model is not None and self._current_model_size == model_size:
             return
 
-        if self.model is not None and self._current_model_size != model_size:
-            self.unload_model()
+        async with self._model_load_lock:
+            if self.model is not None and self._current_model_size == model_size:
+                return
 
-        await asyncio.to_thread(self._load_model_sync, model_size)
+            if self.model is not None and self._current_model_size != model_size:
+                self.unload_model()
+
+            await asyncio.to_thread(self._load_model_sync, model_size)
 
     # Alias for compatibility with the TTSBackend protocol
     load_model = load_model_async

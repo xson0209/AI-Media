@@ -92,9 +92,25 @@ def _tool_from_env(env_name: str) -> str | None:
 
 def _default_tool_candidates(binary: str) -> list[str]:
     candidates = [shutil.which(binary)]
+    if binary == "ffmpeg":
+        candidates.append(_imageio_ffmpeg_candidate())
     for prefix in ("/opt/homebrew", "/usr/local"):
         candidates.append(f"{prefix}/opt/ffmpeg-full/bin/{binary}")
     return [candidate for candidate in candidates if candidate]
+
+def _imageio_ffmpeg_candidate() -> str | None:
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+    except Exception:
+        return None
+    try:
+        candidate = get_ffmpeg_exe()
+    except Exception:
+        return None
+    if not candidate:
+        return None
+    path = Path(candidate).expanduser()
+    return str(path) if path.exists() else None
 
 def _first_existing_tool(candidates: list[str]) -> str | None:
     for candidate in candidates:

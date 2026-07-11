@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 $LogsDir = Join-Path $ProjectRoot ".logs"
 $Python = Join-Path $ProjectRoot "backend\venv\Scripts\python.exe"
 $BackendUrl = "http://127.0.0.1:$env:VOICEBOX_BACKEND_PORT"
+$BackendReadyUrl = "$BackendUrl/health/ready"
 $FrontendUrl = "http://127.0.0.1:$env:VOICEBOX_FRONTEND_PORT"
 $BackendTimeoutSeconds = 180
 $FrontendTimeoutSeconds = 90
@@ -137,7 +138,7 @@ $BackendErr = Join-Path $LogsDir "backend.err.log"
 $FrontendOut = Join-Path $LogsDir "web.out.log"
 $FrontendErr = Join-Path $LogsDir "web.err.log"
 
-if (Test-Url "$BackendUrl/health") {
+if (Test-Url $BackendReadyUrl) {
     Write-Host "Backend already running: $BackendUrl"
 } else {
     Stop-ProjectPortOwners $env:VOICEBOX_BACKEND_PORT "Backend" @(
@@ -193,7 +194,7 @@ if (Test-Url $FrontendUrl) {
 }
 
 try {
-    Wait-ForUrl "Backend" "$BackendUrl/health" $BackendTimeoutSeconds $BackendProcess $env:VOICEBOX_BACKEND_PORT
+    Wait-ForUrl "Backend" $BackendReadyUrl $BackendTimeoutSeconds $BackendProcess $env:VOICEBOX_BACKEND_PORT
 } catch {
     Show-LogTail "Backend stderr" $BackendErr
     Show-LogTail "Backend stdout" $BackendOut
@@ -208,8 +209,8 @@ try {
     throw
 }
 
-if (-not (Test-Url "$BackendUrl/health")) {
-    throw "Backend was not reachable after startup: $BackendUrl/health"
+if (-not (Test-Url $BackendReadyUrl)) {
+    throw "Backend was not reachable after startup: $BackendReadyUrl"
 }
 
 if (-not (Test-Url $FrontendUrl)) {
