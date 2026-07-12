@@ -92,6 +92,7 @@ import type {
   VideoRenderJobResponse,
   VideoRenderReadinessResponse,
   VideoRenderSettings,
+  VideoRenderSfxAssetResponse,
   VideoSceneAssetResponse,
   VideoSceneNarrationRequest,
   VideoSceneResponse,
@@ -1379,9 +1380,46 @@ class ApiClient {
       duration_mode: settings.duration_mode,
       subtitle_mode: settings.subtitle_mode,
       mute_clip_audio: String(settings.mute_clip_audio),
+      enhanced_render: String(settings.enhanced_render ?? false),
+      enhanced_audio: String(settings.enhanced_audio ?? true),
+      ai_review: String(settings.ai_review ?? true),
+      max_fix_attempts: String(settings.max_fix_attempts ?? 1),
     });
     return this.request<VideoRenderReadinessResponse>(
       `/ai-video/projects/${projectId}/render/readiness?${params.toString()}`,
+    );
+  }
+
+  async listVideoRenderSfxAssets(projectId: string): Promise<VideoRenderSfxAssetResponse[]> {
+    return this.request<VideoRenderSfxAssetResponse[]>(
+      `/ai-video/projects/${projectId}/render/sfx-assets`,
+    );
+  }
+
+  async uploadVideoRenderSfxAsset(
+    projectId: string,
+    file: File,
+  ): Promise<VideoRenderSfxAssetResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(
+      `${this.getBaseUrl()}/ai-video/projects/${projectId}/render/sfx-assets`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.json();
+  }
+
+  async deleteVideoRenderSfxAsset(projectId: string, assetId: string): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(
+      `/ai-video/projects/${projectId}/render/sfx-assets/${assetId}`,
+      { method: 'DELETE' },
     );
   }
 
@@ -1415,6 +1453,17 @@ class ApiClient {
     return this.download(
       `/ai-video/projects/${projectId}/render/jobs/${jobId}/download`,
       'Video hoàn chỉnh.mp4',
+    );
+  }
+
+  async downloadVideoRenderEnhancedArtifact(
+    projectId: string,
+    jobId: string,
+    artifactKey: string,
+  ): Promise<DownloadedBlob> {
+    return this.download(
+      `/ai-video/projects/${projectId}/render/jobs/${jobId}/enhanced-artifacts/${encodeURIComponent(artifactKey)}`,
+      'Báo cáo enhanced render.md',
     );
   }
 

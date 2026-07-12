@@ -1,9 +1,9 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Check, Download, Film, Loader2, Settings2, Trash2, UploadCloud, Video } from 'lucide-react';
+import { AlertCircle, Check, Download, FileText, Film, Loader2, Music2, Settings2, Sparkles, Trash2, UploadCloud, Video } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api/client';
-import type { DownloadedBlob, VideoRenderSettings, VideoShotResponse } from '@/lib/api/types';
+import type { DownloadedBlob, VideoRenderSettings, VideoRenderSfxAssetResponse, VideoShotResponse } from '@/lib/api/types';
 import { cn } from '@/lib/utils/cn';
 import { usePlatform } from '@/platform/PlatformContext';
 
@@ -21,6 +21,10 @@ const DEFAULT_SETTINGS: VideoRenderSettings = {
   subtitle_mode: 'burn_in',
   mute_clip_audio: true,
   background_color: '#111827',
+  enhanced_render: true,
+  enhanced_audio: true,
+  ai_review: true,
+  max_fix_attempts: 1,
 };
 
 function shotLabel(shot: VideoShotResponse): string {
@@ -87,9 +91,17 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
     },
   });
 
+  const sfxAssetsQuery = useQuery({
+    queryKey: ['ai-video', 'render-sfx-assets', projectId],
+    queryFn: () => apiClient.listVideoRenderSfxAssets(projectId!),
+    enabled: !!projectId,
+    retry: false,
+  });
+
   const invalidateRender = () => {
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'render'] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'shot-clip'] });
+    queryClient.invalidateQueries({ queryKey: ['ai-video', 'render-sfx-assets', projectId] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'render-job-latest', projectId] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'debug', projectId] });
   };
@@ -112,6 +124,22 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
     },
   });
 
+  const uploadSfxAsset = useMutation({
+    mutationFn: (file: File) => apiClient.uploadVideoRenderSfxAsset(projectId!, file),
+    onSuccess: (asset) => {
+      onNotice(`Đã upload SFX/BGM: ${asset.filename}.`);
+      invalidateRender();
+    },
+  });
+
+  const deleteSfxAsset = useMutation({
+    mutationFn: (asset: VideoRenderSfxAssetResponse) => apiClient.deleteVideoRenderSfxAsset(projectId!, asset.asset_id),
+    onSuccess: () => {
+      onNotice('Đã xóa asset SFX/BGM.');
+      invalidateRender();
+    },
+  });
+
   const createRender = useMutation({
     mutationFn: () => apiClient.createVideoRenderJob(projectId!, settings),
     onSuccess: () => {
@@ -122,17 +150,20 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
 
   const saveDownload = async (download: Promise<DownloadedBlob>) => {
     const result = await download;
-    await platform.filesystem.saveFile(result.filename, result.blob, [{ name: 'MP4 video', extensions: ['mp4'] }]);
+    await platform.filesystem.saveFile(result.filename, result.blob, [{ name: 'Tệp render', extensions: ['mp4', 'md', 'json', 'csv'] }]);
   };
 
   const latestJob = latestJobQuery.data;
   const readiness = readinessQuery.data;
+  const sfxAssets = sfxAssetsQuery.data ?? [];
   const busy = latestJob?.status === 'queued' || latestJob?.status === 'running';
-  const operationError = uploadClip.error || deleteClip.error || createRender.error;
+  const reviewArtifact = latestJob?.enhanced_artifacts_json?.items?.find((item) => item.kind === 'ai_review_report');
+  const manifestArtifact = latestJob?.enhanced_artifacts_json?.items?.find((item) => item.kind === 'timeline_manifest');
+  const operationError = uploadClip.error || deleteClip.error || uploadSfxAsset.error || deleteSfxAsset.error || createRender.error;
 
   if (!projectId) {
     return (
-      <section className="rounded-lg border border-border/80 bg-card/60 p-5">
+      <section className="min-w-0 rounded-lg border border-border/80 bg-card/60 p-4 sm:p-5">
         <RenderHeader />
         <div className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
           Chọn hoặc tạo dự án để dựng nhanh MP4.
@@ -142,7 +173,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   }
 
   return (
-    <section className="rounded-lg border border-border/80 bg-card/60 p-5">
+    <section className="min-w-0 rounded-lg border border-border/80 bg-card/60 p-4 sm:p-5">
       <RenderHeader />
 
       <div className="mt-4 space-y-4">
@@ -279,6 +310,92 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
           </p>
         </div>
 
+        <div className="min-w-0 rounded-lg border border-border/75 bg-background/70 p-3">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Sparkles className="h-4 w-4" />
+            Hiệu ứng giữ chân
+          </div>
+          <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr))]">
+            <ToggleRow
+              label="Chuyển cảnh/SFX"
+              checked={Boolean(settings.enhanced_render)}
+              onChange={(checked) => setSettings((current) => ({ ...current, enhanced_render: checked }))}
+            />
+            <ToggleRow
+              label="Mix SFX/BGM thật"
+              checked={Boolean(settings.enhanced_audio)}
+              disabled={!settings.enhanced_render}
+              onChange={(checked) => setSettings((current) => ({ ...current, enhanced_audio: checked }))}
+            />
+            <ToggleRow
+              label="AI review"
+              checked={Boolean(settings.ai_review)}
+              disabled={!settings.enhanced_render}
+              onChange={(checked) => setSettings((current) => ({ ...current, ai_review: checked }))}
+            />
+          </div>
+          <div className="mt-3 grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr))] sm:items-end">
+            <SettingSelect
+              label="Số vòng auto-fix"
+              value={String(settings.max_fix_attempts ?? 1)}
+              onChange={(value) => setSettings((current) => ({ ...current, max_fix_attempts: Number(value) }))}
+            >
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </SettingSelect>
+            <label
+              aria-disabled={uploadSfxAsset.isPending}
+              className={cn(
+                'flex min-h-11 w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-input bg-card/70 px-3 py-2 text-center text-sm font-medium leading-tight text-foreground transition hover:border-accent hover:bg-accent hover:text-accent-foreground active:translate-y-[1px]',
+                uploadSfxAsset.isPending && 'pointer-events-none opacity-60',
+              )}
+            >
+              {uploadSfxAsset.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music2 className="h-4 w-4" />}
+              <span className="min-w-0 whitespace-normal">{uploadSfxAsset.isPending ? 'Đang upload' : 'Thêm SFX/BGM'}</span>
+              <input
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/flac,.wav,.mp3,.m4a,.aac,.ogg,.flac"
+                className="sr-only"
+                disabled={uploadSfxAsset.isPending}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) uploadSfxAsset.mutate(file);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {sfxAssets.length ? (
+            <div className="grid gap-2">
+              {sfxAssets.map((asset) => (
+                <div key={asset.asset_id} className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-border/60 px-2.5 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold">{asset.filename}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {(asset.cue_aliases || []).join(', ') || 'chưa có alias'} · {asset.status}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0 p-0"
+                    disabled={deleteSfxAsset.isPending}
+                    onClick={() => deleteSfxAsset.mutate(asset)}
+                    title="Xóa asset"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Chưa có asset SFX/BGM. Cue như tiếng kính vỡ sẽ được ghi fallback nếu chưa upload asset thật.
+            </p>
+          )}
+        </div>
+
         <div className={cn('rounded-lg border p-3 text-sm', statusTone(!!readiness?.ready))}>
           <div className="flex items-start gap-2">
             {readiness?.ready ? <Check className="mt-0.5 h-4 w-4" /> : <AlertCircle className="mt-0.5 h-4 w-4" />}
@@ -314,22 +431,46 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
               <div className="h-full rounded-full bg-emerald-600 transition-[width] duration-300" style={{ width: `${Math.round((latestJob.progress || 0) * 100)}%` }} />
             </div>
             {latestJob.failure_reason ? <p className="mt-2 text-xs leading-relaxed text-destructive">{latestJob.failure_reason}</p> : null}
+            {latestJob.review_status ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="rounded-full border border-border px-2 py-1">Review: {latestJob.review_status}</span>
+                <span className="rounded-full border border-border px-2 py-1">Auto-fix: {latestJob.fix_attempt_count ?? 0}</span>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Button className="active:translate-y-[1px]" disabled={!readiness?.ready || busy || createRender.isPending} onClick={() => createRender.mutate()}>
+        <div className="grid min-w-0 gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,9.75rem),1fr))]">
+          <Button className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]" disabled={!readiness?.ready || busy || createRender.isPending} onClick={() => createRender.mutate()}>
             {createRender.isPending || busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
-            Dựng MP4
+            <span className="min-w-0">Dựng MP4</span>
           </Button>
           <Button
-            className="active:translate-y-[1px]"
+            className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
             variant="outline"
             disabled={!latestJob || latestJob.status !== 'completed' || latestJob.stale}
             onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderJob(projectId, latestJob.id))}
           >
             <Download className="h-4 w-4" />
-            Tải MP4
+            <span className="min-w-0">Tải MP4</span>
+          </Button>
+          <Button
+            className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
+            variant="outline"
+            disabled={!latestJob || latestJob.status !== 'completed' || !reviewArtifact}
+            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, reviewArtifact?.kind || 'ai_review_report'))}
+          >
+            <FileText className="h-4 w-4" />
+            <span className="min-w-0">Tải AI review</span>
+          </Button>
+          <Button
+            className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
+            variant="outline"
+            disabled={!latestJob || latestJob.status !== 'completed' || !manifestArtifact}
+            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, manifestArtifact?.kind || 'timeline_manifest'))}
+          >
+            <Download className="h-4 w-4" />
+            <span className="min-w-0">Tải manifest</span>
           </Button>
         </div>
       </div>
@@ -350,6 +491,26 @@ function RenderHeader() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ToggleRow({ label, checked, disabled, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label
+      className={cn(
+        'flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-lg border border-border/70 bg-card/40 px-3 py-2 text-sm font-medium leading-tight',
+        disabled && 'opacity-55',
+      )}
+    >
+      <span className="min-w-0 whitespace-normal">{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        className="h-4 w-4 shrink-0 accent-emerald-600"
+      />
+    </label>
   );
 }
 

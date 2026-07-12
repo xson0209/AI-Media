@@ -47,6 +47,20 @@ FFMPEG_TIMEOUT_SECONDS = 600
 AI_TIMEOUT_SECONDS = 600
 _STDERR_LIMIT = 1200
 _AUDIO_ONLY_SUFFIXES = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"}
+_NO_SPEECH_TRANSCRIPT_LABELS = {
+    "applause",
+    "background music",
+    "background noise",
+    "instrumental",
+    "laughter",
+    "music",
+    "music playing",
+    "no speech",
+    "noise",
+    "silence",
+    "sound effect",
+    "sound effects",
+}
 _SOCIAL_PLATFORMS = {
     "youtube.com": "youtube",
     "youtu.be": "youtube",
@@ -65,7 +79,11 @@ STEP_LABELS_VI = {
     "extract_frames": "Đang lấy hình ảnh đại diện",
     "visual_analysis": "Đang phân tích hình ảnh",
     "content_analysis": "Đang phân tích nội dung",
-    "rewrite": "Đang viết kịch bản mới",
+    "rewrite": "Đang viết kịch bản tối ưu",
+    "rewrite_brief": "Đang tạo brief kịch bản",
+    "rewrite_candidates": "Đang tạo các bản nháp",
+    "rewrite_review": "Đang chấm điểm bản nháp",
+    "rewrite_synthesis": "Đang tổng hợp bản cuối",
     "handoff": "Đang chuyển sang AI Video",
     "completed": "Hoàn tất",
     "failed": "Đã lỗi",
@@ -749,6 +767,22 @@ def _audio_duration_seconds(path: Path) -> float | None:
 def _format_ffmpeg_seconds(value: float) -> str:
     return f"{max(0.0, value):.3f}"
 
+def _is_no_speech_transcript(value: str | None) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    normalized = re.sub(r"[^a-z]+", " ", text.lower()).strip()
+    if not normalized:
+        return True
+    if normalized in _NO_SPEECH_TRANSCRIPT_LABELS:
+        return True
+    words = normalized.split()
+    return bool(words) and set(words).issubset({"music"})
+
+def _clean_transcribed_text(value: str | None) -> str:
+    text = (value or "").strip()
+    return "" if _is_no_speech_transcript(text) else text
+
 def _extract_audio_transcript_chunk(source_path: Path, chunk_path: Path, *, start_seconds: float, duration_seconds: float) -> None:
     tools = _require_ffmpeg(ffprobe=False)
     result = _run_command(
@@ -814,9 +848,9 @@ async def _transcribe_audio(path: Path, *, model_size: str | None) -> tuple[str,
         await load_async(resolved_model)
     parts = []
     for transcript_path in _transcript_audio_paths(path):
-        text = await whisper.transcribe(str(transcript_path), None, resolved_model)
-        if text and text.strip():
-            parts.append(text.strip())
+        text = _clean_transcribed_text(await whisper.transcribe(str(transcript_path), None, resolved_model))
+        if text:
+            parts.append(text)
     return "\n".join(parts), resolved_model
 
 def _frame_timestamps(duration_seconds: float | None) -> list[float]:
@@ -961,32 +995,159 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
     ],
 }
 
-REWRITE_SCHEMA: dict[str, Any] = {
+RETENTION_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "viewer_question": {"type": "string"},
+        "curiosity_gap": {"type": "string"},
+        "beat_curve": {"type": "array", "items": {"type": "string"}},
+        "pattern_interrupts": {"type": "array", "items": {"type": "string"}},
+        "payoff": {"type": "string"},
+        "drop_off_risks": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["viewer_question", "curiosity_gap", "beat_curve", "pattern_interrupts", "payoff", "drop_off_risks"],
+}
+
+SOUND_CUE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "timing": {"type": "string"},
+        "cue": {"type": "string"},
+        "purpose": {"type": "string"},
+    },
+    "required": ["timing", "cue", "purpose"],
+}
+
+SOUND_DESIGN_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "music_mood": {"type": "string"},
+        "ambience": {"type": "string"},
+        "sfx_cues": {"type": "array", "items": SOUND_CUE_SCHEMA},
+        "silence_drops": {"type": "array", "items": {"type": "string"}},
+        "mixing_notes": {"type": "string"},
+    },
+    "required": ["music_mood", "ambience", "sfx_cues", "silence_drops", "mixing_notes"],
+}
+
+REWRITE_SEGMENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": "string"},
+        "narration": {"type": "string"},
+        "visual_suggestion": {"type": "string"},
+        "retention_role": {"type": "string"},
+        "audio_cue": {"type": "string"},
+    },
+    "required": ["title", "narration", "visual_suggestion", "retention_role", "audio_cue"],
+}
+
+AI_VIDEO_SOURCE_BLOCKS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "idea": {"type": "string"},
+        "rough_script": {"type": "string"},
+        "character_notes": {"type": "string"},
+        "style_notes": {"type": "string"},
+        "must_have": {"type": "string"},
+        "avoid": {"type": "string"},
+    },
+    "required": ["idea", "rough_script", "character_notes", "style_notes", "must_have", "avoid"],
+}
+
+REWRITE_PAYLOAD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "title": {"type": "string"},
         "big_idea": {"type": "string"},
         "hook": {"type": "string"},
+        "hook_3_5s": {"type": "string"},
+        "viewer_question": {"type": "string"},
+        "curiosity_gap": {"type": "string"},
         "script": {"type": "string"},
-        "segments": {
+        "segments": {"type": "array", "items": REWRITE_SEGMENT_SCHEMA},
+        "visual_suggestions": {"type": "array", "items": {"type": "string"}},
+        "retention_plan": RETENTION_PLAN_SCHEMA,
+        "sound_design_plan": SOUND_DESIGN_PLAN_SCHEMA,
+        "audio_direction": {"type": "string"},
+        "ai_video_source_blocks": AI_VIDEO_SOURCE_BLOCKS_SCHEMA,
+        "originality_note": {"type": "string"},
+    },
+    "required": [
+        "title",
+        "big_idea",
+        "hook",
+        "hook_3_5s",
+        "viewer_question",
+        "curiosity_gap",
+        "script",
+        "segments",
+        "visual_suggestions",
+        "retention_plan",
+        "sound_design_plan",
+        "audio_direction",
+        "ai_video_source_blocks",
+        "originality_note",
+    ],
+}
+
+CREATIVE_BRIEF_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "strategy_summary": {"type": "string"},
+        "core_insight": {"type": "string"},
+        "audience_promise": {"type": "string"},
+        "visual_direction": {"type": "string"},
+        "constraints": {"type": "array", "items": {"type": "string"}},
+        "candidate_angles": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["strategy_summary", "core_insight", "audience_promise", "visual_direction", "constraints", "candidate_angles"],
+}
+
+REWRITE_CANDIDATES_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": REWRITE_PAYLOAD_SCHEMA,
+        },
+    },
+    "required": ["candidates"],
+}
+
+REWRITE_REVIEW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "reviews": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "title": {"type": "string"},
-                    "narration": {"type": "string"},
-                    "visual_suggestion": {"type": "string"},
+                    "candidate_index": {"type": "number"},
+                    "score": {"type": "number"},
+                    "strengths": {"type": "array", "items": {"type": "string"}},
+                    "weaknesses": {"type": "array", "items": {"type": "string"}},
+                    "best_parts": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["title", "narration", "visual_suggestion"],
+                "required": ["candidate_index", "score", "strengths", "weaknesses", "best_parts"],
             },
         },
-        "visual_suggestions": {"type": "array", "items": {"type": "string"}},
-        "originality_note": {"type": "string"},
+        "synthesis_direction": {"type": "string"},
     },
-    "required": ["title", "big_idea", "hook", "script", "segments", "visual_suggestions", "originality_note"],
+    "required": ["reviews", "synthesis_direction"],
 }
+
+REWRITE_SCHEMA: dict[str, Any] = REWRITE_PAYLOAD_SCHEMA
 
 def _visual_analysis_prompt(frames: list[DBVideoInspirationFrame]) -> str:
     frame_lines = "\n".join(
@@ -1055,6 +1216,250 @@ Yêu cầu:
 - originality_note nhắc rõ đây là bản phát triển mới từ cảm hứng, không phải bản chép lại.
 - Chỉ trả JSON đúng schema.
 """.strip()
+
+def _rewrite_context(row: DBVideoInspirationJob) -> str:
+    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    analysis = {
+        key: value
+        for key, value in (row.analysis_json or {}).items()
+        if key != "rewrite" and not key.startswith("rewrite_")
+    }
+    context = {
+        "target_language": language_label,
+        "rewrite_mode": row.rewrite_mode or "bold_remix",
+        "transcript": _truncate(row.transcript_text, 50000),
+        "analysis_vi": analysis,
+        "visual_summary": _truncate(row.visual_summary, 20000),
+        "user_direction": _truncate(row.user_direction, 20000) or "Không có",
+    }
+    return json.dumps(context, ensure_ascii=False, indent=2)
+
+def _creative_brief_prompt(row: DBVideoInspirationJob) -> str:
+    return f"""
+Bạn là strategist nội dung video ngắn. Hãy tạo creative brief ngắn để chuẩn bị viết kịch bản tối ưu nhiều bước.
+
+Dữ liệu đầu vào:
+{_rewrite_context(row)}
+
+Yêu cầu:
+- Trả bằng tiếng Việt để người dùng dễ hiểu.
+- Tóm tắt insight chính, lời hứa với người xem, hướng hình ảnh và các ràng buộc cần giữ.
+- Đề xuất 2-3 hướng candidate khác nhau, ưu tiên hook 3-5 giây, retention và sound design.
+- Không viết full script ở bước này.
+- Chỉ trả JSON đúng schema.
+""".strip()
+
+def _rewrite_candidates_prompt(row: DBVideoInspirationJob, creative_brief: dict[str, Any]) -> str:
+    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    return f"""
+Bạn là biên kịch video ngắn. Hãy tạo đúng 2 bản nháp kịch bản khác hướng từ creative brief và dữ liệu gốc.
+
+Ngôn ngữ script/narration của bản mới: {language_label}
+Chế độ rewrite: bold_remix
+
+Dữ liệu đầu vào:
+{_rewrite_context(row)}
+
+Creative brief:
+{json.dumps(creative_brief, ensure_ascii=False, indent=2)}
+
+Yêu cầu cho mỗi candidate:
+- Có đủ title, big_idea, hook, hook_3_5s, viewer_question, curiosity_gap, script, segments, visual_suggestions, retention_plan, sound_design_plan, audio_direction, ai_video_source_blocks và originality_note.
+- hook_3_5s phải mô tả rõ 3-5 giây đầu: người xem thấy gì, nghe gì, câu hỏi/xung đột nào khiến họ ở lại.
+- retention_plan phải có viewer question, curiosity gap, beat curve, pattern interrupt, payoff và rủi ro tụt retention.
+- sound_design_plan chỉ là hướng dựng, chưa phải file âm thanh thật; phải có music mood, ambience, SFX cue, silence drop nếu phù hợp và mixing notes để voice không bị che.
+- ai_video_source_blocks phải chia sẵn cho AI Video: idea, rough_script, character_notes, style_notes, must_have, avoid.
+- Hai candidate phải khác hướng rõ ràng, không chỉ đổi câu chữ.
+- Không copy sát transcript/video gốc.
+- Chỉ trả JSON đúng schema.
+""".strip()
+
+def _rewrite_review_prompt(
+    row: DBVideoInspirationJob,
+    creative_brief: dict[str, Any],
+    candidates: dict[str, Any],
+) -> str:
+    return f"""
+Bạn là editor trưởng. Hãy chấm điểm các candidate bằng tiếng Việt trước khi tổng hợp bản cuối.
+
+Ngữ cảnh:
+{_rewrite_context(row)}
+
+Creative brief:
+{json.dumps(creative_brief, ensure_ascii=False, indent=2)}
+
+Candidates:
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Rubric:
+- Hook 3-5 giây đầu có giữ chân người xem không.
+- Ý tưởng có rõ, khác video gốc và dễ dựng thành AI Video không.
+- Retention có câu hỏi người xem, curiosity gap, beat curve, pattern interrupt và payoff không.
+- Sound design/audio direction có giúp nhịp dựng, không che narration không.
+- Có bám định hướng người dùng và đúng ngôn ngữ đầu ra không.
+
+Yêu cầu:
+- Chấm từng candidate, chỉ ra strengths, weaknesses và best_parts.
+- synthesis_direction phải nói rõ nên lấy phần nào từ candidate nào để tạo bản cuối tốt nhất.
+- Chỉ trả JSON đúng schema.
+""".strip()
+
+def _rewrite_synthesis_prompt(
+    row: DBVideoInspirationJob,
+    creative_brief: dict[str, Any],
+    candidates: dict[str, Any],
+    review: dict[str, Any],
+) -> str:
+    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    return f"""
+Bạn là biên kịch kiêm producer AI Video. Hãy tổng hợp bản kịch bản tối ưu cuối cùng từ creative brief, candidates và review.
+
+Ngôn ngữ script/narration cuối: {language_label}
+Chế độ rewrite: bold_remix
+
+Ngữ cảnh gốc:
+{_rewrite_context(row)}
+
+Creative brief:
+{json.dumps(creative_brief, ensure_ascii=False, indent=2)}
+
+Candidates:
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Review:
+{json.dumps(review, ensure_ascii=False, indent=2)}
+
+Yêu cầu bắt buộc:
+- Trả đúng một bản cuối nhất quán, không trả nhiều lựa chọn.
+- Bản cuối có thể lấy hook của candidate A, cấu trúc của candidate B và sound design của candidate khác, nhưng phải mượt và thống nhất.
+- hook_3_5s không được chỉ là tiêu đề. Nó phải mô tả cụ thể 3-5 giây đầu: hành động/hình ảnh mở, âm thanh mở, câu hỏi hoặc xung đột giữ chân.
+- script và narration trong segments phải dùng đúng ngôn ngữ script/narration cuối.
+- retention_plan phải đủ để AI Video phát triển tiếp thành nhịp shot.
+- sound_design_plan và audio_direction là chỉ dẫn dựng âm thanh, không nói như thể file MP4 đã có nhạc/SFX thật.
+- ai_video_source_blocks phải điền sẵn idea, rough_script, character_notes, style_notes, must_have, avoid. Đưa retention, sound design, audio direction và hook 3-5s vào các block phù hợp.
+- Dữ liệu dài để trong source blocks; visual style chỉ cần tóm tắt ngắn khi handoff.
+- originality_note phải nói rõ đây là bản phát triển mới từ cảm hứng, không copy sát video gốc.
+- Chỉ trả JSON đúng schema.
+""".strip()
+
+def _validate_candidate_payload(candidates: dict[str, Any]) -> None:
+    items = candidates.get("candidates") if isinstance(candidates, dict) else None
+    if not isinstance(items, list) or len(items) < 2:
+        raise VideoInspirationError(
+            "AI chưa tạo đủ ít nhất 2 bản nháp kịch bản để chấm điểm.",
+            error_code="VIDEO_INSPIRATION_REWRITE_INCOMPLETE",
+        )
+
+def _has_content(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_content(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_content(item) for item in value.values())
+    return value is not None
+
+def _validate_optimized_rewrite_payload(payload: dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        raise VideoInspirationError(
+            "AI chưa trả đúng dữ liệu kịch bản tối ưu.",
+            error_code="VIDEO_INSPIRATION_REWRITE_INCOMPLETE",
+        )
+    required_fields = [
+        "title",
+        "big_idea",
+        "hook",
+        "hook_3_5s",
+        "viewer_question",
+        "curiosity_gap",
+        "script",
+        "segments",
+        "visual_suggestions",
+        "retention_plan",
+        "sound_design_plan",
+        "audio_direction",
+        "ai_video_source_blocks",
+        "originality_note",
+    ]
+    missing = [field for field in required_fields if not _has_content(payload.get(field))]
+    retention = payload.get("retention_plan") if isinstance(payload.get("retention_plan"), dict) else {}
+    for field in ["viewer_question", "curiosity_gap", "beat_curve", "pattern_interrupts", "payoff", "drop_off_risks"]:
+        if not _has_content(retention.get(field)):
+            missing.append(f"retention_plan.{field}")
+    sound = payload.get("sound_design_plan") if isinstance(payload.get("sound_design_plan"), dict) else {}
+    for field in ["music_mood", "ambience", "sfx_cues", "silence_drops", "mixing_notes"]:
+        if not _has_content(sound.get(field)):
+            missing.append(f"sound_design_plan.{field}")
+    source_blocks = payload.get("ai_video_source_blocks") if isinstance(payload.get("ai_video_source_blocks"), dict) else {}
+    for field in ["idea", "rough_script", "character_notes", "style_notes", "must_have", "avoid"]:
+        if not _has_content(source_blocks.get(field)):
+            missing.append(f"ai_video_source_blocks.{field}")
+    if missing:
+        raise VideoInspirationError(
+            "AI trả thiếu dữ liệu kịch bản tối ưu: " + ", ".join(sorted(set(missing))),
+            error_code="VIDEO_INSPIRATION_REWRITE_INCOMPLETE",
+        )
+
+def _format_json_section(value: Any) -> str:
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            text = _format_json_section(item)
+            if text:
+                lines.append(text if text.startswith("- ") else f"- {text}")
+        return "\n".join(lines)
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            text = _format_json_section(item)
+            if not text:
+                continue
+            label = str(key).replace("_", " ")
+            if "\n" in text:
+                lines.append(f"{label}:\n{text}")
+            else:
+                lines.append(f"{label}: {text}")
+        return "\n".join(lines)
+    return str(value or "").strip()
+
+def _format_optimized_script(payload: dict[str, Any]) -> str:
+    segments = payload.get("segments") if isinstance(payload.get("segments"), list) else []
+    segment_lines = []
+    for index, item in enumerate(segments, start=1):
+        if not isinstance(item, dict):
+            continue
+        segment_lines.append(
+            "\n".join(
+                part
+                for part in [
+                    f"{index}. {_truncate(item.get('title'), 400)}",
+                    f"Narration: {_truncate(item.get('narration'), 4000)}",
+                    f"Gợi ý hình ảnh: {_truncate(item.get('visual_suggestion'), 4000)}",
+                    f"Nhịp giữ chân: {_truncate(item.get('retention_role'), 4000)}",
+                    f"Âm thanh: {_truncate(item.get('audio_cue'), 4000)}",
+                ]
+                if part.split(": ", 1)[-1].strip()
+            )
+        )
+    sections = [
+        ("Tiêu đề", payload.get("title")),
+        ("Big idea", payload.get("big_idea")),
+        ("Hook 3-5 giây", payload.get("hook_3_5s") or payload.get("hook")),
+        ("Câu hỏi giữ chân người xem", payload.get("viewer_question")),
+        ("Khoảng tò mò", payload.get("curiosity_gap")),
+        ("Kịch bản", payload.get("script")),
+        ("Cấu trúc đoạn/cảnh", "\n\n".join(segment_lines)),
+        ("Nhịp giữ chân", _format_json_section(payload.get("retention_plan"))),
+        ("Âm thanh / sound design", _format_json_section(payload.get("sound_design_plan"))),
+        ("Hướng âm thanh", payload.get("audio_direction")),
+        ("Gợi ý hình ảnh", _format_json_section(payload.get("visual_suggestions"))),
+        ("Ghi chú originality", payload.get("originality_note")),
+    ]
+    return "\n\n".join(
+        f"{label}:\n{str(value).strip()}"
+        for label, value in sections
+        if str(value or "").strip()
+    ).strip()
 
 def _apply_visual_payload(row: DBVideoInspirationJob, frames: list[DBVideoInspirationFrame], payload: dict[str, Any], db: Session) -> None:
     by_timestamp = {
@@ -1181,31 +1586,50 @@ def rewrite_job(job_id: str, data: models.VideoInspirationRewriteRequest, db: Se
         if data.user_direction is not None:
             row.user_direction = _clean_user_direction(data.user_direction)
         if not row.analysis_json:
-            raise VideoInspirationError("Cần phân tích video trước khi viết kịch bản mới.", error_code="VIDEO_INSPIRATION_ANALYSIS_REQUIRED")
+            raise VideoInspirationError("Cần phân tích video trước khi viết kịch bản tối ưu.", error_code="VIDEO_INSPIRATION_ANALYSIS_REQUIRED")
         ready, message, error_code = _provider_ready(db)
         if not ready:
             raise VideoInspirationError(
-                f"Chưa viết được kịch bản mới: {message}",
+                f"Chưa viết được kịch bản tối ưu: {message}",
                 error_code=error_code or "VIDEO_INSPIRATION_AI_PROVIDER_REQUIRED",
             )
-        _set_job_state(row, db, status="rewriting", step="rewrite", progress=0.92)
-        payload = _run_structured_ai(db, _rewrite_prompt(row), REWRITE_SCHEMA)
-        segments = payload.get("segments") or []
-        segment_text = "\n\n".join(
-            f"{index}. {item.get('title', '').strip()}\nNarration: {item.get('narration', '').strip()}\nGợi ý hình ảnh: {item.get('visual_suggestion', '').strip()}"
-            for index, item in enumerate(segments, start=1)
-            if isinstance(item, dict)
+        _set_job_state(row, db, status="rewriting", step="rewrite_brief", progress=0.91)
+        creative_brief = _run_structured_ai(db, _creative_brief_prompt(row), CREATIVE_BRIEF_SCHEMA)
+
+        _set_job_state(row, db, status="rewriting", step="rewrite_candidates", progress=0.94)
+        candidates = _run_structured_ai(
+            db,
+            _rewrite_candidates_prompt(row, creative_brief),
+            REWRITE_CANDIDATES_SCHEMA,
         )
-        script = (payload.get("script") or "").strip()
-        if segment_text:
-            script = f"{script}\n\nCấu trúc đoạn/cảnh:\n{segment_text}".strip()
-        if payload.get("originality_note"):
-            script = f"{script}\n\nGhi chú:\n{payload['originality_note']}".strip()
-        row.rewritten_script = script
+        _validate_candidate_payload(candidates)
+
+        _set_job_state(row, db, status="rewriting", step="rewrite_review", progress=0.97)
+        review = _run_structured_ai(
+            db,
+            _rewrite_review_prompt(row, creative_brief, candidates),
+            REWRITE_REVIEW_SCHEMA,
+        )
+
+        _set_job_state(row, db, status="rewriting", step="rewrite_synthesis", progress=0.99)
+        payload = _run_structured_ai(
+            db,
+            _rewrite_synthesis_prompt(row, creative_brief, candidates, review),
+            REWRITE_SCHEMA,
+        )
+        _validate_optimized_rewrite_payload(payload)
+
+        row.rewritten_script = _format_optimized_script(payload)
         row.script_title = _truncate(payload.get("title"), 160)
         row.big_idea = _truncate(payload.get("big_idea"), 20000)
-        row.hook = _truncate(payload.get("hook"), 12000)
-        row.analysis_json = {**(row.analysis_json or {}), "rewrite": payload}
+        row.hook = _truncate(payload.get("hook_3_5s") or payload.get("hook"), 12000)
+        row.analysis_json = {
+            **(row.analysis_json or {}),
+            "rewrite_creative_brief": creative_brief,
+            "rewrite_candidates": candidates,
+            "rewrite_review": review,
+            "rewrite": payload,
+        }
         row.status = "rewritten"
         row.current_step = "completed"
         row.progress = 1.0
@@ -1240,7 +1664,9 @@ def update_script(job_id: str, data: models.VideoInspirationScriptUpdate, db: Se
     db.commit()
     return _job_response(row, db)
 
-def _source_block(block_type: str, content: str) -> models.VideoSourceBlockDraft | None:
+def _source_block(block_type: str, content: Any) -> models.VideoSourceBlockDraft | None:
+    if not isinstance(content, str):
+        content = _format_json_section(content)
     text = _truncate(content, 30000)
     if not text:
         return None
@@ -1248,7 +1674,19 @@ def _source_block(block_type: str, content: str) -> models.VideoSourceBlockDraft
 
 def _project_source_blocks(row: DBVideoInspirationJob) -> list[models.VideoSourceBlockDraft]:
     analysis_text = json.dumps(row.analysis_json or {}, ensure_ascii=False, indent=2)
+    rewrite = (row.analysis_json or {}).get("rewrite") if isinstance(row.analysis_json, dict) else None
+    rewrite_blocks = (
+        rewrite.get("ai_video_source_blocks")
+        if isinstance(rewrite, dict) and isinstance(rewrite.get("ai_video_source_blocks"), dict)
+        else {}
+    )
     blocks = [
+        _source_block("idea", rewrite_blocks.get("idea", "")),
+        _source_block("rough_script", rewrite_blocks.get("rough_script", "")),
+        _source_block("character_notes", rewrite_blocks.get("character_notes", "")),
+        _source_block("style_notes", rewrite_blocks.get("style_notes", "")),
+        _source_block("must_have", rewrite_blocks.get("must_have", "")),
+        _source_block("avoid", rewrite_blocks.get("avoid", "")),
         _source_block("script", row.rewritten_script or ""),
         _source_block("user_direction", row.user_direction or ""),
         _source_block("analysis", analysis_text),
@@ -1266,7 +1704,7 @@ async def create_ai_video_project(
     if row is None:
         return None
     if not (row.rewritten_script or "").strip():
-        raise VideoInspirationError("Cần có kịch bản mới trước khi chuyển sang AI Video.", error_code="VIDEO_INSPIRATION_SCRIPT_REQUIRED")
+        raise VideoInspirationError("Cần có kịch bản tối ưu trước khi chuyển sang AI Video.", error_code="VIDEO_INSPIRATION_SCRIPT_REQUIRED")
     try:
         _set_job_state(row, db, status="handoff", step="handoff", progress=1.0)
         project = video_projects.create_project(

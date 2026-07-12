@@ -34,7 +34,11 @@ const STEP_LABELS: Record<string, string> = {
   extract_frames: 'Đang lấy hình ảnh đại diện',
   visual_analysis: 'Đang phân tích hình ảnh',
   content_analysis: 'Đang phân tích nội dung',
-  rewrite: 'Đang viết kịch bản mới',
+  rewrite: 'Đang viết kịch bản tối ưu',
+  rewrite_brief: 'Đang tạo brief kịch bản',
+  rewrite_candidates: 'Đang tạo các bản nháp',
+  rewrite_review: 'Đang chấm điểm bản nháp',
+  rewrite_synthesis: 'Đang tổng hợp bản cuối',
   handoff: 'Đang chuyển sang AI Video',
   completed: 'Hoàn tất',
   failed: 'Đã lỗi',
@@ -47,7 +51,7 @@ const STATUS_LABELS: Record<string, string> = {
   transcript_edited: 'Đã sửa transcript',
   direction_edited: 'Đã lưu định hướng',
   rewriting: 'Đang viết lại',
-  rewritten: 'Đã có kịch bản mới',
+  rewritten: 'Đã có kịch bản tối ưu',
   handoff: 'Đang chuyển tiếp',
   ai_video_ready: 'Đã chuyển sang AI Video',
   failed: 'Có lỗi',
@@ -64,6 +68,9 @@ const ANALYSIS_LABELS: Record<string, string> = {
   rewrite_opportunities_vi: 'Cơ hội viết mới',
   notes_vi: 'Ghi chú',
 };
+
+const AI_VIDEO_DRAFT_SECTION_MAX_LENGTH = 28000;
+const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Có lỗi không xác định.';
@@ -122,7 +129,7 @@ function formatAnalysisValue(value: unknown): string {
 
 function analysisEntries(job?: VideoInspirationJobResponse | null) {
   if (!job?.analysis_json) return [];
-  return Object.entries(job.analysis_json).filter(([key]) => key !== 'rewrite');
+  return Object.entries(job.analysis_json).filter(([key]) => key !== 'rewrite' && !key.startsWith('rewrite_'));
 }
 
 function draftText(value: unknown): string {
@@ -159,7 +166,40 @@ function rewritePayload(job: VideoInspirationJobResponse): Record<string, unknow
     : {};
 }
 
-function joinDraftSections(sections: Array<[string, string | null | undefined]>): string {
+function rewriteSourceBlocks(rewrite: Record<string, unknown>): Record<string, unknown> {
+  const value = rewrite.ai_video_source_blocks;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function sourceBlockText(blocks: Record<string, unknown>, key: string): string {
+  return draftText(blocks[key]);
+}
+
+function optimizedRewritePanels(job: VideoInspirationJobResponse) {
+  const rewrite = rewritePayload(job);
+  return [
+    ['Hook 3-5 giây', firstDraftText(draftText(rewrite.hook_3_5s), job.hook || '', draftText(rewrite.hook))],
+    ['Nhịp giữ chân', draftText(rewrite.retention_plan)],
+    ['Âm thanh', firstDraftText(draftText(rewrite.sound_design_plan), draftText(rewrite.audio_direction))],
+    ['Gợi ý hình ảnh', firstDraftText(draftText(rewrite.visual_suggestions), draftText(rewrite.segments))],
+  ].filter(([, value]) => value.trim());
+}
+
+function truncateDraftText(value: string, limit: number): string {
+  const text = value.trim();
+  if (text.length <= limit) return text;
+  const cut = text.slice(0, Math.max(0, limit - 3)).trimEnd();
+  const boundary = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf('. '), cut.lastIndexOf('; '));
+  if (boundary > cut.length * 0.55) return `${cut.slice(0, boundary + 1).trimEnd()}...`;
+  return `${cut}...`;
+}
+
+function joinDraftSections(
+  sections: Array<[string, string | null | undefined]>,
+  limit = AI_VIDEO_DRAFT_SECTION_MAX_LENGTH,
+): string {
   return sections
     .map(([label, value]) => {
       const text = (value || '').trim();
@@ -167,7 +207,21 @@ function joinDraftSections(sections: Array<[string, string | null | undefined]>)
     })
     .filter(Boolean)
     .join('\n\n')
-    .slice(0, 28000);
+    .slice(0, limit);
+}
+
+function compactDraftSections(
+  sections: Array<[string, string | null | undefined]>,
+  sectionLimit: number,
+  limit: number,
+): string {
+  return joinDraftSections(
+    sections.map(([label, value]) => [
+      label,
+      value ? truncateDraftText(value, sectionLimit) : value,
+    ]),
+    limit,
+  );
 }
 
 function firstDraftText(...values: Array<string | null | undefined>): string {
@@ -187,14 +241,25 @@ function frameDraftText(job: VideoInspirationJobResponse): string {
 
 function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
   const rewrite = rewritePayload(job);
+  const sourceBlocks = rewriteSourceBlocks(rewrite);
   const title = job.script_title || jobTitle(job);
-  const hook = firstDraftText(job.hook, analysisText(job, 'hook_vi'), draftText(rewrite.hook));
+  const hook3to5 = firstDraftText(
+    draftText(rewrite.hook_3_5s),
+    job.hook,
+    draftText(rewrite.hook),
+    analysisText(job, 'hook_vi'),
+  );
   const bigIdea = firstDraftText(
     job.big_idea,
-    analysisText(job, 'main_idea_vi'),
     draftText(rewrite.big_idea),
+    analysisText(job, 'main_idea_vi'),
     job.rewritten_script,
   );
+  const viewerQuestion = draftText(rewrite.viewer_question);
+  const curiosityGap = draftText(rewrite.curiosity_gap);
+  const retentionPlan = draftText(rewrite.retention_plan);
+  const soundDesignPlan = draftText(rewrite.sound_design_plan);
+  const audioDirection = draftText(rewrite.audio_direction);
   const visualSuggestions = firstDraftText(
     draftText(rewrite.visual_suggestions),
     draftText(rewrite.segments),
@@ -207,20 +272,23 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
     source: 'video-inspiration',
     createdAt: new Date().toISOString(),
     title,
-    visualStyle: joinDraftSections([
+    visualStyle: compactDraftSections([
       ['Định hướng hình ảnh từ người dùng', userDirection],
       ['Tóm tắt hình ảnh video gốc', job.visual_summary],
-      ['Dữ liệu frame đại diện từ video gốc', frameNotes],
+      ['Phong cách từ bản tối ưu', sourceBlockText(sourceBlocks, 'style_notes')],
       ['Nhịp hình ảnh cần học và cải thiện', analysisText(job, 'visual_rhythm_vi')],
       ['Gợi ý hình ảnh từ bản rewrite', visualSuggestions],
-    ]),
+    ], 320, AI_VIDEO_VISUAL_STYLE_MAX_LENGTH),
     sources: [
       {
         block_type: 'idea',
         content: joinDraftSections([
+          ['Dữ liệu đã tối ưu cho ô ý tưởng', sourceBlockText(sourceBlocks, 'idea')],
           ['Tên dự án', title],
           ['Ý tưởng chính', bigIdea],
-          ['Hook nên dùng', hook],
+          ['Hook 3-5 giây đầu để giữ chân người xem', hook3to5],
+          ['Câu hỏi người xem sẽ giữ trong đầu', viewerQuestion],
+          ['Khoảng tò mò cần giữ', curiosityGap],
           ['Ngôn ngữ của bản rewrite hiện tại', outputLanguageNote],
           ['Cơ hội viết mới từ phân tích', analysisText(job, 'rewrite_opportunities_vi')],
         ]),
@@ -228,7 +296,8 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'rough_script',
         content: joinDraftSections([
-          ['Kịch bản mới đã duyệt', job.rewritten_script],
+          ['Dữ liệu đã tối ưu cho ô kịch bản thô', sourceBlockText(sourceBlocks, 'rough_script')],
+          ['Kịch bản tối ưu đã duyệt', job.rewritten_script],
           ['Cấu trúc segment/cảnh từ bản rewrite', draftText(rewrite.segments)],
           ['Transcript gốc để đối chiếu', job.transcript_text],
         ]),
@@ -236,6 +305,7 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'character_notes',
         content: joinDraftSections([
+          ['Dữ liệu đã tối ưu cho nhân vật/bối cảnh', sourceBlockText(sourceBlocks, 'character_notes')],
           ['Nhân vật và bối cảnh', analysisText(job, 'characters_context_vi')],
           ['Bối cảnh/hình ảnh đã quan sát', job.visual_summary],
           ['Frame đại diện cần dùng làm dữ liệu hình ảnh', frameNotes],
@@ -245,8 +315,12 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'style_notes',
         content: joinDraftSections([
+          ['Dữ liệu đã tối ưu cho phong cách video', sourceBlockText(sourceBlocks, 'style_notes')],
           ['Phong cách video', userDirection],
           ['Nhịp dựng / camera / mood', analysisText(job, 'visual_rhythm_vi')],
+          ['Retention plan', retentionPlan],
+          ['Sound design plan', soundDesignPlan],
+          ['Audio direction', audioDirection],
           ['Dữ liệu frame/video inspiration', frameNotes],
           ['Gợi ý hình ảnh theo từng đoạn', visualSuggestions],
           ['Ghi chú phân tích', analysisText(job, 'notes_vi')],
@@ -255,8 +329,10 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'must_have',
         content: joinDraftSections([
+          ['Dữ liệu đã tối ưu cho phần bắt buộc', sourceBlockText(sourceBlocks, 'must_have')],
           ['Bắt buộc giữ ý tưởng chính', bigIdea],
-          ['Bắt buộc có hook', hook],
+          ['Bắt buộc có hook 3-5 giây đầu', hook3to5],
+          ['Bắt buộc có payoff retention', draftText((rewrite.retention_plan as Record<string, unknown> | undefined)?.payoff)],
           ['Điểm mạnh cần giữ lại', analysisText(job, 'strengths_vi')],
           ['Cơ hội phát triển cần tận dụng', analysisText(job, 'rewrite_opportunities_vi')],
           ['Định hướng người dùng', userDirection],
@@ -265,8 +341,10 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'avoid',
         content: joinDraftSections([
+          ['Dữ liệu đã tối ưu cho phần cần tránh', sourceBlockText(sourceBlocks, 'avoid')],
           ['Điểm yếu cần tránh/sửa', analysisText(job, 'weaknesses_vi')],
           ['Không được copy sát video gốc', draftText(rewrite.originality_note)],
+          ['Tránh lỗi âm thanh', 'Không để nhạc nền hoặc SFX che narration; tránh đoạn mở đầu quá tĩnh và không có âm thanh định hướng.'],
           ['Lưu ý chất lượng', analysisText(job, 'notes_vi')],
           [
             'Nguyên tắc',
@@ -435,6 +513,10 @@ export function VideoInspiration() {
     isJobActive(currentJob);
   const currentProgress = progressValue(currentJob);
   const entries = useMemo(() => analysisEntries(currentJob), [currentJob]);
+  const optimizedPanels = useMemo(
+    () => (currentJob ? optimizedRewritePanels(currentJob) : []),
+    [currentJob],
+  );
   const primaryError =
     localError ||
     currentJob?.failure_reason ||
@@ -511,7 +593,7 @@ export function VideoInspiration() {
   const handleOpenAIVideoDraft = () => {
     setLocalError(null);
     if (!currentJob?.rewritten_script?.trim()) {
-      setLocalError('Cần có kịch bản mới trước khi đưa sang form AI Video.');
+      setLocalError('Cần có kịch bản tối ưu trước khi đưa sang form AI Video.');
       return;
     }
     try {
@@ -539,7 +621,7 @@ export function VideoInspiration() {
               </Badge>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-              Đưa video vào, lấy lời nói và hình ảnh làm chất liệu, rồi viết thành kịch bản mới để
+              Đưa video vào, lấy lời nói và hình ảnh làm chất liệu, rồi viết thành kịch bản tối ưu để
               điền sẵn form AI Video trước khi anh tự chọn cấu hình và chạy.
             </p>
           </div>
@@ -821,7 +903,7 @@ export function VideoInspiration() {
                     ) : (
                       <Sparkles className="h-4 w-4" />
                     )}
-                    Viết kịch bản mới
+                    Viết kịch bản tối ưu
                   </Button>
                   <Button type="button" disabled={!canHandoff} onClick={handleOpenAIVideoDraft}>
                     <ArrowRight className="h-4 w-4" />
@@ -847,7 +929,7 @@ export function VideoInspiration() {
                 </TabsTrigger>
                 <TabsTrigger value="script" className="min-h-10">
                   <Sparkles className="mr-2 h-4 w-4" />
-                  Kịch bản mới
+                  Kịch bản tối ưu
                 </TabsTrigger>
               </TabsList>
 
@@ -958,9 +1040,9 @@ export function VideoInspiration() {
                 <section className="rounded-lg border border-border/80 bg-card/65 p-5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <h3 className="text-base font-semibold">Kịch bản mới</h3>
+                      <h3 className="text-base font-semibold">Kịch bản tối ưu</h3>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Bản này dùng để điền form AI Video; anh tự chọn cấu hình rồi mới tạo/chạy.
+                        Bản này có sẵn hook 3-5 giây, retention, âm thanh và source block cho AI Video; anh tự chọn cấu hình rồi mới tạo/chạy.
                       </p>
                     </div>
                     <Button
@@ -995,7 +1077,7 @@ export function VideoInspiration() {
                         value={scriptTitleDraft}
                         onChange={(event) => setScriptTitleDraft(event.target.value)}
                         disabled={!currentJob || busy}
-                        placeholder="Tên kịch bản mới"
+                        placeholder="Tên kịch bản tối ưu"
                         className="h-11"
                       />
                     </label>
@@ -1014,23 +1096,39 @@ export function VideoInspiration() {
                       />
                     </label>
                     <label className="grid gap-2 text-sm font-medium" htmlFor="video-script-hook">
-                      Hook
+                      Hook 3-5 giây
                       <Input
                         id="video-script-hook"
                         value={hookDraft}
                         onChange={(event) => setHookDraft(event.target.value)}
                         disabled={!currentJob || busy}
-                        placeholder="Mở đầu 0-3 giây"
+                        placeholder="Mở đầu 3-5 giây để giữ chân người xem"
                         className="h-11"
                       />
                     </label>
                   </div>
 
+                  {optimizedPanels.length ? (
+                    <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                      {optimizedPanels.map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="rounded-lg border border-border/75 bg-background/60 p-4"
+                        >
+                          <p className="text-sm font-semibold">{label}</p>
+                          <p className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                            {value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
                   <Textarea
                     value={scriptDraft}
                     onChange={(event) => setScriptDraft(event.target.value)}
                     disabled={!currentJob || busy}
-                    placeholder="Kịch bản mới sẽ xuất hiện sau khi bấm Viết kịch bản mới."
+                    placeholder="Kịch bản tối ưu sẽ xuất hiện sau khi bấm Viết kịch bản tối ưu."
                     className="mt-4 min-h-[460px] resize-y text-sm leading-relaxed"
                   />
                 </section>

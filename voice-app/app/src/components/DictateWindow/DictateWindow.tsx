@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CapturePill } from '@/components/CapturePill/CapturePill';
 import { apiClient } from '@/lib/api/client';
 import type { FocusSnapshot } from '@/lib/api/types';
@@ -108,14 +108,14 @@ export function DictateWindow() {
   const statusTimeoutRef = useRef<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const clearStatusTimeout = () => {
+  const clearStatusTimeout = useCallback(() => {
     if (statusTimeoutRef.current !== null) {
       window.clearTimeout(statusTimeoutRef.current);
       statusTimeoutRef.current = null;
     }
-  };
+  }, []);
 
-  const dismissSpeak = (id?: string) => {
+  const dismissSpeak = useCallback((id?: string) => {
     // Guard against a late dismiss targeting a stale cycle (a new speak
     // already started by the time audio.ended from the previous one fired).
     if (id && speakingRef.current && speakingRef.current.generationId !== id) return;
@@ -128,9 +128,9 @@ export function DictateWindow() {
       audioRef.current = null;
     }
     setSpeaking(null);
-  };
+  }, [clearStatusTimeout]);
 
-  const startSpeakPlayback = (generationId: string) => {
+  const startSpeakPlayback = useCallback((generationId: string) => {
     const audio = new Audio(apiClient.getAudioUrl(generationId));
     audio.onended = () => dismissSpeak(generationId);
     audio.onerror = () => dismissSpeak(generationId);
@@ -152,7 +152,7 @@ export function DictateWindow() {
       console.warn('[dictate] audio.play failed:', err);
       dismissSpeak(generationId);
     });
-  };
+  }, [dismissSpeak]);
 
   useEffect(() => {
     const unlistens: Promise<UnlistenFn>[] = [];
@@ -249,7 +249,7 @@ export function DictateWindow() {
       for (const p of unlistens) p.then((fn) => fn()).catch(() => {});
       dismissSpeak();
     };
-  }, []);
+  }, [clearStatusTimeout, dismissSpeak, startSpeakPlayback]);
 
   // Advance the pill's elapsed-time label while audio is playing. Paused
   // during the pre-playback generation window (startedAt is null) so the
@@ -261,7 +261,7 @@ export function DictateWindow() {
       setSpeakElapsed(Date.now() - anchor);
     }, 250);
     return () => window.clearInterval(iv);
-  }, [speaking?.generationId, speaking?.startedAt]);
+  }, [speaking?.startedAt]);
 
   // --- Effective pill state -----------------------------------------------
 

@@ -48,7 +48,7 @@ ITEM_ACTIVE_STATUSES = {
     "importing",
 }
 ITEM_RETRYABLE_STATUSES = {"pending", "failed", "needs_login", "needs_user_action", "needs_credit_approval"}
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 4
 PROVIDER_PROJECT_URL_RESULT_KEY = "provider_project_url"
 PROVIDER_PROJECT_HASH_RESULT_KEY = "provider_project_ref_hash"
 ITEM_STATUS_MESSAGES = {
@@ -83,6 +83,45 @@ PUBLIC_FIGURE_CONTEXT_REPLACEMENTS = (
     (re.compile(r"người nổi tiếng", re.IGNORECASE), "người có tên"),
 )
 
+FLOW_PROVIDER_PROMPT_MAX_CHARS = 5200
+FLOW_PROVIDER_PROMPT_COMPACT_MARKERS = (
+    "Video language:",
+    "Micro-scene timeline:",
+    "Bản giải thích",
+)
+FLOW_PROVIDER_PROMPT_SECTION_HEADINGS = (
+    "Video language:",
+    "Segment:",
+    "Video generation clip length:",
+    "Usable timeline duration:",
+    "Timeline position:",
+    "Micro-scene timeline:",
+    "Aspect ratio:",
+    "Shot type:",
+    "Camera angle:",
+    "Framing:",
+    "Composition:",
+    "Camera movement:",
+    "Subject motion:",
+    "Environment motion:",
+    "Start frame:",
+    "End frame:",
+    "Lighting:",
+    "Mood:",
+    "Continuity notes:",
+    "Retention notes:",
+    "Transition notes:",
+    "Sound design notes:",
+    "Negative prompt:",
+    "Bản giải thích",
+)
+FLOW_PROVIDER_PROMPT_KEEP_SECTIONS = (
+    "Retention notes:",
+    "Transition notes:",
+    "Sound design notes:",
+    "Negative prompt:",
+)
+
 class VideoClipGenerationError(ValueError):
     """Raised when a clip generation job cannot start or continue."""
 
@@ -93,20 +132,90 @@ class VideoClipGenerationError(ValueError):
 def _now() -> datetime:
     return datetime.utcnow()
 
+def _normalize_flow_provider_prompt(prompt: str) -> str:
+    lines: list[str] = []
+    previous_blank = False
+    for raw_line in prompt.splitlines():
+        line = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if not line:
+            if lines and not previous_blank:
+                lines.append("")
+            previous_blank = True
+            continue
+        lines.append(line)
+        previous_blank = False
+    return "\n".join(lines).strip()
+
+def _extract_flow_provider_section(prompt: str, heading: str) -> str | None:
+    start = prompt.find(heading)
+    if start < 0:
+        return None
+    end = len(prompt)
+    for boundary in FLOW_PROVIDER_PROMPT_SECTION_HEADINGS:
+        if boundary == heading:
+            continue
+        candidate = prompt.find(boundary, start + len(heading))
+        if candidate >= 0:
+            end = min(end, candidate)
+    if heading == "Negative prompt:":
+        blank = prompt.find("\n\n", start)
+        if blank >= 0:
+            end = min(end, blank)
+    section = prompt[start:end].strip()
+    return section or None
+
+def _truncate_flow_provider_prompt(prompt: str, max_chars: int = FLOW_PROVIDER_PROMPT_MAX_CHARS) -> str:
+    if len(prompt) <= max_chars:
+        return prompt
+    negative = _extract_flow_provider_section(prompt, "Negative prompt:")
+    suffix = f"\n\n{negative}" if negative and negative not in prompt[:max_chars] else ""
+    budget = max(500, max_chars - len(suffix))
+    head = prompt[:budget].rstrip()
+    sentence_cut = max(head.rfind(". "), head.rfind("\n"))
+    if sentence_cut > budget * 0.55:
+        head = head[: sentence_cut + 1].rstrip()
+    else:
+        head = head.rstrip(" ,;:-") + "."
+    return f"{head}{suffix}".strip()
+
+def compact_prompt_for_veo_provider(prompt: str) -> str:
+    """Keep the creative provider prompt short while preserving hook, retention, and audio notes."""
+    raw = str(prompt or "").strip()
+    if not raw:
+        return ""
+    should_compact = len(raw) > FLOW_PROVIDER_PROMPT_MAX_CHARS or any(marker in raw for marker in FLOW_PROVIDER_PROMPT_COMPACT_MARKERS)
+    if not should_compact:
+        return raw
+    first_cut_candidates = [raw.find("Video language:"), raw.find("Micro-scene timeline:")]
+    first_cut_candidates = [index for index in first_cut_candidates if index > 0]
+    lead = raw[: min(first_cut_candidates)].strip() if first_cut_candidates else raw
+    sections = [lead]
+    language = _extract_flow_provider_section(raw, "Video language:")
+    if language:
+        sections.append(language)
+    for heading in FLOW_PROVIDER_PROMPT_KEEP_SECTIONS:
+        section = _extract_flow_provider_section(raw, heading)
+        if section and section not in sections:
+            sections.append(section)
+    compact = _normalize_flow_provider_prompt("\n\n".join(sections))
+    return _truncate_flow_provider_prompt(compact)
+
 def provider_safe_prompt_for_veo(prompt: str) -> tuple[str, bool]:
-    """Remove public-figure cues before sending a project prompt to Veo/Flow."""
+    """Remove risky cues and provider-unfriendly duplicate notes before sending to Veo/Flow."""
     safe = prompt
     for pattern, replacement in PUBLIC_FIGURE_PROVIDER_REPLACEMENTS:
         safe = pattern.sub(replacement, safe)
     for pattern, replacement in PUBLIC_FIGURE_CONTEXT_REPLACEMENTS:
         safe = pattern.sub(replacement, safe)
-    changed = safe != prompt
-    if changed:
+    replaced_public_figure_cues = safe != prompt
+    safe = compact_prompt_for_veo_provider(safe)
+    if replaced_public_figure_cues:
         safe = (
             safe.strip()
             + "\n\nUse only fictional simple stick-figure or generic football supporters. "
             "No realistic faces, logos, jersey numbers, or real people."
         )
+    changed = safe != prompt
     return safe, changed
 
 def _active_job(project_id: str, db: Session, *, provider: str = "veo") -> DBVideoClipGenerationJob | None:
@@ -249,6 +358,8 @@ def _find_reusable_provider_project_url(project: DBVideoProject, db: Session) ->
         .all()
     )
     for row in rows:
+        if row.status in {"failed", "cancelled"}:
+            continue
         url = _provider_project_url_from_results(row)
         if url:
             return url
@@ -739,7 +850,10 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
             try:
                 _set_item(item, db, status="submitting_prompt")
                 _set_job(job, db, current_step=f"Đang gửi prompt Segment {item.shot_order:02d}")
-                provider_project_url = _provider_project_url_from_results(job)
+                # Keep each shot generation isolated. Reusing a Flow project lets
+                # old selected media and failed chat messages bleed into the next
+                # item, which can make downloads map to the wrong shot.
+                provider_project_url = None
                 provider_prompt, provider_prompt_sanitized = provider_safe_prompt_for_veo(prompt.prompt)
                 def remember_provider_project(provider_project_url: str, provider_project_ref_hash: str | None = None) -> None:
                     _save_provider_project_url(job, db, provider_project_url, provider_project_ref_hash)

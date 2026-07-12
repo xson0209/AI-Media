@@ -482,9 +482,11 @@ export function HistoryTable() {
                   )}
                 >
                   {/* Main row */}
+                  {/* biome-ignore lint/a11y/useSemanticElements: this row contains nested textarea/actions, so it cannot be a button element. */}
                   <div
-                    role={isPlayable ? 'button' : undefined}
-                    tabIndex={isPlayable ? 0 : undefined}
+                    role="button"
+                    tabIndex={isPlayable ? 0 : -1}
+                    aria-disabled={!isPlayable}
                     className={cn(
                       'flex items-stretch gap-4 h-26 p-3 outline-none',
                       isPlayable && 'hover:bg-muted/70 cursor-pointer rounded-md',
@@ -564,6 +566,7 @@ export function HistoryTable() {
                     </div>
 
                     {/* Far right - Actions */}
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: this wrapper only stops nested action buttons from triggering row playback. */}
                     <div
                       className="shrink-0 flex flex-col justify-center items-center gap-0.5"
                       onMouseDown={(e) => e.stopPropagation()}
@@ -708,10 +711,7 @@ export function HistoryTable() {
                               const sourceVersion = v.source_version_id
                                 ? gen.versions?.find((sv) => sv.id === v.source_version_id)
                                 : null;
-                              const showSource =
-                                sourceVersion &&
-                                sourceVersion.effects_chain &&
-                                sourceVersion.effects_chain.length > 0;
+                              const showSource = sourceVersion?.effects_chain && sourceVersion.effects_chain.length > 0;
 
                               return (
                                 <button
@@ -867,9 +867,9 @@ export function HistoryTable() {
           </DialogHeader>
           {effectsTargetVersions.length > 1 && (
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
+              <div className="text-xs font-medium text-muted-foreground">
                 {t('history.effectsDialog.sourceLabel')}
-              </label>
+              </div>
               <Select
                 value={effectsSourceVersionId ?? ''}
                 onValueChange={(val) => setEffectsSourceVersionId(val || null)}

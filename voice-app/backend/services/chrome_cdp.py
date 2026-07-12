@@ -71,13 +71,24 @@ def list_targets(port: int) -> list[ChromeTarget]:
     return targets
 
 def open_target(port: int, url: str) -> ChromeTarget:
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            return _open_target_once(port, url)
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.75)
+    raise CDPError("Không tạo được tab Chrome mới cho provider.") from last_error
+
+def _open_target_once(port: int, url: str) -> ChromeTarget:
     endpoint = f"http://127.0.0.1:{port}/json/new?{quote(url, safe=':/?&=%#')}"
     request = Request(endpoint, method="PUT")
     try:
         with urlopen(request, timeout=5.0) as response:
             item = json.loads(response.read().decode("utf-8"))
     except Exception as exc:
-        raise CDPError("Không tạo được tab Chrome mới cho provider.") from exc
+        return _open_target_via_browser_cdp(port, url, exc)
     ws_url = item.get("webSocketDebuggerUrl")
     if not ws_url:
         raise CDPError("Tab Chrome mới không có websocket endpoint.")
@@ -88,6 +99,26 @@ def open_target(port: int, url: str) -> ChromeTarget:
         url=item.get("url"),
         web_socket_debugger_url=str(ws_url),
     )
+
+def _open_target_via_browser_cdp(port: int, url: str, original_exc: Exception) -> ChromeTarget:
+    try:
+        with CDPClient(browser_websocket_url(port)) as client:
+            result = client.command("Target.createTarget", {"url": url}, timeout=8.0)
+    except Exception as exc:
+        raise CDPError("Không tạo được tab Chrome mới cho provider qua CDP.") from exc
+
+    target_id = str(result.get("targetId") or "")
+    if not target_id:
+        raise CDPError("Chrome không trả về targetId cho tab provider mới.") from original_exc
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        for target in list_targets(port):
+            if target.id == target_id:
+                return target
+        time.sleep(0.2)
+
+    raise CDPError("Tab Chrome provider mới không có websocket endpoint sau khi tạo qua CDP.") from original_exc
 
 def close_target(port: int, target_id: str) -> bool:
     if not target_id:

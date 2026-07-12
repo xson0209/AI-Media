@@ -91,13 +91,18 @@ export function useStoryPlayback(items: StoryItemDetail[] | undefined) {
 
   // Resolve the audio buffer key and URL for an item.
   // When a version_id is pinned, use that version's audio; otherwise use the generation default.
-  const getAudioKey = (item: StoryItemDetail) =>
-    item.version_id ? `v:${item.version_id}` : item.generation_id;
+  const getAudioKey = useCallback(
+    (item: StoryItemDetail) => (item.version_id ? `v:${item.version_id}` : item.generation_id),
+    [],
+  );
 
-  const getAudioUrlForItem = (item: StoryItemDetail) =>
-    item.version_id
-      ? apiClient.getVersionAudioUrl(item.version_id)
-      : apiClient.getAudioUrl(item.generation_id);
+  const getAudioUrlForItem = useCallback(
+    (item: StoryItemDetail) =>
+      item.version_id
+        ? apiClient.getVersionAudioUrl(item.version_id)
+        : apiClient.getAudioUrl(item.generation_id),
+    [],
+  );
 
   // Preload audio files as AudioBuffers
   useEffect(() => {
@@ -148,7 +153,7 @@ export function useStoryPlayback(items: StoryItemDetail[] | undefined) {
     Promise.all(preloadPromises).then(() => {
       console.log('[StoryPlayback] Preloaded', audioBuffersRef.current.size, 'audio buffers');
     });
-  }, [items, getAudioContext]);
+  }, [items, getAudioContext, getAudioKey, getAudioUrlForItem]);
 
   // Cleanup AudioContext on unmount
   useEffect(() => {
@@ -313,7 +318,7 @@ export function useStoryPlayback(items: StoryItemDetail[] | undefined) {
         }
       }
     },
-    [getAudioContext, findActiveItems, storyTimeToContextTime, stopSource],
+    [getAudioContext, findActiveItems, storyTimeToContextTime, stopSource, getAudioKey],
   );
 
   // Sync visual playhead from AudioContext time

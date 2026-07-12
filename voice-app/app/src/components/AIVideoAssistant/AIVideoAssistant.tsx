@@ -75,6 +75,8 @@ import { AIVideoVeoChromePanel } from './AIVideoVeoChromePanel';
 type AspectRatio = '9:16' | '16:9' | '1:1';
 type ProjectCreationMode = 'quick' | 'manual';
 
+const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
+
 interface SourceDraft {
   block_type: string;
   label: string;
@@ -1384,6 +1386,12 @@ function routeSearchValue(search: unknown, key: string): string | null {
   return null;
 }
 
+function normalizeVisualStyleInput(value: string | null | undefined): string | null {
+  const text = (value || '').trim();
+  if (!text) return null;
+  return text.slice(0, AI_VIDEO_VISUAL_STYLE_MAX_LENGTH).trimEnd();
+}
+
 function sourcesFromAIVideoDraft(draft: AIVideoFormDraft): SourceDraft[] {
   const contentByType = new Map(
     draft.sources
@@ -1666,7 +1674,7 @@ export function AIVideoAssistant() {
       setForm((current) => ({
         ...current,
         title: draft.title?.trim() || '',
-        visualStyle: draft.visualStyle?.trim() || current.visualStyle,
+        visualStyle: normalizeVisualStyleInput(draft.visualStyle) || current.visualStyle,
         sources: sourcesFromAIVideoDraft(draft),
       }));
       setNotice(
@@ -1814,7 +1822,7 @@ export function AIVideoAssistant() {
         prompt_segment_duration_seconds: promptSegmentDuration,
         micro_scenes_per_prompt: microScenesPerPrompt,
         aspect_ratio: form.aspectRatio,
-        visual_style: form.visualStyle,
+        visual_style: normalizeVisualStyleInput(form.visualStyle),
         voice_profile_id: form.voiceProfileId || null,
         phase: 'phase2',
         default_shot_duration_seconds: null,
@@ -1899,7 +1907,7 @@ export function AIVideoAssistant() {
         prompt_segment_duration_seconds: promptSegmentDuration,
         micro_scenes_per_prompt: microScenesPerPrompt,
         aspect_ratio: form.aspectRatio,
-        visual_style: form.visualStyle,
+        visual_style: normalizeVisualStyleInput(form.visualStyle),
         voice_profile_id: form.voiceProfileId || null,
         phase: 'phase2',
         default_shot_duration_seconds: null,

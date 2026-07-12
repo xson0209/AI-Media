@@ -38,13 +38,14 @@ export function LogsPage() {
   const clear = useLogStore((s) => s.clear);
   const containerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const entryCount = entries.length;
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
+    if (entryCount > 0 && autoScroll && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [entries.length, autoScroll]);
+  }, [entryCount, autoScroll]);
 
   // Detect manual scroll to disable auto-scroll
   const handleScroll = () => {

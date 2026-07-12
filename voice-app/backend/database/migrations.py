@@ -585,6 +585,11 @@ def _migrate_ai_video_assistant(engine) -> None:
                 settings_json TEXT,
                 readiness_json TEXT,
                 timeline_manifest_path VARCHAR,
+                enhanced_plan_path VARCHAR,
+                review_report_path VARCHAR,
+                enhanced_artifacts_json JSON,
+                review_status VARCHAR,
+                fix_attempt_count INTEGER NOT NULL DEFAULT 0,
                 output_path VARCHAR,
                 subtitle_ass_path VARCHAR,
                 stale BOOLEAN NOT NULL DEFAULT 0,
@@ -786,6 +791,17 @@ def _migrate_ai_video_assistant(engine) -> None:
         for column_name, column_sql in clip_item_column_defaults.items():
             if column_name not in clip_item_columns:
                 conn.execute(text(f"ALTER TABLE video_clip_generation_items ADD COLUMN {column_name} {column_sql}"))
+        render_job_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_render_jobs)")).fetchall()}
+        render_job_column_defaults = {
+            "enhanced_plan_path": "VARCHAR",
+            "review_report_path": "VARCHAR",
+            "enhanced_artifacts_json": "JSON",
+            "review_status": "VARCHAR",
+            "fix_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, column_sql in render_job_column_defaults.items():
+            if column_name not in render_job_columns:
+                conn.execute(text(f"ALTER TABLE video_render_jobs ADD COLUMN {column_name} {column_sql}"))
         conn.commit()
 
 
@@ -915,6 +931,8 @@ def _normalize_storage_paths(engine, tables: set[str]) -> None:
         ("video_package_exports", "manifest_path"),
         ("video_package_exports", "zip_path"),
         ("video_render_jobs", "timeline_manifest_path"),
+        ("video_render_jobs", "enhanced_plan_path"),
+        ("video_render_jobs", "review_report_path"),
         ("video_render_jobs", "output_path"),
         ("video_render_jobs", "subtitle_ass_path"),
         ("video_provider_sessions", "chrome_profile_path"),

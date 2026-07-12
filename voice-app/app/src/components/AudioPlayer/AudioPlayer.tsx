@@ -584,9 +584,8 @@ export function AudioPlayer() {
           </Button>
 
           {/* Volume Control */}
-          <div
+          <fieldset
             className="flex items-center gap-2 shrink-0 w-[120px]"
-            role="group"
             aria-label="Âm lượng"
           >
             <Button
@@ -610,7 +609,7 @@ export function AudioPlayer() {
               aria-labelledby={volumeLabelId}
               aria-valuetext={`${Math.round(volume * 100)}%`}
             />
-          </div>
+          </fieldset>
 
           {/* Close Button */}
           <Button

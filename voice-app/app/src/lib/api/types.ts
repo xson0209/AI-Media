@@ -731,6 +731,10 @@ export interface VideoRenderSettings {
   mute_clip_audio: boolean;
   background_color?: string;
   force?: boolean;
+  enhanced_render?: boolean;
+  enhanced_audio?: boolean;
+  ai_review?: boolean;
+  max_fix_attempts?: number;
 }
 
 export interface VideoRenderWarning {
@@ -754,6 +758,24 @@ export interface VideoRenderReadinessResponse {
   warnings: VideoRenderWarning[];
 }
 
+export interface VideoRenderSfxAssetResponse {
+  asset_id: string;
+  filename: string;
+  file_path: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  duration_seconds?: number | null;
+  cue_aliases: string[];
+  status: string;
+  failure_reason?: string | null;
+}
+
+export interface VideoEnhancedRenderArtifactResponse {
+  filename: string;
+  path?: string | null;
+  kind: string;
+}
+
 export interface VideoRenderJobResponse {
   id: string;
   project_id: string;
@@ -763,6 +785,14 @@ export interface VideoRenderJobResponse {
   settings_json?: string | null;
   readiness_json?: string | null;
   timeline_manifest_path?: string | null;
+  enhanced_plan_path?: string | null;
+  review_report_path?: string | null;
+  enhanced_artifacts_json?: {
+    enhanced_plan?: string | null;
+    items?: VideoEnhancedRenderArtifactResponse[];
+  } | null;
+  review_status?: string | null;
+  fix_attempt_count?: number;
   output_path?: string | null;
   subtitle_ass_path?: string | null;
   stale: boolean;

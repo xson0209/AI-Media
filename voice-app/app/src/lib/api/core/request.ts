@@ -15,54 +15,69 @@ export const isDefined = <T>(
   return value !== undefined && value !== null;
 };
 
-export const isString = (value: any): value is string => {
+export const isString = (value: unknown): value is string => {
   return typeof value === 'string';
 };
 
-export const isStringWithValue = (value: any): value is string => {
+export const isStringWithValue = (value: unknown): value is string => {
   return isString(value) && value !== '';
 };
 
-export const isBlob = (value: any): value is Blob => {
+export const isBlob = (value: unknown): value is Blob => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const candidate = value as {
+    type?: unknown;
+    stream?: unknown;
+    arrayBuffer?: unknown;
+    constructor?: { name?: unknown };
+    [Symbol.toStringTag]?: unknown;
+  };
+  const tag = candidate[Symbol.toStringTag];
   return (
-    typeof value === 'object' &&
-    typeof value.type === 'string' &&
-    typeof value.stream === 'function' &&
-    typeof value.arrayBuffer === 'function' &&
-    typeof value.constructor === 'function' &&
-    typeof value.constructor.name === 'string' &&
-    /^(Blob|File)$/.test(value.constructor.name) &&
-    /^(Blob|File)$/.test(value[Symbol.toStringTag])
+    typeof candidate.type === 'string' &&
+    typeof candidate.stream === 'function' &&
+    typeof candidate.arrayBuffer === 'function' &&
+    typeof candidate.constructor === 'function' &&
+    typeof candidate.constructor.name === 'string' &&
+    /^(Blob|File)$/.test(candidate.constructor.name) &&
+    typeof tag === 'string' &&
+    /^(Blob|File)$/.test(tag)
   );
 };
 
-export const isFormData = (value: any): value is FormData => {
+export const isFormData = (value: unknown): value is FormData => {
   return value instanceof FormData;
 };
 
 export const base64 = (str: string): string => {
   try {
     return btoa(str);
-  } catch (err) {
-    // @ts-ignore
-    return Buffer.from(str).toString('base64');
+  } catch {
+    const nodeBuffer = (
+      globalThis as typeof globalThis & {
+        Buffer?: { from(value: string): { toString(encoding: string): string } };
+      }
+    ).Buffer;
+    return nodeBuffer?.from(str).toString('base64') ?? str;
   }
 };
 
-export const getQueryString = (params: Record<string, any>): string => {
+export const getQueryString = (params: Record<string, unknown>): string => {
   const qs: string[] = [];
 
-  const append = (key: string, value: any) => {
+  const append = (key: string, value: unknown) => {
     qs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
   };
 
-  const process = (key: string, value: any) => {
+  const process = (key: string, value: unknown) => {
     if (isDefined(value)) {
       if (Array.isArray(value)) {
         value.forEach((v) => {
           process(key, v);
         });
-      } else if (typeof value === 'object') {
+      } else if (typeof value === 'object' && value !== null) {
         Object.entries(value).forEach(([k, v]) => {
           process(`${key}[${k}]`, v);
         });
@@ -89,7 +104,7 @@ const getUrl = (config: OpenAPIConfig, options: ApiRequestOptions): string => {
   const path = options.url
     .replace('{api-version}', config.VERSION)
     .replace(/{(.*?)}/g, (substring: string, group: string) => {
-      if (options.path?.hasOwnProperty(group)) {
+      if (options.path && Object.keys(options.path).includes(group)) {
         return encoder(String(options.path[group]));
       }
       return substring;
@@ -106,7 +121,7 @@ export const getFormData = (options: ApiRequestOptions): FormData | undefined =>
   if (options.formData) {
     const formData = new FormData();
 
-    const process = (key: string, value: any) => {
+    const process = (key: string, value: unknown) => {
       if (isString(value) || isBlob(value)) {
         formData.append(key, value);
       } else {
@@ -118,7 +133,9 @@ export const getFormData = (options: ApiRequestOptions): FormData | undefined =>
       .filter(([_, value]) => isDefined(value))
       .forEach(([key, value]) => {
         if (Array.isArray(value)) {
-          value.forEach((v) => process(key, v));
+          value.forEach((v) => {
+            process(key, v);
+          });
         } else {
           process(key, value);
         }
@@ -159,20 +176,20 @@ export const getHeaders = async (
   })
     .filter(([_, value]) => isDefined(value))
     .reduce(
-      (headers, [key, value]) => ({
-        ...headers,
-        [key]: String(value),
-      }),
+      (headers, [key, value]) => {
+        headers[key] = String(value);
+        return headers;
+      },
       {} as Record<string, string>,
     );
 
   if (isStringWithValue(token)) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   if (isStringWithValue(username) && isStringWithValue(password)) {
     const credentials = base64(`${username}:${password}`);
-    headers['Authorization'] = `Basic ${credentials}`;
+    headers.Authorization = `Basic ${credentials}`;
   }
 
   if (options.body !== undefined) {
@@ -190,7 +207,7 @@ export const getHeaders = async (
   return new Headers(headers);
 };
 
-export const getRequestBody = (options: ApiRequestOptions): any => {
+export const getRequestBody = (options: ApiRequestOptions): BodyInit | undefined => {
   if (options.body !== undefined) {
     if (options.mediaType?.includes('/json')) {
       return JSON.stringify(options.body);
@@ -207,7 +224,7 @@ export const sendRequest = async (
   config: OpenAPIConfig,
   options: ApiRequestOptions,
   url: string,
-  body: any,
+  body: BodyInit | undefined,
   formData: FormData | undefined,
   headers: Headers,
   onCancel: OnCancel,
@@ -243,7 +260,7 @@ export const getResponseHeader = (
   return undefined;
 };
 
-export const getResponseBody = async (response: Response): Promise<any> => {
+export const getResponseBody = async (response: Response): Promise<unknown> => {
   if (response.status !== 204) {
     try {
       const contentType = response.headers.get('Content-Type');
@@ -286,7 +303,7 @@ export const catchErrorCodes = (options: ApiRequestOptions, result: ApiResult): 
     const errorBody = (() => {
       try {
         return JSON.stringify(result.body, null, 2);
-      } catch (e) {
+      } catch (_e) {
         return undefined;
       }
     })();
@@ -332,7 +349,7 @@ export const request = <T>(
 
         catchErrorCodes(options, result);
 
-        resolve(result.body);
+        resolve(result.body as T);
       }
     } catch (error) {
       reject(error);

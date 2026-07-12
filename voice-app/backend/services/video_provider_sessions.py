@@ -331,17 +331,35 @@ def launch_chrome(
         return runtime
 
 def _existing_chrome_runtime(provider: str, profile_dir: Path) -> ChromeRuntime | None:
-    if platform.system().lower() == "windows":
-        return None
     profile_text = str(profile_dir)
     try:
-        result = subprocess.run(
-            ["ps", "axo", "pid=,command="],
-            capture_output=True,
-            text=True,
-            timeout=3.0,
-            check=False,
-        )
+        if platform.system().lower() == "windows":
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); "
+                        "Get-CimInstance Win32_Process -Filter \"name='chrome.exe'\" "
+                        "| ForEach-Object { $_.CommandLine }"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5.0,
+                check=False,
+            )
+        else:
+            result = subprocess.run(
+                ["ps", "axo", "pid=,command="],
+                capture_output=True,
+                text=True,
+                timeout=3.0,
+                check=False,
+            )
     except Exception:
         return None
     if result.returncode != 0:

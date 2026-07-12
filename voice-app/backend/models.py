@@ -2,7 +2,7 @@
 Pydantic models for request/response validation.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Optional, List
 from datetime import datetime
 
@@ -11,6 +11,22 @@ from .utils.capture_chords import (
     default_toggle_to_talk_chord,
 )
 from .services import video_purpose as video_purpose_service
+
+_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000
+
+
+def _truncate_string_field(value: Any, limit: int) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    return text[:limit].rstrip() if len(text) > limit else text
+
+
+class _VisualStyleLimitedModel(BaseModel):
+    @field_validator("visual_style", mode="before", check_fields=False)
+    @classmethod
+    def _limit_visual_style(cls, value: Any) -> Any:
+        return _truncate_string_field(value, _VIDEO_VISUAL_STYLE_MAX_LENGTH)
 
 
 class VoiceProfileCreate(BaseModel):
@@ -545,6 +561,10 @@ class VideoRenderSettings(BaseModel):
     mute_clip_audio: bool = True
     background_color: str = Field(default="#111827", max_length=20)
     force: bool = False
+    enhanced_render: bool = False
+    enhanced_audio: bool = True
+    ai_review: bool = True
+    max_fix_attempts: int = Field(default=1, ge=0, le=2)
 
 class VideoRenderWarning(BaseModel):
     shot_id: Optional[str] = None
@@ -582,6 +602,90 @@ class VideoRenderTimelineShot(BaseModel):
     sound_design: Optional[dict[str, Any]] = None
     retainability_quality_check: Optional[dict[str, Any]] = None
 
+class VideoRenderSfxAssetResponse(BaseModel):
+    """SFX/BGM audio asset available to enhanced render."""
+
+    asset_id: str
+    filename: str
+    file_path: str
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    duration_seconds: Optional[float] = None
+    cue_aliases: List[str] = Field(default_factory=list)
+    status: str = "ready"
+    failure_reason: Optional[str] = None
+
+class VideoEnhancedRenderArtifactResponse(BaseModel):
+    filename: str
+    path: Optional[str] = None
+    kind: str
+
+class VideoEnhancedRenderFallback(BaseModel):
+    kind: str
+    shot_id: Optional[str] = None
+    cue_alias: Optional[str] = None
+    message_vi: str
+
+class VideoEnhancedTransitionAction(BaseModel):
+    from_shot_id: str
+    to_shot_id: Optional[str] = None
+    transition_alias: str
+    original_transition: Optional[str] = None
+    at_seconds: float
+    duration_seconds: float = 0.0
+    render_mode: str = "hard_cut"
+    rendered: bool = True
+    continuity_risk: Optional[str] = None
+    fallback_reason: Optional[str] = None
+
+class VideoEnhancedSfxAction(BaseModel):
+    shot_id: str
+    cue_alias: str
+    cue_label: Optional[str] = None
+    start_seconds: float
+    duration_seconds: float
+    volume: float = Field(default=0.45, ge=0, le=1)
+    fade_in_seconds: float = Field(default=0.02, ge=0, le=2)
+    fade_out_seconds: float = Field(default=0.08, ge=0, le=2)
+    duck_under_voice: bool = True
+    asset_id: Optional[str] = None
+    asset_filename: Optional[str] = None
+    asset_path: Optional[str] = None
+    rendered: bool = False
+    fallback_reason: Optional[str] = None
+
+class VideoEnhancedBgmAction(BaseModel):
+    asset_id: Optional[str] = None
+    asset_filename: Optional[str] = None
+    asset_path: Optional[str] = None
+    start_seconds: float = 0.0
+    duration_seconds: float = 0.0
+    volume: float = Field(default=0.12, ge=0, le=1)
+    rendered: bool = False
+    fallback_reason: Optional[str] = None
+
+class VideoEnhancedRetentionAction(BaseModel):
+    shot_id: str
+    shot_order: int
+    role: Optional[str] = None
+    hook: Optional[str] = None
+    pattern_interrupt: Optional[str] = None
+    payoff: Optional[str] = None
+    note_vi: Optional[str] = None
+
+class VideoEnhancedRenderPlan(BaseModel):
+    schema_version: str = "enhanced-render-plan-v1"
+    project_id: str
+    project_title: Optional[str] = None
+    total_duration_seconds: float = 0.0
+    settings: dict[str, Any] = Field(default_factory=dict)
+    transition_actions: List[VideoEnhancedTransitionAction] = Field(default_factory=list)
+    sfx_actions: List[VideoEnhancedSfxAction] = Field(default_factory=list)
+    bgm_action: Optional[VideoEnhancedBgmAction] = None
+    retention_actions: List[VideoEnhancedRetentionAction] = Field(default_factory=list)
+    fallbacks: List[VideoEnhancedRenderFallback] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
 class VideoRenderJobCreateRequest(BaseModel):
     settings: VideoRenderSettings = Field(default_factory=VideoRenderSettings)
 
@@ -596,6 +700,11 @@ class VideoRenderJobResponse(BaseModel):
     settings_json: Optional[str] = None
     readiness_json: Optional[str] = None
     timeline_manifest_path: Optional[str] = None
+    enhanced_plan_path: Optional[str] = None
+    review_report_path: Optional[str] = None
+    enhanced_artifacts_json: Optional[dict[str, Any]] = None
+    review_status: Optional[str] = None
+    fix_attempt_count: int = 0
     output_path: Optional[str] = None
     subtitle_ass_path: Optional[str] = None
     stale: bool = False
@@ -802,7 +911,7 @@ class VideoSeriesResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class VideoEpisodeCreate(BaseModel):
+class VideoEpisodeCreate(_VisualStyleLimitedModel):
     """Create a new episode project from a series."""
 
     topic: str = Field(..., min_length=1, max_length=4000)
@@ -835,7 +944,7 @@ class VideoGeneratedDataResetResponse(BaseModel):
 class VideoSeriesSummaryUpdateRequest(BaseModel):
     summary: Optional[str] = Field(default=None, max_length=50000)
 
-class VideoProjectCreate(BaseModel):
+class VideoProjectCreate(_VisualStyleLimitedModel):
     """Request model for creating an AI Video Assistant project."""
 
     topic: str = Field(..., min_length=1, max_length=4000)
@@ -860,7 +969,7 @@ class VideoProjectCreate(BaseModel):
     micro_scenes_per_prompt: Optional[int] = Field(default=None, ge=1, le=5)
     source_blocks: List[VideoSourceBlockDraft] = Field(default_factory=list, max_length=40)
 
-class VideoProjectUpdate(BaseModel):
+class VideoProjectUpdate(_VisualStyleLimitedModel):
     """Partial update for an AI Video Assistant project."""
 
     title: Optional[str] = Field(default=None, min_length=1, max_length=160)

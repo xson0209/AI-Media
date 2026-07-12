@@ -18,6 +18,7 @@ import type { VoiceProfileResponse } from '../models/VoiceProfileResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
+// biome-ignore lint/complexity/noStaticOnlyClass: Generated OpenAPI service shape is static by contract.
 export class DefaultService {
   /**
    * Root
@@ -25,7 +26,7 @@ export class DefaultService {
    * @returns any Successful Response
    * @throws ApiError
    */
-  public static rootGet(): CancelablePromise<any> {
+  public static rootGet(): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'GET',
       url: '/',
@@ -134,7 +135,7 @@ export class DefaultService {
     profileId,
   }: {
     profileId: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'DELETE',
       url: '/profiles/{profile_id}',
@@ -204,7 +205,7 @@ export class DefaultService {
     sampleId,
   }: {
     sampleId: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'DELETE',
       url: '/profiles/samples/{sample_id}',
@@ -300,7 +301,7 @@ export class DefaultService {
     generationId,
   }: {
     generationId: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'DELETE',
       url: '/history/{generation_id}',
@@ -318,7 +319,7 @@ export class DefaultService {
    * @returns any Successful Response
    * @throws ApiError
    */
-  public static getStatsHistoryStatsGet(): CancelablePromise<any> {
+  public static getStatsHistoryStatsGet(): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'GET',
       url: '/history/stats',
@@ -355,7 +356,7 @@ export class DefaultService {
     generationId,
   }: {
     generationId: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'GET',
       url: '/audio/{generation_id}',
@@ -377,7 +378,7 @@ export class DefaultService {
     modelSize = '1.7B',
   }: {
     modelSize?: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'POST',
       url: '/models/load',
@@ -395,7 +396,7 @@ export class DefaultService {
    * @returns any Successful Response
    * @throws ApiError
    */
-  public static unloadModelModelsUnloadPost(): CancelablePromise<any> {
+  public static unloadModelModelsUnloadPost(): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'POST',
       url: '/models/unload',
@@ -411,7 +412,7 @@ export class DefaultService {
     modelName,
   }: {
     modelName: string;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'GET',
       url: '/models/progress/{model_name}',
@@ -445,7 +446,7 @@ export class DefaultService {
     requestBody,
   }: {
     requestBody: ModelDownloadRequest;
-  }): CancelablePromise<any> {
+  }): CancelablePromise<unknown> {
     return __request(OpenAPI, {
       method: 'POST',
       url: '/models/download',
@@ -457,3 +458,4 @@ export class DefaultService {
     });
   }
 }
+

@@ -207,12 +207,12 @@ def to_storage_path(path: str | Path) -> str:
 
     relative_to_any_data_dir = _path_relative_to_any_data_dir(resolved_path)
     if relative_to_any_data_dir is not None:
-        return str(relative_to_any_data_dir)
+        return relative_to_any_data_dir.as_posix()
 
     try:
-        return str(resolved_path.relative_to(_data_dir))
+        return resolved_path.relative_to(_data_dir).as_posix()
     except ValueError:
-        return str(resolved_path)
+        return resolved_path.as_posix()
 
 
 def resolve_storage_path(path: str | Path | None) -> Path | None:
