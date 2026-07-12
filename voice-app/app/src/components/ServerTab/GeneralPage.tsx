@@ -27,7 +27,7 @@ function makeConnectionSchema(invalidUrl: string) {
 type ConnectionFormValues = { serverUrl: string };
 
 export function GeneralPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const platform = usePlatform();
   const serverUrl = useServerStore((state) => state.serverUrl);
   const setServerUrl = useServerStore((state) => state.setServerUrl);
@@ -46,6 +46,7 @@ export function GeneralPage() {
     resolver,
     defaultValues: { serverUrl },
   });
+  const currentLanguage = i18n.resolvedLanguage ?? i18n.language;
 
   useEffect(() => {
     form.reset({ serverUrl });
@@ -53,10 +54,10 @@ export function GeneralPage() {
 
   // Re-run validation when the locale changes so existing error messages retranslate.
   useEffect(() => {
-    if (form.formState.errors.serverUrl) {
+    if (currentLanguage && form.formState.errors.serverUrl) {
       form.trigger('serverUrl');
     }
-  }, [t, form]);
+  }, [currentLanguage, form]);
 
   const { isDirty } = form.formState;
 

@@ -31,6 +31,7 @@ class PyTorchTTSBackend:
         self.model_size = model_size
         self.device = self._get_device()
         self._current_model_size = None
+        self._model_load_lock = asyncio.Lock()
 
     def _get_device(self) -> str:
         """Get the best available device."""
@@ -73,16 +74,21 @@ class PyTorchTTSBackend:
         if model_size is None:
             model_size = self.model_size
 
-        # If already loaded with correct size, return
         if self.model is not None and self._current_model_size == model_size:
             return
 
-        # Unload existing model if different size requested
-        if self.model is not None and self._current_model_size != model_size:
-            self.unload_model()
+        async with self._model_load_lock:
+            # Re-check after acquiring the lock; another generation may have
+            # loaded the model while this task was waiting.
+            if self.model is not None and self._current_model_size == model_size:
+                return
 
-        # Run blocking load in thread pool
-        await asyncio.to_thread(self._load_model_sync, model_size)
+            # Unload existing model if different size requested
+            if self.model is not None and self._current_model_size != model_size:
+                self.unload_model()
+
+            # Run blocking load in thread pool
+            await asyncio.to_thread(self._load_model_sync, model_size)
 
     # Alias for compatibility
     load_model = load_model_async

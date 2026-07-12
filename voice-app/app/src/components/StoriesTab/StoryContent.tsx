@@ -315,7 +315,8 @@ export function StoryContent() {
   }
 
   return (
-    <div
+    <section
+      aria-label={story.name}
       className="flex flex-col h-full min-h-0 relative overflow-hidden"
       onDragEnter={(e) => {
         if (!e.dataTransfer?.types.includes('Files')) return;
@@ -512,6 +513,6 @@ export function StoryContent() {
           </DndContext>
         )}
       </div>
-    </div>
+    </section>
   );
 }

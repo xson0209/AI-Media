@@ -25,6 +25,7 @@ def register_routers(app: FastAPI) -> None:
     from .mcp_bindings import router as mcp_bindings_router
     from .events import router as events_router
     from .ai_video import router as ai_video_router
+    from .video_inspiration import router as video_inspiration_router
 
     app.include_router(health_router)
     app.include_router(profiles_router)
@@ -46,3 +47,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(mcp_bindings_router)
     app.include_router(events_router)
     app.include_router(ai_video_router)
+    app.include_router(video_inspiration_router)

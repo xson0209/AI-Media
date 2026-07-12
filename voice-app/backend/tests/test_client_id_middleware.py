@@ -31,6 +31,7 @@ def test_mcp_semantic_paths_are_stamped(path: str) -> None:
     [
         "/",
         "/health",
+        "/health/ready",
         "/generate",
         "/captures",
         "/profiles",

@@ -156,7 +156,6 @@ export function useSystemAudioCapture({
         });
       }
     };
-    // biome-ignore lint/correctness/useExhaustiveDependencies: Only run on unmount
   }, [platform]);
 
   return {

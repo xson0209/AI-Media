@@ -66,6 +66,17 @@ import type {
   VideoClipGenerationRetryRequest,
   VideoEpisodeCreate,
   VideoGeneratedDataResetResponse,
+  VideoInspirationAnalyzeRequest,
+  VideoInspirationCreateProjectRequest,
+  VideoInspirationDirectionUpdate,
+  VideoInspirationHandoffResponse,
+  VideoInspirationJobResponse,
+  VideoInspirationListResponse,
+  VideoInspirationRewriteRequest,
+  VideoInspirationScriptUpdate,
+  VideoInspirationTargetLanguage,
+  VideoInspirationTranscriptUpdate,
+  VideoInspirationUrlRequest,
   VideoPackageExportResponse,
   VideoPackageReadinessResponse,
   VideoProviderSessionLabelUpdate,
@@ -81,6 +92,7 @@ import type {
   VideoRenderJobResponse,
   VideoRenderReadinessResponse,
   VideoRenderSettings,
+  VideoRenderSfxAssetResponse,
   VideoSceneAssetResponse,
   VideoSceneNarrationRequest,
   VideoSceneResponse,
@@ -519,6 +531,128 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  // Video Inspiration
+  async listVideoInspirationJobs(limit = 20, offset = 0): Promise<VideoInspirationListResponse> {
+    return this.request<VideoInspirationListResponse>(
+      `/video-inspiration/jobs?limit=${limit}&offset=${offset}`,
+    );
+  }
+
+  async getVideoInspirationJob(jobId: string): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(`/video-inspiration/jobs/${jobId}`);
+  }
+
+  getVideoInspirationFrameUrl(frameId: string): string {
+    return `${this.getBaseUrl()}/video-inspiration/frames/${frameId}`;
+  }
+
+  async uploadVideoInspirationJob(
+    file: File,
+    targetLanguage: VideoInspirationTargetLanguage,
+    userDirection?: string | null,
+  ): Promise<VideoInspirationJobResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('target_language', targetLanguage);
+    const direction = userDirection?.trim();
+    if (direction) {
+      formData.append('user_direction', direction);
+    }
+    const response = await fetch(`${this.getBaseUrl()}/video-inspiration/jobs/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.json();
+  }
+
+  async createVideoInspirationJobFromUrl(
+    data: VideoInspirationUrlRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>('/video-inspiration/jobs/from-url', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async analyzeVideoInspirationJob(
+    jobId: string,
+    data: VideoInspirationAnalyzeRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/analyze`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateVideoInspirationTranscript(
+    jobId: string,
+    data: VideoInspirationTranscriptUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/transcript`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateVideoInspirationDirection(
+    jobId: string,
+    data: VideoInspirationDirectionUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/direction`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async rewriteVideoInspirationJob(
+    jobId: string,
+    data: VideoInspirationRewriteRequest,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(`/video-inspiration/jobs/${jobId}/rewrite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateVideoInspirationScript(
+    jobId: string,
+    data: VideoInspirationScriptUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/script`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async createAIVideoProjectFromInspiration(
+    jobId: string,
+    data: VideoInspirationCreateProjectRequest,
+  ): Promise<VideoInspirationHandoffResponse> {
+    return this.request<VideoInspirationHandoffResponse>(
+      `/video-inspiration/jobs/${jobId}/create-ai-video-project`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
   }
 
   // Captures
@@ -1246,9 +1380,46 @@ class ApiClient {
       duration_mode: settings.duration_mode,
       subtitle_mode: settings.subtitle_mode,
       mute_clip_audio: String(settings.mute_clip_audio),
+      enhanced_render: String(settings.enhanced_render ?? false),
+      enhanced_audio: String(settings.enhanced_audio ?? true),
+      ai_review: String(settings.ai_review ?? true),
+      max_fix_attempts: String(settings.max_fix_attempts ?? 1),
     });
     return this.request<VideoRenderReadinessResponse>(
       `/ai-video/projects/${projectId}/render/readiness?${params.toString()}`,
+    );
+  }
+
+  async listVideoRenderSfxAssets(projectId: string): Promise<VideoRenderSfxAssetResponse[]> {
+    return this.request<VideoRenderSfxAssetResponse[]>(
+      `/ai-video/projects/${projectId}/render/sfx-assets`,
+    );
+  }
+
+  async uploadVideoRenderSfxAsset(
+    projectId: string,
+    file: File,
+  ): Promise<VideoRenderSfxAssetResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(
+      `${this.getBaseUrl()}/ai-video/projects/${projectId}/render/sfx-assets`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.json();
+  }
+
+  async deleteVideoRenderSfxAsset(projectId: string, assetId: string): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(
+      `/ai-video/projects/${projectId}/render/sfx-assets/${assetId}`,
+      { method: 'DELETE' },
     );
   }
 
@@ -1282,6 +1453,17 @@ class ApiClient {
     return this.download(
       `/ai-video/projects/${projectId}/render/jobs/${jobId}/download`,
       'Video hoàn chỉnh.mp4',
+    );
+  }
+
+  async downloadVideoRenderEnhancedArtifact(
+    projectId: string,
+    jobId: string,
+    artifactKey: string,
+  ): Promise<DownloadedBlob> {
+    return this.download(
+      `/ai-video/projects/${projectId}/render/jobs/${jobId}/enhanced-artifacts/${encodeURIComponent(artifactKey)}`,
+      'Báo cáo enhanced render.md',
     );
   }
 

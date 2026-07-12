@@ -16,6 +16,9 @@ VIDEO_PROJECT_SUBDIRS = (
     "render_intermediates",
     "render_cache",
     "render_outputs",
+    "render_enhanced",
+    "sfx_assets",
+    "review_reports",
     "preview_images",
     "subtitles",
     "manifests",
@@ -124,6 +127,9 @@ def render_output_filename(project_title: str) -> str:
 def render_manifest_filename(project_title: str) -> str:
     title = sanitize_download_filename(project_title, fallback="Du an")
     return sanitize_download_filename(f"Timeline render - {title}.json")
+
+def enhanced_render_artifact_filename(index: int, title: str, suffix: str) -> str:
+    return sanitize_download_filename(f"{index}. {title}{suffix}")
 
 def subtitle_filename(project_title: str) -> str:
     title = sanitize_download_filename(project_title, fallback="Du an")

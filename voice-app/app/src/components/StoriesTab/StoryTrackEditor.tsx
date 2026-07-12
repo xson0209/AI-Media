@@ -139,13 +139,9 @@ function ClipWaveform({
 // Per-clip volume popover. Local state drives the slider during a drag so
 // each pointer-move pixel doesn't fire a PATCH; commits on release.
 function ClipVolumePopover({
-  storyId,
-  itemId,
   volume,
   onChange,
 }: {
-  storyId: string;
-  itemId: string;
   volume: number;
   onChange: (value: number) => void;
 }) {
@@ -154,7 +150,7 @@ function ClipVolumePopover({
   // out-of-band (split/duplicate carry the value forward).
   useEffect(() => {
     setLocalVolume(volume);
-  }, [volume, itemId, storyId]);
+  }, [volume]);
 
   const display = Math.round(localVolume * 100);
   const Icon = localVolume === 0 ? VolumeX : Volume2;
@@ -336,13 +332,13 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
     return [...items].sort((a, b) => a.start_time_ms - b.start_time_ms);
   }, [items]);
 
-  const handlePlayPause = () => {
+  const handlePlayPause = useCallback(() => {
     if (isCurrentlyPlaying) {
       pause();
     } else {
       play(storyId, sortedItems);
     }
-  };
+  }, [isCurrentlyPlaying, pause, play, storyId, sortedItems]);
 
   const handleStop = () => {
     stop();
@@ -433,9 +429,9 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
   }, []);
 
   // Calculate effective duration (accounting for trims)
-  const getEffectiveDuration = (item: StoryItemDetail) => {
+  const getEffectiveDuration = useCallback((item: StoryItemDetail) => {
     return item.duration * 1000 - (item.trim_start_ms || 0) - (item.trim_end_ms || 0);
-  };
+  }, []);
 
   // Calculate total duration (using effective durations)
   const totalDurationMs = useMemo(() => {
@@ -1150,8 +1146,6 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
               </Button>
               {selectedItem && (
                 <ClipVolumePopover
-                  storyId={storyId}
-                  itemId={selectedItem.id}
                   volume={selectedItem.volume}
                   onChange={(value) =>
                     updateVolume.mutate(
@@ -1492,9 +1486,9 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
               style={{ width: `${thumbWidth}px`, left: `${thumbLeft}px` }}
             >
               {/* Left zoom handle */}
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse-driven edge handle */}
               <div
                 role="slider"
+                tabIndex={0}
                 aria-label="Thu phóng từ cạnh trái"
                 aria-valuenow={Math.round(pixelsPerSecond)}
                 aria-valuemin={Math.round(minPps)}
@@ -1512,9 +1506,9 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
                 onMouseDown={canScrollHorizontally ? handleScrollbarMouseDown('pan') : undefined}
               />
               {/* Right zoom handle */}
-              {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse-driven edge handle */}
               <div
                 role="slider"
+                tabIndex={0}
                 aria-label="Thu phóng từ cạnh phải"
                 aria-valuenow={Math.round(pixelsPerSecond)}
                 aria-valuemin={Math.round(minPps)}
@@ -1529,3 +1523,4 @@ export function StoryTrackEditor({ storyId, items }: StoryTrackEditorProps) {
     </div>
   );
 }
+

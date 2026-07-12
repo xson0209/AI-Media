@@ -1103,6 +1103,10 @@ async def get_video_render_readiness(
     duration_mode: str = Query("freeze", pattern="^(freeze|trim_only)$"),
     subtitle_mode: str = Query("burn_in", pattern="^(burn_in|sidecar|none)$"),
     mute_clip_audio: bool = Query(True),
+    enhanced_render: bool = Query(False),
+    enhanced_audio: bool = Query(True),
+    ai_review: bool = Query(True),
+    max_fix_attempts: int = Query(1, ge=0, le=2),
     db: Session = Depends(get_db),
 ):
     settings = models.VideoRenderSettings(
@@ -1112,11 +1116,51 @@ async def get_video_render_readiness(
         duration_mode=duration_mode,
         subtitle_mode=subtitle_mode,
         mute_clip_audio=mute_clip_audio,
+        enhanced_render=enhanced_render,
+        enhanced_audio=enhanced_audio,
+        ai_review=ai_review,
+        max_fix_attempts=max_fix_attempts,
     )
     readiness = video_rendering.get_render_readiness(project_id, db, settings)
     if readiness is None:
         raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return readiness
+
+@router.get("/projects/{project_id}/render/sfx-assets", response_model=list[models.VideoRenderSfxAssetResponse])
+async def list_video_render_sfx_assets(project_id: str, db: Session = Depends(get_db)):
+    assets = video_rendering.list_render_sfx_assets(project_id, db)
+    if assets is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return assets
+
+@router.post("/projects/{project_id}/render/sfx-assets", response_model=models.VideoRenderSfxAssetResponse)
+async def upload_video_render_sfx_asset(
+    project_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        asset = video_rendering.upload_render_sfx_asset(
+            project_id,
+            filename=file.filename or "sfx.wav",
+            content_type=file.content_type,
+            data=await file.read(),
+            db=db,
+        )
+    except video_rendering.VideoRenderError as exc:
+        raise _error(400, str(exc), exc.error_code, exc=exc, project_id=project_id, step_name="video_render_sfx_asset") from exc
+    if asset is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return asset
+
+@router.delete("/projects/{project_id}/render/sfx-assets/{asset_id}")
+async def delete_video_render_sfx_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
+    deleted = video_rendering.delete_render_sfx_asset(project_id, asset_id, db)
+    if deleted is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    if not deleted:
+        raise _error(404, "Không tìm thấy asset SFX/BGM.", "VIDEO_RENDER_SFX_ASSET_NOT_FOUND")
+    return {"deleted": True}
 
 
 @router.get("/projects/{project_id}/render/jobs", response_model=list[models.VideoRenderJobResponse])
@@ -1170,6 +1214,23 @@ async def download_video_render_job(project_id: str, job_id: str, db: Session = 
         headers={"Content-Disposition": safe_content_disposition("attachment", filename)},
     )
 
+
+@router.get("/projects/{project_id}/render/jobs/{job_id}/enhanced-artifacts/{artifact_key:path}")
+async def download_video_render_enhanced_artifact(
+    project_id: str,
+    job_id: str,
+    artifact_key: str,
+    db: Session = Depends(get_db),
+):
+    result = video_rendering.get_enhanced_render_artifact_download(project_id, job_id, artifact_key, db)
+    if result is None:
+        raise _error(404, "File enhanced render report không còn tồn tại hoặc job chưa tạo artifact.", "VIDEO_RENDER_ARTIFACT_NOT_FOUND")
+    filename, path = result
+    return FileResponse(
+        path,
+        media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream",
+        headers={"Content-Disposition": safe_content_disposition("attachment", filename)},
+    )
 
 @router.get("/projects/{project_id}/package/readiness", response_model=models.VideoPackageReadinessResponse)
 async def get_video_package_readiness(project_id: str, db: Session = Depends(get_db)):

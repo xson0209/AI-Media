@@ -1,9 +1,9 @@
 """
-Serial generation queue — ensures only one TTS inference runs at a time
-to avoid GPU contention.
+Generation queue with bounded TTS concurrency.
 """
 
 import asyncio
+import os
 import traceback
 from dataclasses import dataclass
 from typing import Coroutine, Literal
@@ -20,12 +20,16 @@ class GenerationJob:
     coro: Coroutine
 
 
-# Generation queue — serializes TTS inference to avoid GPU contention
+DEFAULT_GENERATION_CONCURRENCY = 2
+MAX_GENERATION_CONCURRENCY = 4
+
+# Generation queue — limits concurrent TTS inference to avoid GPU contention
 _generation_queue: asyncio.Queue = None  # type: ignore  # initialized at startup
-_generation_worker_task: asyncio.Task | None = None
+_generation_worker_tasks: list[asyncio.Task] = []
 _queued_generation_ids: set[str] = set()
 _running_generation_tasks: dict[str, asyncio.Task] = {}
 _cancelled_generation_ids: set[str] = set()
+_generation_max_concurrency = DEFAULT_GENERATION_CONCURRENCY
 
 
 def create_background_task(coro) -> asyncio.Task:
@@ -36,8 +40,19 @@ def create_background_task(coro) -> asyncio.Task:
     return task
 
 
+def get_generation_max_concurrency() -> int:
+    """Return configured generation concurrency, clamped to a small safe range."""
+    raw = os.environ.get("VOICEBOX_GENERATION_CONCURRENCY")
+    if raw is None or not raw.strip():
+        return DEFAULT_GENERATION_CONCURRENCY
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_GENERATION_CONCURRENCY
+    return max(1, min(MAX_GENERATION_CONCURRENCY, value))
+
 async def _generation_worker():
-    """Worker that processes generation tasks one at a time."""
+    """Worker that processes generation tasks from the shared queue."""
     while True:
         job = await _generation_queue.get()
         try:
@@ -94,7 +109,7 @@ async def _force_fail_if_active(generation_id: str, error: str) -> None:
 
 
 def enqueue_generation(generation_id: str, coro):
-    """Add a generation coroutine to the serial queue."""
+    """Add a generation coroutine to the bounded-concurrency queue."""
     if _generation_queue is None:
         raise RuntimeError("Generation queue has not been initialized")
 
@@ -121,29 +136,37 @@ def get_generation_queue_snapshot() -> dict:
     """Return queue state for resource cleanup guards and diagnostics."""
     return {
         "available": _generation_queue is not None,
+        "max_concurrency": _generation_max_concurrency,
         "queued": len(_queued_generation_ids),
         "running": len(_running_generation_tasks),
         "queued_ids": sorted(_queued_generation_ids),
         "running_ids": sorted(_running_generation_tasks.keys()),
     }
 
-def init_queue(force: bool = False):
-    """Initialize the generation queue and start the worker.
+def init_queue(force: bool = False, max_concurrency: int | None = None):
+    """Initialize the generation queue and start worker tasks.
 
     Must be called once during application startup (inside a running event loop).
     """
-    global _generation_queue, _generation_worker_task
+    global _generation_queue, _generation_worker_tasks, _generation_max_concurrency
     global _queued_generation_ids, _running_generation_tasks, _cancelled_generation_ids
 
-    if _generation_worker_task is not None and not _generation_worker_task.done():
+    active_workers = [task for task in _generation_worker_tasks if not task.done()]
+    if active_workers:
         if not force:
             return
-        _generation_worker_task.cancel()
+        for task in active_workers:
+            task.cancel()
         for task in list(_running_generation_tasks.values()):
             task.cancel()
 
+    configured_concurrency = max_concurrency if max_concurrency is not None else get_generation_max_concurrency()
+    _generation_max_concurrency = max(1, min(MAX_GENERATION_CONCURRENCY, int(configured_concurrency)))
     _generation_queue = asyncio.Queue()
     _queued_generation_ids = set()
     _running_generation_tasks = {}
     _cancelled_generation_ids = set()
-    _generation_worker_task = create_background_task(_generation_worker())
+    _generation_worker_tasks = [
+        create_background_task(_generation_worker())
+        for _ in range(_generation_max_concurrency)
+    ]

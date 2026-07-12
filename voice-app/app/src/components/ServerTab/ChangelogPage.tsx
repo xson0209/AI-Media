@@ -51,17 +51,18 @@ function renderMarkdown(md: string): React.ReactNode[] {
 
     // List items — collect consecutive
     if (line.startsWith('- ')) {
-      const items: string[] = [];
+      const items: Array<{ key: string; text: string }> = [];
       while (i < lines.length && lines[i].startsWith('- ')) {
-        items.push(lines[i].slice(2));
+        const text = lines[i].slice(2);
+        items.push({ key: `item-${i}-${text}`, text });
         i++;
       }
       elements.push(
         <ul key={elements.length} className="space-y-1 my-2">
-          {items.map((item, idx) => (
-            <li key={idx} className="text-sm text-muted-foreground flex gap-2">
+          {items.map((item) => (
+            <li key={item.key} className="text-sm text-muted-foreground flex gap-2">
               <span className="text-muted-foreground/50 select-none shrink-0">&bull;</span>
-              <span>{inlineMarkdown(item)}</span>
+              <span>{inlineMarkdown(item.text)}</span>
             </li>
           ))}
         </ul>,
@@ -82,37 +83,43 @@ function renderMarkdown(md: string): React.ReactNode[] {
 }
 
 function renderTable(tableLines: string[], keyBase: number): React.ReactNode {
-  const parseRow = (line: string) =>
+  const parseRow = (line: string, rowKey: string) =>
     line
       .split('|')
       .slice(1, -1)
-      .map((c) => c.trim());
+      .map((c, columnIndex) => {
+        const value = c.trim();
+        return { key: `${rowKey}-cell-${columnIndex}-${value}`, value };
+      });
 
-  const headers = parseRow(tableLines[0]);
+  const headers = parseRow(tableLines[0], 'header');
   // Skip separator line (index 1)
-  const rows = tableLines.slice(2).map(parseRow);
+  const rows = tableLines.slice(2).map((line, rowIndex) => ({
+    key: `row-${rowIndex}-${line}`,
+    cells: parseRow(line, `row-${rowIndex}`),
+  }));
 
   return (
     <div key={keyBase} className="overflow-x-auto my-3">
       <table className="text-sm w-full">
         <thead>
           <tr className="border-b">
-            {headers.map((h, hIdx) => (
+            {headers.map((header) => (
               <th
-                key={hIdx}
+                key={header.key}
                 className="text-left py-1.5 pr-4 text-muted-foreground font-medium text-xs"
               >
-                {inlineMarkdown(h)}
+                {inlineMarkdown(header.value)}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIdx) => (
-            <tr key={rowIdx} className="border-b border-border/50">
-              {row.map((cell, cellIdx) => (
-                <td key={cellIdx} className="py-1.5 pr-4 text-muted-foreground">
-                  {inlineMarkdown(cell)}
+          {rows.map((row) => (
+            <tr key={row.key} className="border-b border-border/50">
+              {row.cells.map((cell) => (
+                <td key={cell.key} className="py-1.5 pr-4 text-muted-foreground">
+                  {inlineMarkdown(cell.value)}
                 </td>
               ))}
             </tr>
@@ -201,6 +208,7 @@ function ChangelogEntryCard({ entry }: { entry: ChangelogEntry }) {
 
       {isLong && (
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
           className="text-xs text-accent hover:underline mt-2"
         >

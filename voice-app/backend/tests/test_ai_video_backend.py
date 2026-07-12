@@ -4959,21 +4959,23 @@ def test_auto_run_waits_for_voice_then_generates_subtitle(db, monkeypatch):
     assert subtitle is not None
     assert subtitle.status == "completed"
 
-def test_auto_run_enqueues_one_voice_segment_at_a_time(db, monkeypatch):
+def test_auto_run_enqueues_two_voice_segments_at_a_time(db, monkeypatch):
     _disable_auto_run_background(monkeypatch)
     _patch_auto_planning(monkeypatch)
     project = _ready_phase2_project(db, voice_profile_id="profile-1")
     first = _add_phase2_shot(db, project.id, order=1, narration="First narration line.", duration_seconds=2)
     second = _add_phase2_shot(db, project.id, order=2, narration="Second narration line.", duration_seconds=2)
+    third = _add_phase2_shot(db, project.id, order=3, narration="Third narration line.", duration_seconds=2)
     _add_passed_prompt(db, project.id, first)
     _add_passed_prompt(db, project.id, second)
+    _add_passed_prompt(db, project.id, third)
 
     run = _start_auto_run(db, project.id, mode="full_auto")
     assert run is not None
     action = video_auto_runs._advance_auto_run_sync(run.id)
 
     assert action["action"] == "enqueue_voice"
-    assert action["shot_ids"] == [first.id]
+    assert action["shot_ids"] == [first.id, second.id]
 
 def test_auto_run_voice_failure_is_recorded_without_prompt_or_narration_leak(db, monkeypatch):
     _disable_auto_run_background(monkeypatch)

@@ -109,3 +109,17 @@ def test_system_resources_endpoint_returns_monitor_payload(monkeypatch):
     assert data["thermal"]["unit"] == "C"
     assert data["thermal"]["label"] == "NVIDIA GPU temperature"
     assert data["sampled_at"]
+
+def test_health_ready_endpoint_is_lightweight(monkeypatch):
+    app = FastAPI()
+    app.include_router(health.router)
+
+    def fail_if_model_status_is_checked():
+        raise AssertionError("readiness check should not inspect TTS model state")
+
+    monkeypatch.setattr(health.tts, "get_tts_model", fail_if_model_status_is_checked)
+
+    response = TestClient(app).get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}

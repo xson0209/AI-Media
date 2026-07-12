@@ -684,7 +684,7 @@ export function ModelManagement() {
                           (() => {
                             const dl = downloadProgressMap.get(model.model_name);
                             const pct = dl?.progress ?? 0;
-                            const hasProgress = dl && dl.total && dl.total > 0;
+                            const hasProgress = dl?.total && dl.total > 0;
                             return (
                               <div className="mt-1 space-y-0.5">
                                 <Progress value={hasProgress ? pct : undefined} className="h-1" />
@@ -956,7 +956,7 @@ export function ModelManagement() {
                             ? downloadProgressMap.get(freshSelectedModel.model_name)
                             : undefined;
                           const pct = dl?.progress ?? 0;
-                          const hasProgress = dl && dl.total && dl.total > 0;
+                          const hasProgress = dl?.total && dl.total > 0;
                           return (
                             <>
                               <Progress value={hasProgress ? pct : undefined} className="h-2" />

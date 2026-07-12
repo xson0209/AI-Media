@@ -471,6 +471,11 @@ async def watchdog_disable():
     disable_watchdog()
     return {"message": "Watchdog disabled"}
 
+@router.get("/health/ready")
+async def health_ready():
+    """Lightweight readiness check for local dev startup polling."""
+    return {"status": "ready"}
+
 
 @router.get("/health", response_model=models.HealthResponse)
 async def health():

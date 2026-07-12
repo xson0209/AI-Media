@@ -31,6 +31,7 @@ class MLXTTSBackend:
         self.model_size = model_size
         self._current_model_size = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-tts")
+        self._model_load_lock = asyncio.Lock()
 
     def is_loaded(self) -> bool:
         """Check if model is loaded."""
@@ -75,18 +76,23 @@ class MLXTTSBackend:
         if model_size is None:
             model_size = self.model_size
 
-        # If already loaded with correct size, return
         if self.model is not None and self._current_model_size == model_size:
             return
 
-        # Unload existing model if different size requested
-        if self.model is not None and self._current_model_size != model_size:
-            self.unload_model()
+        async with self._model_load_lock:
+            # Re-check after acquiring the lock; another generation may have
+            # loaded the model while this task was waiting.
+            if self.model is not None and self._current_model_size == model_size:
+                return
 
-        # MLX keeps GPU stream state thread-local. Load and inference must use
-        # the same dedicated worker thread or generation can fail with
-        # "There is no Stream(gpu, 1) in current thread."
-        await self._run_on_worker(self._load_model_sync, model_size)
+            # Unload existing model if different size requested
+            if self.model is not None and self._current_model_size != model_size:
+                self.unload_model()
+
+            # MLX keeps GPU stream state thread-local. Load and inference must use
+            # the same dedicated worker thread or generation can fail with
+            # "There is no Stream(gpu, 1) in current thread."
+            await self._run_on_worker(self._load_model_sync, model_size)
 
     # Alias for compatibility
     load_model = load_model_async

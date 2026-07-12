@@ -19,7 +19,7 @@ export function ProfileList() {
   const selectedProfileId = useUIStore((state) => state.selectedProfileId);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  // Scroll to the selected profile after engine/sort changes
+  // Scroll to the selected profile after selection changes.
   useEffect(() => {
     if (!selectedProfileId) return;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -38,7 +38,7 @@ export function ProfileList() {
       cancelAnimationFrame(rafId);
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [selectedProfileId, selectedEngine]);
+  }, [selectedProfileId]);
 
   if (isLoading) {
     return null;

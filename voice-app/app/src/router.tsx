@@ -24,6 +24,7 @@ import { SettingsLayout } from '@/components/ServerTab/ServerTab';
 import { Sidebar } from '@/components/Sidebar';
 import { StoriesTab } from '@/components/StoriesTab/StoriesTab';
 import { Toaster } from '@/components/ui/toaster';
+import { VideoInspiration } from '@/components/VideoInspiration/VideoInspiration';
 import { VoicesTab } from '@/components/VoicesTab/VoicesTab';
 import { useGenerationProgress } from '@/lib/hooks/useGenerationProgress';
 import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
@@ -36,7 +37,9 @@ const isMacOS = () => navigator.platform.toLowerCase().includes('mac');
 // Root layout component
 function RootLayout() {
   const routerState = useRouterState();
-  const isAIVideoRoute = routerState.location.pathname === '/ai-video';
+  const isWideWorkspace =
+    routerState.location.pathname === '/ai-video' ||
+    routerState.location.pathname === '/video-inspiration';
 
   // Monitor active downloads/generations and show toasts for them
   const activeDownloads = useRestoreActiveTasks();
@@ -53,7 +56,7 @@ function RootLayout() {
           <div
             className={cn(
               'h-full overflow-hidden flex flex-col',
-              isAIVideoRoute ? 'w-full px-2 sm:px-3' : 'container mx-auto px-8 max-w-[1800px]',
+              isWideWorkspace ? 'w-full px-2 sm:px-3' : 'container mx-auto px-8 max-w-[1800px]',
             )}
           >
             <Outlet />
@@ -153,6 +156,12 @@ const aiVideoRoute = createRoute({
   component: AIVideoAssistant,
 });
 
+const videoInspirationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/video-inspiration',
+  component: VideoInspiration,
+});
+
 // Models route
 const modelsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -233,6 +242,7 @@ const routeTree = rootRoute.addChildren([
   capturesRoute,
   voicesRoute,
   effectsRoute,
+  videoInspirationRoute,
   aiVideoRoute,
   modelsRoute,
   settingsRoute.addChildren([

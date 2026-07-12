@@ -164,6 +164,8 @@ export function AIVideoVeoChromePanel({ projectId, shots, onNotice }: AIVideoVeo
 
   const session = sessionQuery.data;
   const latestJob = latestJobQuery.data;
+  const latestJobRenderJobId = latestJob?.render_job_id;
+  const latestJobStatus = latestJob?.status;
   const activeJob = !!latestJob && ACTIVE_JOB_STATUSES.has(latestJob.status);
 
   useEffect(() => {
@@ -182,13 +184,13 @@ export function AIVideoVeoChromePanel({ projectId, shots, onNotice }: AIVideoVeo
   };
 
   useEffect(() => {
-    if (!latestJob || !projectId) return;
-    if (latestJob.render_job_id || latestJob.status === 'completed_with_render_blocked') {
+    if (!projectId) return;
+    if (latestJobRenderJobId || latestJobStatus === 'completed_with_render_blocked') {
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'render'] });
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'render-job-latest', projectId] });
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'debug', projectId] });
     }
-  }, [latestJob?.render_job_id, latestJob?.status, projectId, queryClient]);
+  }, [latestJobRenderJobId, latestJobStatus, projectId, queryClient]);
 
   const openLogin = useMutation({
     mutationFn: () => apiClient.openVeoProviderLogin({ provider: 'veo' }),
