@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 import subprocess
+import sys
 import threading
 import time
 import zipfile
@@ -49,6 +50,7 @@ from backend.services import (
     video_projects,
     video_rendering,
     video_storage,
+    story_studio,
     video_subtitles,
     video_voice,
 )
@@ -85,6 +87,23 @@ def _add_phase2_shot(
     db.commit()
     db.refresh(shot)
     return shot
+
+def test_video_render_prompt_sanitizer_blocks_subtitles_and_text_overlays():
+    prompt = (
+        "Create a 3-second 9:16 cinematic video. Lan reaches toward a glowing door, "
+        "with clean lower-frame space for Vietnamese subtitles."
+    )
+
+    safe = video_phase2._render_safe_video_prompt_text(prompt)
+    negative = video_phase2._render_safe_video_negative_prompt_text("No watermark.")
+    lowered = safe.casefold()
+
+    assert "clean lower-frame space for vietnamese subtitles" not in lowered
+    assert "yellow karaoke" not in lowered
+    assert "Do not render subtitles" in safe
+    assert "text overlays" in safe
+    assert "no subtitles" in negative.casefold()
+    assert "no text overlays" in negative.casefold()
 
 def _add_ready_clip(
     db,
@@ -252,7 +271,19 @@ def test_ai_video_tables_are_created(db):
     clip_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_shot_clips")}
     assert {"project_id", "shot_id", "status", "file_path", "duration_seconds", "is_active"}.issubset(clip_columns)
     render_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_render_jobs")}
-    assert {"project_id", "status", "progress", "settings_json", "output_path", "stale"}.issubset(render_columns)
+    assert {
+        "project_id",
+        "status",
+        "progress",
+        "settings_json",
+        "enhanced_plan_path",
+        "review_report_path",
+        "enhanced_artifacts_json",
+        "review_status",
+        "fix_attempt_count",
+        "output_path",
+        "stale",
+    }.issubset(render_columns)
     shot_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_shots")}
     assert {"retention_json", "transition_json", "sound_design_json", "micro_scenes_json", "retainability_quality_check"}.issubset(shot_columns)
     shot_prompt_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_shot_prompts")}
@@ -339,7 +370,15 @@ def test_ai_video_migration_upgrades_legacy_project_table_before_series_index(tm
 def test_ai_planning_settings_default_and_invalid_path_check(db):
     row = settings_service.get_ai_planning_settings(db)
     assert row.provider == "codex-cli"
-    assert row.timeout_seconds == 60
+    assert row.timeout_seconds == 600
+    policy = ai_planning.resolve_codex_model_policy(row)
+    assert policy.requested_model == "gpt-5.6-sol"
+    assert policy.requested_reasoning_effort == "ultra"
+
+    row.timeout_seconds = 60
+    db.commit()
+    row = settings_service.get_ai_planning_settings(db)
+    assert row.timeout_seconds == 600
 
     row = settings_service.update_ai_planning_settings(db, {"codex_path": "/missing/codex"})
     result = ai_planning.check_provider(row)
@@ -347,6 +386,8 @@ def test_ai_planning_settings_default_and_invalid_path_check(db):
     assert result.ready is False
     assert result.error_code == "CODEX_PATH_INVALID"
     assert result.request_id
+    assert result.requested_model == "gpt-5.6-sol"
+    assert result.requested_reasoning_effort == "ultra"
 
 
 def test_ai_planning_settings_repairs_stale_codex_path_when_detected(db, monkeypatch):
@@ -381,6 +422,9 @@ def test_ai_planning_provider_check_success_with_mocked_codex(db, tmp_path, monk
 
     assert result.ready is True
     assert result.version == "codex-cli 0.test"
+    assert result.requested_model == "gpt-5.6-sol"
+    assert result.requested_reasoning_effort == "ultra"
+    assert result.model_verified is False
 
 def test_ai_planning_provider_check_command_error(db, tmp_path, monkeypatch):
     fake_codex = tmp_path / "codex"
@@ -522,6 +566,216 @@ def test_codex_exec_falls_back_when_provider_rejects_output_schema(db, tmp_path,
     assert len(calls) == 2
     assert "--output-schema" in calls[0][0]
     assert "--output-schema" not in calls[1][0]
+    assert "--model" in calls[0][0]
+    assert calls[0][0][calls[0][0].index("--model") + 1] == "gpt-5.6-sol"
+    assert "--config" in calls[0][0]
+    assert 'model_reasoning_effort="ultra"' in calls[0][0]
+
+
+def test_codex_exec_falls_back_when_output_schema_hits_high_demand(db, tmp_path, monkeypatch):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    row = settings_service.update_ai_planning_settings(
+        db,
+        {"codex_path": str(fake_codex), "timeout_seconds": 30},
+    )
+    calls = []
+
+    def fake_run(command, *, timeout_seconds, cwd=None, input_text=None):
+        calls.append((command, input_text))
+        assert command[-1] == "-"
+        if "--output-schema" in command:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="",
+                stderr=(
+                    "ERROR: Reconnecting... 1/5\n"
+                    "ERROR: We're currently experiencing high demand, which may cause temporary errors."
+                ),
+            )
+        output_path = command[command.index("--output-last-message") + 1]
+        assert input_text is not None
+        assert "JSON Schema:" in input_text
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write('{"ok":"yes"}')
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ai_planning, "_run_command", fake_run)
+
+    result = ai_planning.run_codex_exec(
+        row,
+        "Return ok JSON.",
+        output_schema={
+            "type": "object",
+            "properties": {"ok": {"type": "string"}},
+            "required": ["ok"],
+        },
+    )
+
+    assert result == '{"ok":"yes"}'
+    assert len(calls) == 2
+    assert "--output-schema" in calls[0][0]
+    assert "--output-schema" not in calls[1][0]
+
+def test_codex_exec_fallback_uses_user_connected_config_without_forced_model(db, tmp_path, monkeypatch):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    row = settings_service.update_ai_planning_settings(
+        db,
+        {"codex_path": str(fake_codex), "timeout_seconds": 30},
+    )
+    calls = []
+
+    def fake_run(command, *, timeout_seconds, cwd=None, input_text=None):
+        calls.append((command, input_text))
+        assert command[-1] == "-"
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="model does not exist")
+        output_path = command[command.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("fallback ok")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ai_planning, "_run_command", fake_run)
+
+    result = ai_planning.run_codex_exec(row, "Return ok.", return_metadata=True)
+
+    assert isinstance(result, ai_planning.CodexExecResult)
+    assert result.output == "fallback ok"
+    assert len(calls) == 2
+    primary_command = calls[0][0]
+    fallback_command = calls[1][0]
+    assert "--model" in primary_command
+    assert primary_command[primary_command.index("--model") + 1] == "gpt-5.6-sol"
+    assert "--config" in primary_command
+    assert 'model_reasoning_effort="ultra"' in primary_command
+    assert "--model" not in fallback_command
+    assert "--config" not in fallback_command
+    assert result.metadata["requested_model"] == "gpt-5.6-sol"
+    assert result.metadata["requested_reasoning_effort"] == "ultra"
+    assert result.metadata["effective_model"] == ai_planning.USER_CONNECTED_CODEX_CONFIG_LABEL
+    assert result.metadata["effective_reasoning_effort"] is None
+    assert result.metadata["model_source"] == ai_planning.MODEL_SOURCE_USER_CONNECTED
+    assert result.metadata["model_verified"] is True
+    assert result.metadata["fallback_used"] is True
+    assert result.metadata["fallback_error_code"] == "CODEX_EXEC_NONZERO"
+    assert "model does not exist" in result.metadata["fallback_reason"]
+    assert result.metadata["request_id"]
+
+def test_codex_exec_schema_fallback_still_runs_inside_user_config_fallback(db, tmp_path, monkeypatch):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    row = settings_service.update_ai_planning_settings(
+        db,
+        {"codex_path": str(fake_codex), "timeout_seconds": 30},
+    )
+    calls = []
+
+    def fake_run(command, *, timeout_seconds, cwd=None, input_text=None):
+        calls.append((command, input_text))
+        assert command[-1] == "-"
+        if len(calls) == 1:
+            assert "--model" in command
+            assert "--output-schema" in command
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="model does not exist")
+        if len(calls) == 2:
+            assert "--model" not in command
+            assert "--config" not in command
+            assert "--output-schema" in command
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="",
+                stderr="ERROR: unexpected status 400 Bad Request: response_format unsupported",
+            )
+        assert "--model" not in command
+        assert "--config" not in command
+        assert "--output-schema" not in command
+        assert input_text is not None
+        assert "JSON Schema:" in input_text
+        output_path = command[command.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write('{"ok":"fallback"}')
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ai_planning, "_run_command", fake_run)
+
+    result = ai_planning.run_codex_exec(
+        row,
+        "Return ok JSON.",
+        output_schema={
+            "type": "object",
+            "properties": {"ok": {"type": "string"}},
+            "required": ["ok"],
+        },
+        return_metadata=True,
+    )
+
+    assert isinstance(result, ai_planning.CodexExecResult)
+    assert result.output == '{"ok":"fallback"}'
+    assert len(calls) == 3
+    assert "--model" in calls[0][0]
+    assert "--output-schema" in calls[0][0]
+    assert "--model" not in calls[1][0]
+    assert "--output-schema" in calls[1][0]
+    assert "--model" not in calls[2][0]
+    assert "--output-schema" not in calls[2][0]
+    assert result.metadata["fallback_used"] is True
+    assert result.metadata["effective_model"] == ai_planning.USER_CONNECTED_CODEX_CONFIG_LABEL
+
+def test_ai_planning_provider_check_exec_reports_fallback_metadata(db, tmp_path, monkeypatch):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    row = settings_service.update_ai_planning_settings(db, {"codex_path": str(fake_codex)})
+
+    def fake_run(command, *, timeout_seconds, cwd=None, input_text=None):
+        if command[-1] == "--version":
+            return subprocess.CompletedProcess(command, 0, stdout="codex-cli 0.test\n", stderr="")
+        if command[:3] == [str(fake_codex), "login", "status"]:
+            return subprocess.CompletedProcess(command, 0, stdout="Logged in\n", stderr="")
+        if "--model" in command:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="",
+                stderr='unsupported config model_reasoning_effort="ultra"',
+            )
+        output_path = command[command.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("OK")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ai_planning, "_run_command", fake_run)
+
+    result = ai_planning.check_provider(row, check_exec=True)
+
+    assert result.ready is True
+    assert result.version == "codex-cli 0.test"
+    assert result.request_id
+    assert result.requested_model == "gpt-5.6-sol"
+    assert result.requested_reasoning_effort == "ultra"
+    assert result.effective_model == ai_planning.USER_CONNECTED_CODEX_CONFIG_LABEL
+    assert result.effective_reasoning_effort is None
+    assert result.model_source == ai_planning.MODEL_SOURCE_USER_CONNECTED
+    assert result.model_verified is True
+    assert result.fallback_used is True
+    assert result.fallback_error_code == "CODEX_EXEC_NONZERO"
+    assert "model_reasoning_effort" in result.fallback_reason
+
+def test_provider_detail_preserves_error_tail():
+    long_text = "provider header\n" + ("x" * 4000) + "\nERROR: We're currently experiencing high demand"
+
+    detail = ai_planning._redact_provider_text(long_text)
+
+    assert detail is not None
+    assert len(detail) <= ai_planning._MAX_PROVIDER_DETAIL_CHARS
+    assert "provider header" in detail
+    assert "high demand" in detail
 
 
 def test_codex_exec_sends_long_prompt_via_stdin(db, tmp_path, monkeypatch):
@@ -550,25 +804,16 @@ def test_codex_exec_sends_long_prompt_via_stdin(db, tmp_path, monkeypatch):
     assert result == "done"
 
 
-def test_codex_run_command_uses_utf8_for_stdin(monkeypatch):
-    captured = {}
-
-    def fake_subprocess_run(command, **kwargs):
-        captured.update(kwargs)
-        return subprocess.CompletedProcess(command, 0, stdout="OK", stderr="")
-
-    monkeypatch.setattr(ai_planning.subprocess, "run", fake_subprocess_run)
-
+def test_codex_run_command_uses_utf8_for_stdin():
+    input_text = "Tạo prompt tiếng Việt có dấu."
     result = ai_planning._run_command(
-        ["codex", "exec", "-"],
+        [sys.executable, "-c", "import sys; print(sys.stdin.read())"],
         timeout_seconds=5,
-        input_text="Tạo prompt tiếng Việt có dấu.",
+        input_text=input_text,
     )
 
     assert result.returncode == 0
-    assert captured["input"] == "Tạo prompt tiếng Việt có dấu."
-    assert captured["encoding"] == "utf-8"
-    assert captured["errors"] == "replace"
+    assert result.stdout.strip() == input_text
 
 
 def test_video_project_crud_and_scene_status(db):
@@ -634,6 +879,45 @@ def test_video_project_crud_and_scene_status(db):
     assert video_projects.delete_project(created.id, db) is True
     assert video_projects.get_project(created.id, db) is None
     assert not (config.get_data_dir() / "video_projects" / created.id).exists()
+
+def test_create_project_accepts_overlong_visual_style_from_inspiration_draft(db):
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    long_visual_style = "Use minimalist stick figures.\n" + ("Frame note. " * 260)
+    long_style_notes = "Full frame analysis should stay in source blocks.\n" + ("Detailed frame note. " * 1200)
+
+    response = client.post(
+        "/ai-video/projects",
+        json={
+            "topic": "Video inspiration handoff",
+            "title": "Inspired stick figure video",
+            "language": "vi",
+            "target_language": "en",
+            "phase": "phase2",
+            "visual_style": long_visual_style,
+            "source_blocks": [
+                {"block_type": "idea", "content": "A short idea"},
+                {"block_type": "style_notes", "content": long_style_notes},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    project_id = response.json()["id"]
+    project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).one()
+    assert project.visual_style is not None
+    assert len(project.visual_style) <= 2000
+    assert project.visual_style.startswith("Use minimalist stick figures.")
+    style_block = (
+        db.query(DBVideoSourceBlock)
+        .filter(DBVideoSourceBlock.project_id == project_id, DBVideoSourceBlock.block_type == "style_notes")
+        .one()
+    )
+    assert style_block.content == long_style_notes
 
 def test_video_project_response_marks_latest_failed_auto_run(db):
     project = video_projects.create_project(models.VideoProjectCreate(topic="Failed project", phase="phase2"), db)
@@ -1181,6 +1465,272 @@ def test_series_context_reaches_story_shots_and_prompt_pack(db, monkeypatch):
         assert "Same quiet city" in prompts[1]
         assert "Minimal cinematic" in prompts[1]
 
+def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, monkeypatch):
+    captured_prompts = {"story": "", "shots": "", "prompts": ""}
+
+    def fake_run(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
+        if output_schema == video_phase2.STORY_DEVELOPMENT_SCHEMA:
+            captured_prompts["story"] = prompt
+            return json.dumps(
+                {
+                    "input_synthesis": "Lan follows the approved Story Studio master episode.",
+                    "story_strategy": "Turn the approved door mystery into a short Vietnamese video episode.",
+                    "continuity_bible": "Keep Lan's blue jacket, the silver door clue, and the same cinematic webtoon style.",
+                    "detailed_script": "Lan opens the silver door, finds the warning note, and chooses to chase the final train.",
+                    **_creative_direction_fields(),
+                    "scenes": [
+                        {
+                            "title": "Cánh cửa bạc",
+                            "vietnamese_description": "Lan mở cánh cửa bạc và nhìn thấy lời nhắn cảnh báo.",
+                            "english_narration": (
+                                "Lan giữ chặt áo khoác xanh khi cánh cửa bạc mở ra. "
+                                "Trên chiếc bàn nhỏ, một lời nhắn cảnh báo cô phải bắt chuyến tàu cuối cùng."
+                            ),
+                            **_scene_detail_fields(
+                                character_appearance="Lan có mặt trái xoan, tóc đen ngang vai và ánh mắt cảnh giác.",
+                                wardrobe_and_sandals="Áo khoác xanh là điểm nhận diện cố định; giày tối giản phù hợp bối cảnh.",
+                            ),
+                            "target_duration_seconds": 6,
+                        }
+                    ],
+                }
+            )
+        if output_schema == video_phase2.SHOT_BREAKDOWN_SCHEMA:
+            captured_prompts["shots"] = prompt
+            return json.dumps(
+                {
+                    "shots": [
+                        {
+                            "scene_order": 1,
+                            "shot_order": 1,
+                            "duration_seconds": 3,
+                            "vietnamese_description": "Cận cảnh Lan đứng trước cánh cửa bạc đang phát sáng.",
+                            "english_narration": "Lan giữ chặt áo khoác xanh khi cánh cửa bạc mở ra.",
+                            "primary_action": "Lan reaches toward the glowing silver door.",
+                            "purpose": "Mở hook và xác nhận manh mối.",
+                            "shot_type": "medium close-up",
+                            "camera_angle": "eye level",
+                            "framing": "Lan and the glowing door fill the vertical frame",
+                            "composition": "Lan on the left third, silver light on the right",
+                            "camera_motion": "slow push-in",
+                            "subject_motion": "Lan raises one hand toward the door",
+                            "environment_motion": "silver light pulses from the door edge",
+                            "transition_to_next": "match cut from silver light to the warning note",
+                            **_shot_creative_fields(role="hook"),
+                        },
+                        {
+                            "scene_order": 1,
+                            "shot_order": 2,
+                            "duration_seconds": 3,
+                            "vietnamese_description": "Lan đọc lời nhắn về chuyến tàu cuối cùng.",
+                            "english_narration": "Trên chiếc bàn nhỏ, một lời nhắn cảnh báo cô phải bắt chuyến tàu cuối cùng.",
+                            "primary_action": "Lan picks up the warning note and turns toward the exit.",
+                            "purpose": "Payoff cho tập và mở nhiệm vụ tiếp theo.",
+                            "shot_type": "insert to over-shoulder",
+                            "camera_angle": "slightly high angle",
+                            "framing": "warning note foreground with Lan's shoulder in frame",
+                            "composition": "note centered, Lan's blue jacket visible as continuity anchor",
+                            "camera_motion": "small tilt from note to Lan's face",
+                            "subject_motion": "Lan grabs the note and pivots",
+                            "environment_motion": "dust motes drift in the silver light",
+                            "transition_to_next": "final hold on Lan's determined face",
+                            **_shot_creative_fields(final=True, role="payoff"),
+                        },
+                    ]
+                }
+            )
+        if output_schema == video_phase2.VIDEO_PROMPT_PACK_SCHEMA:
+            captured_prompts["prompts"] = prompt
+            return json.dumps(
+                {
+                    "global_continuity": "Lan keeps the same face, black shoulder-length hair, blue jacket, and silver door continuity.",
+                    "negative_prompt_global": "No watermark, no random text, no changed outfit, no extra main character.",
+                    "prompts": [
+                        {
+                            "shot_order": 1,
+                            "prompt": (
+                                "Create a 3-second 9:16 cinematic video. Lan, a Vietnamese heroine with a blue jacket "
+                                "and black shoulder-length hair, reaches toward a glowing silver door. Slow push-in, "
+                                "silver light pulses, leave clean space at the lower frame for Vietnamese subtitles."
+                            ),
+                            "prompt_explanation_vi": "Prompt mở hook bằng cánh cửa bạc, giữ áo khoác xanh và chừa vùng phụ đề.",
+                            "negative_prompt": "No watermark, no random text, no changed blue jacket.",
+                            "duration_seconds": 3,
+                            "aspect_ratio": "9:16",
+                            "shot_type": "medium close-up",
+                            "camera_angle": "eye level",
+                            "framing": "Lan and the glowing door fill the vertical frame",
+                            "composition": "Lan on the left third, silver light on the right",
+                            "camera_motion": "slow push-in",
+                            "subject_motion": "Lan raises one hand toward the door",
+                            "environment_motion": "silver light pulses from the door edge",
+                            "start_frame": "Lan faces the closed silver door",
+                            "end_frame": "Lan touches the glowing door seam",
+                            "lighting": "silver rim light with soft cinematic contrast",
+                            "mood": "mysterious and tense",
+                            "continuity_notes": "Keep Lan's face, hair and blue jacket unchanged.",
+                            **_prompt_creative_fields(),
+                        },
+                        {
+                            "shot_order": 2,
+                            "prompt": (
+                                "Create a 3-second 9:16 cinematic video. A warning note sits on a small table while "
+                                "Lan's blue jacket remains visible over her shoulder. The camera tilts from the note "
+                                "to Lan's determined face, with clean lower-frame space for Vietnamese subtitles."
+                            ),
+                            "prompt_explanation_vi": "Prompt payoff bằng lời nhắn chuyến tàu cuối, tiếp tục giữ continuity của Lan.",
+                            "negative_prompt": "No watermark, no unreadable random text, no extra main character.",
+                            "duration_seconds": 3,
+                            "aspect_ratio": "9:16",
+                            "shot_type": "insert to over-shoulder",
+                            "camera_angle": "slightly high angle",
+                            "framing": "warning note foreground with Lan's shoulder in frame",
+                            "composition": "note centered, Lan's blue jacket visible as continuity anchor",
+                            "camera_motion": "small tilt from note to Lan's face",
+                            "subject_motion": "Lan grabs the note and pivots",
+                            "environment_motion": "dust motes drift in the silver light",
+                            "start_frame": "warning note on the table",
+                            "end_frame": "Lan turns with a determined expression",
+                            "lighting": "soft silver light, readable note surface, cinematic shadows",
+                            "mood": "urgent and resolved",
+                            "continuity_notes": "Keep the same silver door clue and Lan's blue jacket.",
+                            **_prompt_creative_fields(),
+                        },
+                    ],
+                }
+            )
+        raise AssertionError(f"unexpected schema: {output_schema}")
+
+    enqueued_voice_generations: list[str] = []
+
+    def fake_enqueue(generation_id, coro):
+        enqueued_voice_generations.append(generation_id)
+        close = getattr(coro, "close", None)
+        if close:
+            close()
+
+    monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
+    monkeypatch.setattr(video_voice, "enqueue_generation", fake_enqueue)
+
+    profile = DBVoiceProfile(
+        id="story-cycle-vi-profile",
+        name="Story cycle Vietnamese profile",
+        language="vi",
+        voice_type="cloned",
+        default_engine="qwen",
+    )
+    db.add(profile)
+    series = video_projects.create_series(
+        models.VideoSeriesCreate(
+            title="Story cycle",
+            series_mode="hybrid",
+            character_bible="Lan là nhân vật chính.",
+            world_bible="Cánh cửa bạc là manh mối xuyên suốt.",
+            style_bible="Cinematic webtoon dọc 9:16.",
+        ),
+        db,
+    )
+    video_projects.create_character_profile(
+        series.id,
+        models.SeriesCharacterProfileCreate(
+            name="Lan",
+            role="Nhân vật chính",
+            face_description="Mặt trái xoan",
+            hair_description="Tóc đen ngang vai",
+            signature_outfit="Áo khoác xanh",
+            personality="Tò mò nhưng quyết đoán",
+            speech_style="Nói tiếng Việt ngắn, rõ",
+            fixed_traits="Không đổi áo khoác xanh và tóc đen ngang vai",
+        ),
+        db,
+    )
+    episode = story_studio.create_episode(
+        series.id,
+        models.StoryEpisodeCreate(
+            title="Cánh cửa bạc",
+            output_intent="ca_hai",
+            language_profile="vi",
+            market_profile="viet_nam",
+            source_input="Lan mở cánh cửa bạc và thấy lời nhắn về chuyến tàu cuối.",
+        ),
+        db,
+    )
+
+    episode = story_studio.generate_candidates(episode.id, db)
+    assert len(episode.candidates) == 3
+    episode = story_studio.select_master_story(
+        episode.id,
+        models.StoryCandidateSelectionRequest(candidate_id=episode.candidates[0].id),
+        db,
+    )
+    episode = story_studio.approve_master_story(episode.id, models.StoryApprovalRequest(approved=True), db)
+    image_adaptation = story_studio.create_image_adaptation(episode.id, db)
+    assert image_adaptation.payload_json["panels"]
+    assert "Áo khoác xanh" in image_adaptation.payload_json["panels"][0]["prompt"]
+    assert "Prompt:" in story_studio.export_image_prompts(episode.id, db)
+
+    video_adaptation = story_studio.create_video_adaptation(
+        episode.id,
+        models.StoryVideoHandoffRequest(open_existing=True),
+        db,
+    )
+    project_id = video_adaptation.linked_video_project_id
+    project = db.get(DBVideoProject, project_id)
+    project.voice_profile_id = profile.id
+    db.commit()
+
+    detail = video_phase2.develop_story(project_id, db, force=True)
+    assert detail is not None
+    assert "Series context:" in captured_prompts["story"]
+    assert "Lan" in captured_prompts["story"]
+    assert "Cánh cửa bạc" in captured_prompts["story"]
+    assert video_phase2.approve_story(project_id, True, db) is not None
+    shots = video_phase2.generate_shots(project_id, db)
+    assert shots is not None and len(shots) == 2
+    prompt_pack = video_phase2.generate_video_prompt_pack(project_id, db)
+    assert prompt_pack is not None
+    assert db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project_id).count() == 2
+    assert "Mỗi prompt/shot chỉ có một hành động chính" in captured_prompts["prompts"]
+    stored_prompts = (
+        db.query(DBVideoShotPrompt)
+        .filter(DBVideoShotPrompt.project_id == project_id)
+        .order_by(DBVideoShotPrompt.created_at.asc())
+        .all()
+    )
+    assert all("clean lower-frame space for Vietnamese subtitles" not in row.prompt for row in stored_prompts)
+    assert all("Do not render subtitles" in row.prompt for row in stored_prompts)
+    assert all("no subtitles" in (row.negative_prompt or "").casefold() for row in stored_prompts)
+    assert "không nhắc tên provider" in captured_prompts["prompts"]
+
+    for shot in db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id).order_by(DBVideoShot.shot_order).all():
+        voice_status = asyncio.run(
+            video_voice.create_shot_narration(
+                project_id,
+                shot.id,
+                models.VideoSceneNarrationRequest(profile_id=profile.id, engine="qwen", model_size="1.7B"),
+                db,
+            )
+        )
+        assert voice_status.voice_status == "queued"
+        audio_file = config.get_generations_dir() / f"story-cycle-shot-{shot.shot_order}.wav"
+        audio_file.write_bytes(b"fake wav data")
+        generation = db.get(DBGeneration, voice_status.generation_id)
+        generation.status = "completed"
+        generation.audio_path = config.to_storage_path(audio_file)
+        generation.duration = float(shot.duration_seconds or 3.0)
+        db.commit()
+        synced = video_voice.sync_shot_voice_status(project_id, shot.id, db)
+        assert synced.voice_status == "completed"
+        assert synced.audio_path == config.to_storage_path(audio_file)
+
+    subtitle = video_subtitles.generate_subtitle(project_id, db)
+    assert subtitle.status == "completed"
+    assert len(subtitle.cues) >= 2
+    assert all(cue.shot_id for cue in subtitle.cues)
+    assert db.query(DBVideoShotClip).filter(DBVideoShotClip.project_id == project_id).count() == 0
+    assert db.query(DBVideoRenderJob).filter(DBVideoRenderJob.project_id == project_id).count() == 0
+    assert enqueued_voice_generations and len(enqueued_voice_generations) == 2
+
 def test_delete_source_block_reorders_marks_stale_and_requires_last_confirm(db):
     project = video_projects.create_project(
         models.VideoProjectCreate(
@@ -1440,6 +1990,79 @@ def test_vietnamese_download_filenames_are_sanitized():
     assert video_storage.shot_clip_filename(2, 3) == "Video clip - Cảnh 02 - Shot 03.mp4"
     assert video_storage.render_output_filename("Dự án: test / nhanh") == "Video hoàn chỉnh - Dự án test nhanh.mp4"
 
+def test_enhanced_render_artifact_filenames_keep_numbered_vietnamese_titles():
+    first = video_storage.enhanced_render_artifact_filename(1, "Kịch bản và nhịp giữ chân", ".md")
+    fourth = video_storage.enhanced_render_artifact_filename(4, "Âm thanh SFX và mixing notes", ".md")
+
+    assert first.startswith("1. ")
+    assert fourth.startswith("4. ")
+    assert "Kịch bản" in first
+    assert "Âm thanh" in fourth
+
+def test_enhanced_render_plan_maps_glass_break_asset_and_missing_fallback(db):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Glass break render", phase="phase2"), db)
+    shot1 = _add_phase2_shot(db, project.id, order=1, narration="The glass cracks.", voice_completed=True, audio_duration=2.0)
+    shot2 = _add_phase2_shot(db, project.id, order=2, narration="", duration_seconds=1.0)
+    shot1.retention_json = {"retention_role": "cold open", "hook_0_2s": "A glass is about to break"}
+    shot1.transition_json = {"transition_type": "glitch whip", "transition_sfx": "glass shatter"}
+    shot1.sound_design_json = {"sound_cues": [{"cue_type": "tiếng kính vỡ", "timing": "on reveal"}]}
+    shot2.sound_design_json = {"sound_cues": [{"cue_type": "whoosh", "timing": "on transition"}]}
+    db.commit()
+
+    timeline = video_rendering.build_timeline_manifest(project.id, db)
+    glass_asset = models.VideoRenderSfxAssetResponse(
+        asset_id="asset-glass",
+        filename="kinh-vo.wav",
+        file_path=str(config.get_data_dir() / "glass.wav"),
+        duration_seconds=0.8,
+        cue_aliases=["glass_break"],
+        status="ready",
+    )
+    plan = video_rendering.build_enhanced_render_plan(
+        db.get(DBVideoProject, project.id),
+        timeline,
+        {shot1.id: shot1, shot2.id: shot2},
+        [glass_asset],
+        models.VideoRenderSettings(enhanced_render=True, enhanced_audio=True),
+    )
+
+    glass_actions = [action for action in plan["sfx_actions"] if action["cue_alias"] == "glass_break"]
+    assert glass_actions
+    assert all(action["rendered"] is True for action in glass_actions)
+    assert {action["asset_id"] for action in glass_actions} == {"asset-glass"}
+    missing = [fallback for fallback in plan["fallbacks"] if fallback.get("cue_alias") == "whoosh"]
+    assert missing
+    assert "Thiếu asset" in missing[0]["message_vi"]
+    assert any(action["transition_alias"] in {"glitch", "whip_pan"} and action["rendered"] is False for action in plan["transition_actions"])
+
+def test_enhanced_audio_mix_command_uses_delay_volume_and_amix(tmp_path):
+    base = tmp_path / "voice.wav"
+    sfx = tmp_path / "glass.wav"
+    base.write_bytes(b"voice")
+    sfx.write_bytes(b"sfx")
+    command = video_rendering.build_enhanced_audio_mix_command(
+        ffmpeg="ffmpeg",
+        base_audio_path=base,
+        sfx_actions=[
+            {
+                "asset_path": str(sfx),
+                "cue_alias": "glass_break",
+                "start_seconds": 1.25,
+                "duration_seconds": 0.8,
+                "volume": 0.36,
+                "fade_in_seconds": 0.02,
+                "fade_out_seconds": 0.08,
+            }
+        ],
+        output_path=tmp_path / "mixed.wav",
+        total_duration_seconds=3.0,
+    )
+    graph = command[command.index("-filter_complex") + 1]
+    assert "adelay=1250|1250" in graph
+    assert "volume=0.360" in graph
+    assert "afade=t=in" in graph
+    assert "amix=inputs=2:duration=first" in graph
+
 def test_render_ffprobe_parser_and_missing_tools(tmp_path, monkeypatch):
     clip_path = tmp_path / "clip.mp4"
     clip_path.write_bytes(b"fake video")
@@ -1490,6 +2113,55 @@ def test_render_ffprobe_parser_and_missing_tools(tmp_path, monkeypatch):
         video_rendering.probe_clip(clip_path)
     assert exc_info.value.error_code == "VIDEO_RENDER_FFPROBE_MISSING"
     assert "FFprobe" in str(exc_info.value)
+
+def test_render_detects_ffprobe_exe_sibling_for_configured_ffmpeg(tmp_path, monkeypatch):
+    ffmpeg_bin = tmp_path / "ffmpeg.exe"
+    ffprobe_bin = tmp_path / "ffprobe.exe"
+    ffmpeg_bin.write_text("", encoding="utf-8")
+    ffprobe_bin.write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("VOICEBOX_FFMPEG_PATH", str(ffmpeg_bin))
+    monkeypatch.delenv("VOICEBOX_FFPROBE_PATH", raising=False)
+    monkeypatch.setattr(video_rendering.shutil, "which", lambda binary: None)
+
+    tools = video_rendering.detect_tools()
+
+    assert tools.ffmpeg == str(ffmpeg_bin)
+    assert tools.ffprobe == str(ffprobe_bin)
+
+def test_render_probe_clip_falls_back_to_ffmpeg_when_ffprobe_missing(tmp_path, monkeypatch):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"fake video")
+    monkeypatch.setattr(
+        video_rendering,
+        "detect_tools",
+        lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg-bin", ffprobe=None),
+    )
+
+    def fake_run(args, *, capture_output, text, timeout, check):
+        assert args == ["ffmpeg-bin", "-hide_banner", "-i", str(clip_path)]
+        return subprocess.CompletedProcess(
+            args,
+            1,
+            stdout="",
+            stderr=(
+                "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'clip.mp4':\n"
+                "  Duration: 00:00:05.50, start: 0.000000, bitrate: 2000 kb/s\n"
+                "  Stream #0:0: Video: h264 (High), yuv420p(progressive), 720x1280, 24 fps\n"
+                "  Stream #0:1: Audio: aac, 44100 Hz, stereo\n"
+            ),
+        )
+
+    monkeypatch.setattr(video_rendering.subprocess, "run", fake_run)
+
+    metadata = video_rendering.probe_clip(clip_path)
+
+    assert metadata.duration_seconds == pytest.approx(5.5)
+    assert metadata.width == 720
+    assert metadata.height == 1280
+    assert metadata.fps == pytest.approx(24)
+    assert metadata.codec == "h264"
+    assert metadata.has_audio is True
 
 def test_render_prefers_subtitle_capable_ffmpeg(tmp_path, monkeypatch):
     plain_ffmpeg = tmp_path / "ffmpeg"
@@ -1566,6 +2238,65 @@ def test_render_clip_upload_replace_delete_and_serialization(db, monkeypatch):
     deleted_path = video_storage.resolve_artifact_storage_path(second.file_path)
     assert deleted_path is None or not deleted_path.exists()
 
+
+def test_shot_clip_download_api_returns_active_clip_file(db):
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip download", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1)
+    _add_ready_clip(db, project.id, shot.id)
+
+    response = client.get(f"/ai-video/projects/{project.id}/shots/{shot.id}/clip/download")
+
+    assert response.status_code == 200
+    assert response.content == b"fake mp4 data"
+    assert response.headers["content-type"].startswith("video/mp4")
+    assert "inline" in response.headers["content-disposition"]
+    assert "clip.mp4" in response.headers["content-disposition"]
+
+
+def test_render_sfx_asset_api_upload_list_delete(db, monkeypatch):
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    project = video_projects.create_project(models.VideoProjectCreate(topic="SFX assets", phase="phase2"), db)
+    render_job = DBVideoRenderJob(project_id=project.id, status="completed", progress=1.0, stale=False)
+    db.add(render_job)
+    db.commit()
+
+    monkeypatch.setattr(
+        video_rendering,
+        "probe_audio_asset",
+        lambda path: video_rendering.AudioMetadata(duration_seconds=0.72, codec="pcm_s16le"),
+    )
+
+    uploaded = client.post(
+        f"/ai-video/projects/{project.id}/render/sfx-assets",
+        files={"file": ("kinh-vo.wav", b"fake wav", "audio/wav")},
+    )
+
+    assert uploaded.status_code == 200
+    payload = uploaded.json()
+    assert payload["duration_seconds"] == pytest.approx(0.72)
+    assert "glass_break" in payload["cue_aliases"]
+    assert db.get(DBVideoRenderJob, render_job.id).stale is True
+
+    listed = client.get(f"/ai-video/projects/{project.id}/render/sfx-assets")
+    assert listed.status_code == 200
+    assert listed.json()[0]["asset_id"] == payload["asset_id"]
+
+    deleted = client.delete(f"/ai-video/projects/{project.id}/render/sfx-assets/{payload['asset_id']}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    assert client.get(f"/ai-video/projects/{project.id}/render/sfx-assets").json() == []
+
 def test_render_empty_state_endpoints_return_null_without_404(db):
     app = FastAPI()
     app.include_router(ai_video_router)
@@ -1589,7 +2320,7 @@ def test_render_empty_state_endpoints_return_null_without_404(db):
     assert missing_shot.json()["detail"]["error_code"] == "VIDEO_SHOT_NOT_FOUND"
 
 def test_render_readiness_duration_resolver_and_timeline_manifest(db, monkeypatch):
-    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe=None))
     monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda ffmpeg: "subtitles")
 
     incomplete = video_projects.create_project(models.VideoProjectCreate(topic="Render missing", phase="phase2"), db)
@@ -1639,6 +2370,8 @@ def test_render_readiness_duration_resolver_and_timeline_manifest(db, monkeypatc
 
     assert ready is not None
     assert ready.ready is True
+    assert ready.ffmpeg_ready is True
+    assert ready.ffprobe_ready is False
     assert ready.missing_reasons == []
     assert any(warning.code == "VIDEO_RENDER_SOUND_DESIGN_METADATA_ONLY" for warning in ready.warnings)
     assert any(warning.shot_id == narrated.id for warning in ready.warnings)
@@ -1734,6 +2467,19 @@ def test_render_ffmpeg_command_builders_include_expected_filters(tmp_path):
     assert "libx264" in burn_cmd
     assert sidecar_cmd[sidecar_cmd.index("-c:v") + 1] == "copy"
 
+    transition_cmd = video_rendering.build_transition_edge_effect_command(
+        ffmpeg="ffmpeg",
+        input_path=tmp_path / "clip.mp4",
+        output_path=tmp_path / "clip-effect.mp4",
+        duration_seconds=2.0,
+        fade_in_seconds=0.25,
+        fade_out_seconds=0.35,
+        color="white",
+    )
+    transition_filter = transition_cmd[transition_cmd.index("-vf") + 1]
+    assert "fade=t=in:st=0:d=0.250:color=white" in transition_filter
+    assert "fade=t=out:st=1.650:d=0.350:color=white" in transition_filter
+
 def test_render_ass_subtitle_uses_social_caption_style(db, tmp_path):
     project = video_projects.create_project(models.VideoProjectCreate(topic="Styled subtitle", phase="phase2"), db)
     db.add(
@@ -1766,6 +2512,50 @@ def test_render_ass_subtitle_uses_social_caption_style(db, tmp_path):
     assert "{\\fad(110,110)\\blur0.35}{\\k" in content
     assert r"}Dòng\h{\k" in content
     assert r"\N{\k" in content
+
+def test_enhanced_render_artifacts_include_numbered_review_when_review_disabled(db):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Artifact render", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    shot.retention_json = {"retention_role": "hook", "hook_0_2s": "Start fast"}
+    db.commit()
+    timeline = video_rendering.build_timeline_manifest(project.id, db)
+    settings = models.VideoRenderSettings(enhanced_render=True, ai_review=False)
+    plan = video_rendering.build_enhanced_render_plan(
+        db.get(DBVideoProject, project.id),
+        timeline,
+        {shot.id: shot},
+        [],
+        settings,
+    )
+    review = video_rendering._build_render_review(plan, settings, {"available": False, "reason": "test"})
+    job = DBVideoRenderJob(project_id=project.id, status="completed", progress=1.0)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    artifacts = video_rendering._write_enhanced_render_artifacts(
+        project=db.get(DBVideoProject, project.id),
+        job=job,
+        timeline=timeline,
+        plan=plan,
+        manifest_payload={"timeline": [item.model_dump() for item in timeline]},
+        review=review,
+        db=db,
+    )
+    job.enhanced_artifacts_json = artifacts
+    db.commit()
+
+    filenames = [item["filename"] for item in artifacts["items"]]
+    assert [filename.split(".", 1)[0] for filename in filenames] == ["1", "2", "3", "4", "5", "6"]
+    review_item = next(item for item in artifacts["items"] if item["kind"] == "ai_review_report")
+    review_path = video_storage.resolve_artifact_storage_path(review_item["path"])
+    assert review_path is not None
+    assert "Chưa chạy AI review" in review_path.read_text(encoding="utf-8")
+
+    download = video_rendering.get_enhanced_render_artifact_download(project.id, job.id, "ai_review_report", db)
+    assert download is not None
+    assert download[0].startswith("5. ")
+    assert download[1] == review_path
 
 def test_render_job_api_lifecycle_and_download_missing_output(db, monkeypatch):
     app = FastAPI()
@@ -1847,7 +2637,9 @@ def test_ai_video_error_response_has_code_and_request_id(db):
         "request_id": "test-request-1",
     }
 
-def test_ai_video_timeout_error_uses_friendly_message(db, monkeypatch):
+def test_phase2_timeout_error_uses_internal_fallback_for_story_shots_and_prompts(db, monkeypatch):
+    monkeypatch.setenv("VOICEBOX_PHASE2_CODEX_TIMEOUT", "20")
+    settings_service.update_ai_planning_settings(db, {"timeout_seconds": 20})
     project = video_projects.create_project(
         models.VideoProjectCreate(
             topic="Video timeout",
@@ -1869,7 +2661,7 @@ def test_ai_video_timeout_error_uses_friendly_message(db, monkeypatch):
         calls["count"] += 1
         calls["timeout_seconds"] = timeout_seconds
         raise ai_planning.AIPlanningError(
-            "Codex CLI bị timeout khi tạo nội dung.",
+            "AI planning took too long while creating content.",
             error_code="CODEX_EXEC_TIMEOUT",
         )
 
@@ -1882,21 +2674,39 @@ def test_ai_video_timeout_error_uses_friendly_message(db, monkeypatch):
         headers={"X-Request-ID": "timeout-request-1"},
     )
 
-    assert response.status_code == 502
-    detail = response.json()["detail"]
-    assert detail["error_code"] == "CODEX_EXEC_TIMEOUT"
-    assert detail["request_id"] == "timeout-request-1"
-    assert "AI xử lý quá lâu" in detail["message"]
-    assert "Codex CLI" not in detail["message"]
-    assert calls == {"count": 1, "timeout_seconds": video_phase2.PHASE2_DEFAULT_CODEX_TIMEOUT_SECONDS}
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["status"] == "story_ready"
+    assert detail["planning_status"] == "story_ready"
+    assert detail["retention_plan_json"]["quality_check"]["fallback_used"] is True
+    assert len(detail["scenes"]) >= 1
 
-    events = video_observability.latest_events(project.id, db, limit=10)
+    approval_response = client.post(f"/ai-video/projects/{project.id}/story/approval", json={"approved": True})
+    assert approval_response.status_code == 200
+
+    shots_response = client.post(f"/ai-video/projects/{project.id}/shots")
+    assert shots_response.status_code == 200
+    shots = shots_response.json()
+    assert len(shots) >= 1
+    assert shots[0]["vietnamese_description"]
+
+    prompts_response = client.post(f"/ai-video/projects/{project.id}/prompts")
+    assert prompts_response.status_code == 200
+    prompts = prompts_response.json()["prompts"]
+    assert len(prompts) == len(shots)
+    assert prompts[0]["prompt"]
+    assert prompts[0]["prompt_explanation_vi"]
+    assert calls == {"count": 3, "timeout_seconds": video_phase2.PHASE2_DEFAULT_CODEX_TIMEOUT_SECONDS}
+
+    events = video_observability.latest_events(project.id, db, limit=50)
     failure = next(event for event in events if event.step_name == "story_development" and event.status == "failure")
+    fallback = next(event for event in events if event.step_name == "story_development_fallback")
     details = json.loads(failure.technical_details or "{}")
     assert details["timeout_seconds"] == video_phase2.PHASE2_DEFAULT_CODEX_TIMEOUT_SECONDS
     assert details["prompt_chars"] > 0
     assert details["will_retry"] is False
     assert failure.error_code == "CODEX_EXEC_TIMEOUT"
+    assert fallback.status == "warning"
 
 
 def test_phase2_story_development_accepts_structured_text_fields(db, monkeypatch):
@@ -2026,6 +2836,145 @@ def test_scene_voice_status_syncs_from_existing_generation(db):
     assert download is not None
     assert download[0] == "Giọng đọc - Cảnh 01.wav"
 
+def test_scene_voice_enqueue_stays_queued_until_worker_starts(db, monkeypatch):
+    profile = DBVoiceProfile(
+        id="queued-scene-profile",
+        name="Queued scene profile",
+        language="en",
+        voice_type="cloned",
+        default_engine="qwen",
+    )
+    db.add(profile)
+    project = video_projects.create_project(
+        models.VideoProjectCreate(
+            topic="Queued scene voice",
+            target_language="en",
+            voice_profile_id=profile.id,
+        ),
+        db,
+    )
+    scene = video_projects.replace_scenes(
+        project.id,
+        models.VideoScenesReplaceRequest(
+            scenes=[models.VideoSceneDraft(dialogue="Wait for a worker slot.", visual_description="A quiet studio.")]
+        ),
+        db,
+    )[0]
+    enqueued: list[str] = []
+
+    def fake_enqueue(generation_id, coro):
+        enqueued.append(generation_id)
+        coro.close()
+
+    monkeypatch.setattr(video_voice, "enqueue_generation", fake_enqueue)
+
+    status = asyncio.run(
+        video_voice.create_scene_narration(
+            project.id,
+            scene.id,
+            models.VideoSceneNarrationRequest(engine="qwen", model_size="1.7B"),
+            db,
+        )
+    )
+
+    assert status is not None
+    assert status.voice_status == "queued"
+    assert enqueued == [status.generation_id]
+    generation = db.get(DBGeneration, status.generation_id)
+    assert generation is not None
+    assert generation.status == "queued"
+
+
+def test_cancel_project_voice_generations_keeps_completed_audio(db, monkeypatch):
+    project = video_projects.create_project(
+        models.VideoProjectCreate(topic="Cancel active project voice", voice_profile_id="profile-1"),
+        db,
+    )
+    scene = video_projects.replace_scenes(
+        project.id,
+        models.VideoScenesReplaceRequest(
+            scenes=[models.VideoSceneDraft(dialogue="Queued scene.", visual_description="Scene")]
+        ),
+        db,
+    )[0]
+    running_shot = _add_phase2_shot(db, project.id, order=1, narration="Running shot.")
+    completed_shot = _add_phase2_shot(
+        db,
+        project.id,
+        order=2,
+        narration="Completed shot.",
+        voice_completed=True,
+        audio_duration=2.0,
+    )
+    completed_audio_path = completed_shot.audio_path
+
+    queued_generation = DBGeneration(
+        id="cancel-project-queued",
+        profile_id="profile-1",
+        text="Queued scene.",
+        language="en",
+        status="queued",
+        source="ai_video_scene",
+    )
+    running_generation = DBGeneration(
+        id="cancel-project-running",
+        profile_id="profile-1",
+        text="Running shot.",
+        language="en",
+        status="generating",
+        source="ai_video_shot",
+    )
+    completed_generation = DBGeneration(
+        id="cancel-project-completed",
+        profile_id="profile-1",
+        text="Completed shot.",
+        language="en",
+        status="completed",
+        audio_path=completed_audio_path,
+        duration=2.0,
+        source="ai_video_shot",
+    )
+    db.add_all([queued_generation, running_generation, completed_generation])
+    scene_row = db.get(database.VideoScene, scene.id)
+    scene_row.generation_id = queued_generation.id
+    scene_row.voice_status = "queued"
+    running_shot.generation_id = running_generation.id
+    running_shot.voice_status = "generating"
+    completed_shot.generation_id = completed_generation.id
+    db.commit()
+
+    cancelled_ids: list[str] = []
+
+    def fake_cancel(generation_id):
+        cancelled_ids.append(generation_id)
+        return "queued" if generation_id == queued_generation.id else "running"
+
+    monkeypatch.setattr(video_voice, "cancel_generation_job", fake_cancel)
+
+    result = video_voice.cancel_project_voice_generations(project.id, db)
+
+    db.expire_all()
+    queued_generation = db.get(DBGeneration, queued_generation.id)
+    running_generation = db.get(DBGeneration, running_generation.id)
+    completed_generation = db.get(DBGeneration, completed_generation.id)
+    scene = db.get(database.VideoScene, scene.id)
+    running_shot = db.get(DBVideoShot, running_shot.id)
+    completed_shot = db.get(DBVideoShot, completed_shot.id)
+
+    assert sorted(cancelled_ids) == ["cancel-project-queued", "cancel-project-running"]
+    assert result["queued_cancelled"] == 1
+    assert result["running_cancel_requested"] == 1
+    assert result["scene_count"] == 1
+    assert result["shot_count"] == 1
+    assert queued_generation.status == "cancelled"
+    assert running_generation.status == "generating"
+    assert scene.voice_status == "cancelled"
+    assert running_shot.voice_status == "cancelled"
+    assert completed_generation.status == "completed"
+    assert completed_shot.voice_status == "completed"
+    assert completed_shot.audio_path == completed_audio_path
+
+
 def test_scene_voice_rejects_profile_language_mismatch(db):
     profile = DBVoiceProfile(
         id="english-profile",
@@ -2090,7 +3039,7 @@ def test_shot_voice_vietnamese_profile_uses_qwen_1_7b_when_default_is_tada(db, m
     status = asyncio.run(video_voice.create_shot_narration(project.id, shot.id, models.VideoSceneNarrationRequest(), db))
 
     assert status is not None
-    assert status.voice_status == "generating"
+    assert status.voice_status == "queued"
     assert enqueued == [status.generation_id]
     generation = db.get(DBGeneration, status.generation_id)
     assert generation is not None
@@ -2929,6 +3878,18 @@ def test_mapping_alias_conflict_and_series_bible_validation_errors():
     with pytest.raises(video_planning.VideoPlanningValidationError) as missing:
         video_phase2.normalize_series_bible_payload({"character_bible": "Hero only"})
     assert getattr(missing.value, "error_code", None) == "AI_VIDEO_MAPPING_REQUIRED_FIELD_MISSING"
+
+    with pytest.raises(video_planning.VideoPlanningValidationError) as missing_character:
+        video_phase2.normalize_series_bible_payload({"world_bible": "World", "style_bible": "Style"})
+    assert getattr(missing_character.value, "error_code", None) == "AI_VIDEO_MAPPING_REQUIRED_FIELD_MISSING"
+
+    structured_profile_fallback = video_phase2.normalize_series_bible_payload(
+        {"world_bible": "World", "style_bible": "Style"},
+        has_character_profiles=True,
+    )
+    assert structured_profile_fallback["character_bible"] == ""
+    assert structured_profile_fallback["world_bible"] == "World"
+    assert structured_profile_fallback["style_bible"] == "Style"
 
 def test_shot_breakdown_normalizes_ai_shot_order_to_list_order():
     normalized = video_phase2._normalize_shot_breakdown_payload(

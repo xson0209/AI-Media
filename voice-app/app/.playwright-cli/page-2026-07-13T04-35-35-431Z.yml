@@ -1,0 +1,192 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Story Studio" [ref=e33] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Dự án prompt video" [ref=e36] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Mô hình" [ref=e42] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e46] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e50]: v0.5.0
+    - main [ref=e52]:
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]:
+              - generic [ref=e58]:
+                - paragraph [ref=e62]: Story Studio
+                - generic [ref=e63]: Luồng theo series
+              - heading "Soạn truyện, giữ canon, handoff video" [level=1] [ref=e64]
+              - paragraph [ref=e65]: Xưởng tạo truyện ảnh và handoff video theo series. Tập trung vào nhân vật, canon, bản Master và prompt đã duyệt trước khi chuyển sang pipeline AI Video.
+            - generic [ref=e66]:
+              - generic [ref=e67]:
+                - paragraph [ref=e69]: Series
+                - paragraph [ref=e72]: "0"
+                - paragraph [ref=e73]: 0 tập
+              - generic [ref=e74]:
+                - paragraph [ref=e76]: Nhân vật
+                - paragraph [ref=e80]: "0"
+                - paragraph [ref=e81]: 0 ảnh ref
+              - generic [ref=e82]:
+                - paragraph [ref=e84]: Canon
+                - paragraph [ref=e88]: OK
+                - paragraph [ref=e89]: ổn định
+              - generic [ref=e90]:
+                - paragraph [ref=e92]: Panel
+                - paragraph [ref=e97]: "0"
+                - paragraph [ref=e98]: ảnh/video
+          - generic [ref=e99]:
+            - generic [ref=e104]:
+              - paragraph [ref=e105]: Series
+              - paragraph [ref=e106]: Chọn hoặc tạo series
+            - generic [ref=e112]:
+              - paragraph [ref=e113]: Nhân vật
+              - paragraph [ref=e114]: 0 hồ sơ · 0 ảnh active
+            - generic [ref=e120]:
+              - paragraph [ref=e121]: Master Story
+              - paragraph [ref=e122]: Chưa chọn tập
+            - generic [ref=e130]:
+              - paragraph [ref=e131]: Sản xuất
+              - paragraph [ref=e132]: Ảnh/video chưa tạo
+        - generic [ref=e133]:
+          - complementary [ref=e134]:
+            - paragraph [ref=e139]: Series
+            - generic [ref=e144]:
+              - paragraph [ref=e145]: Tạo series mới
+              - generic [ref=e146]:
+                - generic [ref=e147]:
+                  - generic [ref=e148]: Tên series
+                  - textbox "Tên series" [ref=e149]:
+                    - /placeholder: "Ví dụ: Thị trấn sau màn mưa"
+                - generic [ref=e150]:
+                  - generic [ref=e151]: Chế độ
+                  - combobox "Chế độ" [ref=e152]:
+                    - option "Series truyện ảnh" [selected]
+                    - option "Series truyện + video"
+                - button "Tạo series" [disabled]
+          - complementary [ref=e153]:
+            - paragraph [ref=e159]: Nhân vật và tập
+            - generic [ref=e160]:
+              - generic [ref=e161]:
+                - generic [ref=e162]:
+                  - paragraph [ref=e163]: Hồ sơ nhân vật
+                  - button "Gợi ý từ Bible" [disabled]
+                - paragraph [ref=e165]: Chưa có Hồ sơ nhân vật. Character Bible cũ vẫn là fallback.
+                - generic [ref=e166]:
+                  - generic [ref=e167]:
+                    - paragraph [ref=e168]: Thư viện ảnh tham chiếu
+                    - generic [ref=e169]: 0 ảnh
+                  - generic [ref=e170]:
+                    - generic [ref=e171]:
+                      - generic [ref=e172]: Loại đối tượng
+                      - combobox "Loại đối tượng" [ref=e173]:
+                        - option "Nhân vật" [selected]
+                        - option "Địa điểm"
+                    - generic [ref=e174]:
+                      - generic [ref=e175]: Nhân vật
+                      - combobox "Nhân vật" [ref=e176]
+                    - generic [ref=e177]:
+                      - generic [ref=e178]: Vai trò ảnh
+                      - combobox "Vai trò ảnh" [ref=e179]:
+                        - option "Mặt chính diện" [selected]
+                        - option "Mặt góc nghiêng"
+                        - option "Toàn thân"
+                        - option "Trang phục"
+                        - option "Biểu cảm"
+                        - option "Khác"
+                    - generic [ref=e180]:
+                      - generic [ref=e181]: Nhãn ảnh
+                      - textbox "Nhãn ảnh" [ref=e182]:
+                        - /placeholder: "Ví dụ: mặt chính diện, trang phục tập 2"
+                    - generic [ref=e183]:
+                      - generic [ref=e184]: File ảnh
+                      - button "File ảnh" [ref=e185]
+                    - button "Tải ảnh" [disabled]
+                  - paragraph [ref=e187]: Chưa có ảnh tham chiếu. Chỉ ảnh đã duyệt và active mới vào prompt.
+                - generic [ref=e188]:
+                  - generic [ref=e189]:
+                    - paragraph [ref=e190]: Phiên bản và stale
+                    - generic [ref=e191]: Series rev 1
+                  - paragraph [ref=e192]: Chưa có lịch sử version cho series này.
+                  - generic [ref=e193]:
+                    - generic [ref=e194]:
+                      - paragraph [ref=e195]: Artifact cần tạo lại
+                      - generic [ref=e196]: "0"
+                    - paragraph [ref=e197]: Không có stale event active.
+                - generic [ref=e198]:
+                  - generic [ref=e199]:
+                    - generic [ref=e200]: Tên nhân vật
+                    - textbox "Tên nhân vật" [ref=e201]:
+                      - /placeholder: "Ví dụ: Linh"
+                  - generic [ref=e202]:
+                    - generic [ref=e203]: Vai trò
+                    - textbox "Vai trò" [ref=e204]:
+                      - /placeholder: Nhập vai trò
+                  - generic [ref=e205]:
+                    - generic [ref=e206]: Khuôn mặt
+                    - textbox "Khuôn mặt" [ref=e207]:
+                      - /placeholder: Nhập khuôn mặt
+                  - generic [ref=e208]:
+                    - generic [ref=e209]: Tóc
+                    - textbox "Tóc" [ref=e210]:
+                      - /placeholder: Nhập tóc
+                  - generic [ref=e211]:
+                    - generic [ref=e212]: Vóc dáng
+                    - textbox "Vóc dáng" [ref=e213]:
+                      - /placeholder: Nhập vóc dáng
+                  - generic [ref=e214]:
+                    - generic [ref=e215]: Trang phục đặc trưng
+                    - textbox "Trang phục đặc trưng" [ref=e216]:
+                      - /placeholder: Nhập trang phục đặc trưng
+                  - generic [ref=e217]:
+                    - generic [ref=e218]: Tính cách
+                    - textbox "Tính cách" [ref=e219]:
+                      - /placeholder: Nhập tính cách
+                  - generic [ref=e220]:
+                    - generic [ref=e221]: Cách nói chuyện
+                    - textbox "Cách nói chuyện" [ref=e222]:
+                      - /placeholder: Nhập cách nói chuyện
+                  - generic [ref=e223]:
+                    - generic [ref=e224]: Những điều không được thay đổi
+                    - textbox "Những điều không được thay đổi" [ref=e225]:
+                      - /placeholder: Nhập những điều không được thay đổi
+                  - button "Lưu nhân vật" [disabled]
+              - generic [ref=e226]:
+                - paragraph [ref=e227]: Tạo tập Story Studio
+                - generic [ref=e228]:
+                  - generic [ref=e229]:
+                    - generic [ref=e230]: Tên tập
+                    - textbox "Tên tập" [ref=e231]:
+                      - /placeholder: "Ví dụ: Tập 01 - Cánh cửa sau mưa"
+                  - generic [ref=e232]:
+                    - generic [ref=e233]: Đầu ra
+                    - combobox "Đầu ra" [ref=e234]:
+                      - option "Truyện ảnh" [selected]
+                      - option "Video truyện"
+                      - option "Cả hai"
+                  - generic [ref=e235]:
+                    - generic [ref=e236]: Nguồn nội dung
+                    - textbox "Nguồn nội dung" [ref=e237]:
+                      - /placeholder: Nguồn truyện, ý tưởng, diễn biến hoặc yêu cầu tập này
+                    - generic [ref=e238]: Có thể dán tóm tắt, beat chính, yêu cầu giữ canon hoặc phong cách thoại.
+                  - button "Tạo tập" [disabled]
+          - main [ref=e239]:
+            - generic [ref=e240]: Chọn hoặc tạo một Story Episode để bắt đầu.
+  - region "Notifications (F8)":
+    - list

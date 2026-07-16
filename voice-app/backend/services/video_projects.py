@@ -11,12 +11,21 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..database import (
     Generation as DBGeneration,
+    SeriesCanonCheck as DBSeriesCanonCheck,
+    SeriesCharacterProfile as DBSeriesCharacterProfile,
+    SeriesContextTrace as DBSeriesContextTrace,
+    SeriesCurrentState as DBSeriesCurrentState,
+    SeriesMemoryCard as DBSeriesMemoryCard,
+    StoryEpisode as DBStoryEpisode,
     VideoDebugEvent as DBVideoDebugEvent,
     VideoAutoRun as DBVideoAutoRun,
     VideoClipGenerationItem as DBVideoClipGenerationItem,
     VideoClipGenerationJob as DBVideoClipGenerationJob,
+    VideoCodexRepairAttempt as DBVideoCodexRepairAttempt,
     VideoPackageExport as DBVideoPackageExport,
+    VideoProviderProjectBinding as DBVideoProviderProjectBinding,
     VideoProject as DBVideoProject,
+    VideoPublishingMetadata as DBVideoPublishingMetadata,
     VideoRenderJob as DBVideoRenderJob,
     VideoScene as DBVideoScene,
     VideoSceneAsset as DBVideoSceneAsset,
@@ -32,9 +41,12 @@ from . import (
     video_clip_generation,
     video_language,
     video_observability,
+    video_provider_project_bindings,
     video_provider_storage,
     video_purpose,
+    video_publishing_metadata,
     video_rendering,
+    series_references,
     video_series_memory,
     video_state,
     video_storage,
@@ -44,6 +56,10 @@ PROMPT_SEGMENT_MIN_SECONDS_PER_MICRO_SCENE = 1.5
 PROJECT_OPERATION_ACTIVE_CODE = "AI_VIDEO_PROJECT_OPERATION_ACTIVE"
 VOICE_BUSY_STATUSES = {"queued", "generating", "loading_model"}
 RENDER_BUSY_STATUSES = {"queued", "running"}
+SERIES_MODE_IMAGE = "image_story_only"
+SERIES_MODE_VIDEO = "video_story_only"
+SERIES_MODE_HYBRID = "hybrid"
+DIRECT_VIDEO_SERIES_MODES = {SERIES_MODE_VIDEO}
 
 class VideoProjectOperationError(ValueError):
     """Raised when a destructive project operation cannot safely run."""
@@ -67,9 +83,26 @@ def _shot_count(project_id: str, db: Session) -> int:
 def _series_episode_count(series_id: str, db: Session) -> int:
     return db.query(func.count(DBVideoProject.id)).filter(DBVideoProject.series_id == series_id).scalar() or 0
 
+def _series_story_episode_count(series_id: str, db: Session) -> int:
+    return db.query(func.count(DBStoryEpisode.id)).filter(DBStoryEpisode.series_id == series_id).scalar() or 0
+
+def _series_character_profiles(series_id: str, db: Session) -> list[models.SeriesCharacterProfileResponse]:
+    rows = (
+        db.query(DBSeriesCharacterProfile)
+        .filter(DBSeriesCharacterProfile.series_id == series_id)
+        .order_by(DBSeriesCharacterProfile.sort_order.asc(), DBSeriesCharacterProfile.created_at.asc())
+        .all()
+    )
+    return [models.SeriesCharacterProfileResponse.model_validate(row) for row in rows]
+
 def _series_response(series: DBVideoSeries, db: Session) -> models.VideoSeriesResponse:
     response = models.VideoSeriesResponse.model_validate(series)
-    response.episode_count = _series_episode_count(series.id, db)
+    video_count = _series_episode_count(series.id, db)
+    response.episode_count = video_count
+    response.video_episode_count = video_count
+    response.story_episode_count = _series_story_episode_count(series.id, db)
+    response.character_profiles = _series_character_profiles(series.id, db)
+    response.provider_project_binding = video_provider_project_bindings.binding_for_series_response(series, db)
     return response
 
 def _project_response(project: DBVideoProject, db: Session) -> models.VideoProjectResponse:
@@ -78,6 +111,7 @@ def _project_response(project: DBVideoProject, db: Session) -> models.VideoProje
     response = models.VideoProjectResponse.model_validate(project)
     response.scene_count = _scene_count(project.id, db)
     response.shot_count = _shot_count(project.id, db)
+    response.provider_project_binding = video_provider_project_bindings.binding_for_project_response(project, db)
     active_run = (
         db.query(video_auto_runs.DBVideoAutoRun)
         .filter(
@@ -114,6 +148,24 @@ def _validate_series_exists(series_id: str | None, db: Session) -> DBVideoSeries
     if series is None:
         raise ValueError("Không tìm thấy series AI Video.")
     return series
+
+def _series_mode(series: DBVideoSeries | None) -> str:
+    if series is None:
+        return SERIES_MODE_VIDEO
+    mode = (getattr(series, "series_mode", None) or SERIES_MODE_VIDEO).strip()
+    if mode in {SERIES_MODE_IMAGE, SERIES_MODE_VIDEO, SERIES_MODE_HYBRID}:
+        return mode
+    return SERIES_MODE_VIDEO
+
+def _validate_direct_ai_video_allowed(series: DBVideoSeries | None, *, story_episode_id: str | None = None) -> None:
+    mode = _series_mode(series)
+    if series is None or mode in DIRECT_VIDEO_SERIES_MODES:
+        return
+    if mode in {SERIES_MODE_HYBRID, SERIES_MODE_IMAGE} and story_episode_id:
+        return
+    if mode == SERIES_MODE_IMAGE:
+        raise ValueError("Series truyện ảnh không tạo project AI Video trực tiếp.")
+    raise ValueError("Series truyện + video phải tạo video bằng handoff từ Story Studio.")
 
 def _validate_project_operation_available(project_id: str, db: Session, *, operation: str) -> None:
     from . import video_auto_runs, video_planning_pool
@@ -243,6 +295,11 @@ def _stale_dialogue_dependent_artifacts(project: DBVideoProject, db: Session) ->
     )
     video_rendering.mark_render_outputs_stale(project.id, db)
     video_state.mark_package_stale(project, db)
+    video_publishing_metadata.mark_publishing_metadata_stale(
+        project.id,
+        db,
+        reason="Nội dung kịch bản, narration hoặc mục đích video đã thay đổi.",
+    )
 
 def _ordered_scenes(project_id: str, db: Session) -> list[DBVideoScene]:
     return (
@@ -288,6 +345,7 @@ def _detail_response(project: DBVideoProject, db: Session) -> models.VideoProjec
     data = models.VideoProjectDetailResponse.model_validate(project)
     data.scene_count = _scene_count(project.id, db)
     data.shot_count = _shot_count(project.id, db)
+    data.provider_project_binding = video_provider_project_bindings.binding_for_project_response(project, db)
     data.source_blocks = [
         models.VideoSourceBlockResponse.model_validate(row)
         for row in db.query(DBVideoSourceBlock)
@@ -309,6 +367,7 @@ def create_project(data: models.VideoProjectCreate, db: Session) -> models.Video
     now = datetime.utcnow()
     create_data = data.model_dump()
     series = _validate_series_exists(data.series_id, db)
+    _validate_direct_ai_video_allowed(series, story_episode_id=data.story_episode_id)
     derived_target_duration = _derive_target_duration_from_config(create_data)
     explicit_target_language = data.target_language if "target_language" in data.model_fields_set else None
     purpose_settings = video_purpose.resolve_purpose_settings(
@@ -321,6 +380,7 @@ def create_project(data: models.VideoProjectCreate, db: Session) -> models.Video
     project = DBVideoProject(
         id=str(uuid.uuid4()),
         series_id=series.id if series else None,
+        story_episode_id=data.story_episode_id,
         episode_number=data.episode_number,
         episode_title=data.episode_title,
         title=data.title or _default_title(data.topic),
@@ -389,6 +449,7 @@ def create_series(data: models.VideoSeriesCreate, db: Session) -> models.VideoSe
     row = DBVideoSeries(
         id=str(uuid.uuid4()),
         title=data.title.strip(),
+        series_mode=data.series_mode,
         character_bible=data.character_bible,
         world_bible=data.world_bible,
         style_bible=data.style_bible,
@@ -396,10 +457,31 @@ def create_series(data: models.VideoSeriesCreate, db: Session) -> models.VideoSe
         negative_rules=data.negative_rules,
         previous_episode_summary=data.previous_episode_summary,
         latest_episode_number=0,
+        revision=1,
         created_at=now,
         updated_at=now,
     )
     db.add(row)
+    series_references.record_version(
+        db,
+        series_id=row.id,
+        entity_type="video_series",
+        entity_id=row.id,
+        revision=1,
+        snapshot={
+            "title": row.title,
+            "series_mode": row.series_mode,
+            "character_bible": row.character_bible,
+            "world_bible": row.world_bible,
+            "style_bible": row.style_bible,
+            "continuity_rules": row.continuity_rules,
+            "negative_rules": row.negative_rules,
+            "previous_episode_summary": row.previous_episode_summary,
+            "latest_episode_number": row.latest_episode_number,
+        },
+        change_source="series_create",
+        change_reason="Tạo series mới.",
+    )
     db.commit()
     db.refresh(row)
     video_series_memory.sync_series_memory_file(row.id, db)
@@ -410,13 +492,285 @@ def update_series(series_id: str, patch: models.VideoSeriesUpdate, db: Session) 
     if row is None:
         return None
     data = patch.model_dump(exclude_unset=True)
+    old_revision = int(row.revision or 1)
+    changed_fields = [key for key, value in data.items() if getattr(row, key) != value]
     for key, value in data.items():
         setattr(row, key, value.strip() if key == "title" and isinstance(value, str) else value)
+    if changed_fields:
+        row.revision = old_revision + 1
     row.updated_at = datetime.utcnow()
+    if changed_fields:
+        series_references.record_version(
+            db,
+            series_id=row.id,
+            entity_type="video_series",
+            entity_id=row.id,
+            revision=int(row.revision or 1),
+            snapshot={
+                "title": row.title,
+                "series_mode": row.series_mode,
+                "character_bible": row.character_bible,
+                "world_bible": row.world_bible,
+                "style_bible": row.style_bible,
+                "continuity_rules": row.continuity_rules,
+                "negative_rules": row.negative_rules,
+                "previous_episode_summary": row.previous_episode_summary,
+                "latest_episode_number": row.latest_episode_number,
+            },
+            change_source="series_update",
+            change_reason="Cập nhật Series Bible/style.",
+        )
+        if "style_bible" in changed_fields:
+            series_references.mark_dependency_stale(
+                row.id,
+                dependency_type="series_style",
+                dependency_id=row.id,
+                changed_scope="camera_style",
+                old_revision=old_revision,
+                new_revision=int(row.revision or 1),
+                reason_vi="Style Bible của series đã thay đổi.",
+                db=db,
+                commit=False,
+            )
+        if any(field in changed_fields for field in {"character_bible", "world_bible", "continuity_rules", "previous_episode_summary"}):
+            series_references.mark_dependency_stale(
+                row.id,
+                dependency_type="series_bible",
+                dependency_id=row.id,
+                changed_scope="story_state",
+                old_revision=old_revision,
+                new_revision=int(row.revision or 1),
+                reason_vi="Series Bible hoặc continuity của series đã thay đổi.",
+                db=db,
+                commit=False,
+            )
     db.commit()
     db.refresh(row)
     video_series_memory.sync_series_memory_file(row.id, db)
     return _series_response(row, db)
+
+def list_character_profiles(series_id: str, db: Session) -> list[models.SeriesCharacterProfileResponse] | None:
+    if db.query(DBVideoSeries.id).filter(DBVideoSeries.id == series_id).first() is None:
+        return None
+    return _series_character_profiles(series_id, db)
+
+def create_character_profile(
+    series_id: str,
+    data: models.SeriesCharacterProfileCreate,
+    db: Session,
+) -> models.SeriesCharacterProfileResponse | None:
+    if db.query(DBVideoSeries.id).filter(DBVideoSeries.id == series_id).first() is None:
+        return None
+    now = datetime.utcnow()
+    next_order = (
+        db.query(func.max(DBSeriesCharacterProfile.sort_order))
+        .filter(DBSeriesCharacterProfile.series_id == series_id)
+        .scalar()
+        or 0
+    ) + 1
+    row = DBSeriesCharacterProfile(
+        id=str(uuid.uuid4()),
+        series_id=series_id,
+        name=data.name.strip(),
+        role=data.role,
+        face_description=data.face_description,
+        hair_description=data.hair_description,
+        body_description=data.body_description,
+        signature_outfit=data.signature_outfit,
+        personality=data.personality,
+        speech_style=data.speech_style,
+        fixed_traits=data.fixed_traits,
+        additional_notes=data.additional_notes,
+        sort_order=data.sort_order if data.sort_order is not None else next_order,
+        revision=1,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    series_references.record_version(
+        db,
+        series_id=series_id,
+        entity_type="character_profile",
+        entity_id=row.id,
+        revision=1,
+        snapshot={
+            "name": row.name,
+            "role": row.role,
+            "face_description": row.face_description,
+            "hair_description": row.hair_description,
+            "body_description": row.body_description,
+            "signature_outfit": row.signature_outfit,
+            "personality": row.personality,
+            "speech_style": row.speech_style,
+            "fixed_traits": row.fixed_traits,
+            "additional_notes": row.additional_notes,
+            "sort_order": row.sort_order,
+        },
+        change_source="character_profile_create",
+        change_reason="Tạo Hồ sơ nhân vật.",
+    )
+    db.commit()
+    db.refresh(row)
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return models.SeriesCharacterProfileResponse.model_validate(row)
+
+def update_character_profile(
+    series_id: str,
+    profile_id: str,
+    patch: models.SeriesCharacterProfileUpdate,
+    db: Session,
+) -> models.SeriesCharacterProfileResponse | None:
+    row = (
+        db.query(DBSeriesCharacterProfile)
+        .filter(DBSeriesCharacterProfile.series_id == series_id, DBSeriesCharacterProfile.id == profile_id)
+        .first()
+    )
+    if row is None:
+        return None
+    data = patch.model_dump(exclude_unset=True)
+    old_revision = int(row.revision or 1)
+    changed_fields = [key for key, value in data.items() if getattr(row, key) != value]
+    for key, value in data.items():
+        setattr(row, key, value.strip() if key == "name" and isinstance(value, str) else value)
+    if changed_fields:
+        row.revision = old_revision + 1
+    row.updated_at = datetime.utcnow()
+    if changed_fields:
+        series_references.record_version(
+            db,
+            series_id=series_id,
+            entity_type="character_profile",
+            entity_id=row.id,
+            revision=int(row.revision or 1),
+            snapshot={
+                "name": row.name,
+                "role": row.role,
+                "face_description": row.face_description,
+                "hair_description": row.hair_description,
+                "body_description": row.body_description,
+                "signature_outfit": row.signature_outfit,
+                "personality": row.personality,
+                "speech_style": row.speech_style,
+                "fixed_traits": row.fixed_traits,
+                "additional_notes": row.additional_notes,
+                "sort_order": row.sort_order,
+            },
+            change_source="character_profile_update",
+            change_reason="Cập nhật Hồ sơ nhân vật.",
+        )
+        if any(field in changed_fields for field in {"face_description", "hair_description", "body_description", "signature_outfit", "fixed_traits"}):
+            series_references.mark_dependency_stale(
+                series_id,
+                dependency_type="character_profile",
+                dependency_id=row.id,
+                changed_scope="visual_identity",
+                old_revision=old_revision,
+                new_revision=int(row.revision or 1),
+                reason_vi=f"Ngoại hình hoặc fixed traits của nhân vật {row.name} đã thay đổi.",
+                db=db,
+                commit=False,
+            )
+        if any(field in changed_fields for field in {"personality", "speech_style"}):
+            series_references.mark_dependency_stale(
+                series_id,
+                dependency_type="character_profile",
+                dependency_id=row.id,
+                changed_scope="dialogue",
+                old_revision=old_revision,
+                new_revision=int(row.revision or 1),
+                reason_vi=f"Tính cách hoặc cách nói của nhân vật {row.name} đã thay đổi.",
+                db=db,
+                commit=False,
+            )
+    db.commit()
+    db.refresh(row)
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return models.SeriesCharacterProfileResponse.model_validate(row)
+
+def delete_character_profile(series_id: str, profile_id: str, db: Session) -> bool:
+    row = (
+        db.query(DBSeriesCharacterProfile)
+        .filter(DBSeriesCharacterProfile.series_id == series_id, DBSeriesCharacterProfile.id == profile_id)
+        .first()
+    )
+    if row is None:
+        return False
+    dependency_count = (
+        db.query(func.count(series_references.DBArtifactDependencySnapshot.id))
+        .filter(
+            series_references.DBArtifactDependencySnapshot.series_id == series_id,
+            series_references.DBArtifactDependencySnapshot.dependency_type == "character_profile",
+            series_references.DBArtifactDependencySnapshot.dependency_id == profile_id,
+        )
+        .scalar()
+        or 0
+    )
+    reference_count = (
+        db.query(func.count(series_references.DBSeriesReferenceAsset.id))
+        .filter(
+            series_references.DBSeriesReferenceAsset.series_id == series_id,
+            series_references.DBSeriesReferenceAsset.entity_type == "character",
+            series_references.DBSeriesReferenceAsset.entity_id == profile_id,
+        )
+        .scalar()
+        or 0
+    )
+    if dependency_count or reference_count:
+        raise VideoProjectOperationError(
+            "Không thể xoá Hồ sơ nhân vật đang có ảnh tham chiếu hoặc artifact phụ thuộc. Hãy vô hiệu hóa ảnh/thực hiện tạo lại trước.",
+            error_code="SERIES_CHARACTER_PROFILE_IN_USE",
+        )
+    db.delete(row)
+    db.commit()
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return True
+
+def reorder_character_profiles(
+    series_id: str,
+    data: models.SeriesCharacterProfileReorderRequest,
+    db: Session,
+) -> list[models.SeriesCharacterProfileResponse] | None:
+    rows = {
+        row.id: row
+        for row in db.query(DBSeriesCharacterProfile).filter(DBSeriesCharacterProfile.series_id == series_id).all()
+    }
+    if not rows:
+        return None if db.query(DBVideoSeries.id).filter(DBVideoSeries.id == series_id).first() is None else []
+    for index, profile_id in enumerate(data.profile_ids, start=1):
+        row = rows.get(profile_id)
+        if row is not None:
+            row.sort_order = index
+            row.updated_at = datetime.utcnow()
+    db.commit()
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return _series_character_profiles(series_id, db)
+
+def suggest_character_profiles_from_bible(
+    series_id: str,
+    db: Session,
+) -> models.SeriesCharacterProfileSuggestionResponse | None:
+    series = db.query(DBVideoSeries).filter(DBVideoSeries.id == series_id).first()
+    if series is None:
+        return None
+    bible = (series.character_bible or "").strip()
+    if not bible:
+        return models.SeriesCharacterProfileSuggestionResponse(
+            profiles=[],
+            message="Character Bible cũ đang trống nên chưa có hồ sơ nhân vật nháp.",
+        )
+    first_line = next((line.strip(" -#:\t") for line in bible.splitlines() if line.strip()), "")
+    name = first_line[:80] if first_line else "Nhân vật chính"
+    profile = models.SeriesCharacterProfileCreate(
+        name=name,
+        role="Nhân vật trong Character Bible cũ",
+        fixed_traits=bible[:4000],
+        additional_notes="Đây là gợi ý nháp từ Character Bible cũ. Hãy chỉnh lại từng trường rồi lưu nếu đồng ý.",
+        sort_order=1,
+    )
+    return models.SeriesCharacterProfileSuggestionResponse(
+        profiles=[profile],
+        message="Đã tạo gợi ý nháp từ Character Bible cũ. Chưa lưu thay đổi vào series.",
+    )
 
 def _latest_episode_project(series_id: str, db: Session) -> DBVideoProject | None:
     return (
@@ -435,6 +789,7 @@ def create_episode(series_id: str, data: models.VideoEpisodeCreate, db: Session)
     series = db.query(DBVideoSeries).filter(DBVideoSeries.id == series_id).first()
     if series is None:
         return None
+    _validate_direct_ai_video_allowed(series)
     latest = _latest_episode_project(series_id, db) if data.reuse_latest_config else None
     episode_number = data.episode_number or next_episode_number(series_id, db)
     duplicate = db.query(DBVideoProject.id).filter(
@@ -549,6 +904,15 @@ def delete_series(series_id: str, db: Session, *, delete_episodes: bool = False,
             {"series_id": None, "episode_number": None, "episode_title": None, "updated_at": now},
             synchronize_session=False,
         )
+    db.query(DBSeriesCanonCheck).filter(DBSeriesCanonCheck.series_id == series_id).delete(synchronize_session=False)
+    db.query(DBSeriesContextTrace).filter(DBSeriesContextTrace.series_id == series_id).delete(synchronize_session=False)
+    db.query(DBSeriesCurrentState).filter(DBSeriesCurrentState.series_id == series_id).delete(synchronize_session=False)
+    db.query(DBSeriesMemoryCard).filter(DBSeriesMemoryCard.series_id == series_id).delete(synchronize_session=False)
+    db.query(series_references.DBArtifactStaleEvent).filter(series_references.DBArtifactStaleEvent.series_id == series_id).delete(synchronize_session=False)
+    db.query(series_references.DBArtifactDependencySnapshot).filter(series_references.DBArtifactDependencySnapshot.series_id == series_id).delete(synchronize_session=False)
+    db.query(series_references.DBSeriesVersionRecord).filter(series_references.DBSeriesVersionRecord.series_id == series_id).delete(synchronize_session=False)
+    db.query(series_references.DBSeriesReferenceAsset).filter(series_references.DBSeriesReferenceAsset.series_id == series_id).delete(synchronize_session=False)
+    db.query(DBVideoProviderProjectBinding).filter(DBVideoProviderProjectBinding.series_id == series_id).delete(synchronize_session=False)
     db.delete(series)
     db.commit()
     video_storage.remove_series_artifacts(series_id)
@@ -604,7 +968,8 @@ def update_project(
     data = patch.model_dump(exclude_unset=True)
     incoming_keys = set(data)
     if "series_id" in data and data["series_id"]:
-        _validate_series_exists(data["series_id"], db)
+        series = _validate_series_exists(data["series_id"], db)
+        _validate_direct_ai_video_allowed(series, story_episode_id=data.get("story_episode_id") or project.story_episode_id)
     purpose_contract_keys = {"video_purpose", "dialogue_mode", "narration_density", "call_to_action_style"}
     if "target_language" in data or incoming_keys & purpose_contract_keys:
         if "target_language" in data:
@@ -721,6 +1086,12 @@ def update_project(
                 )
         video_rendering.mark_render_outputs_stale(project_id, db)
         video_state.mark_package_stale(project, db)
+        if content_changed:
+            video_publishing_metadata.mark_publishing_metadata_stale(
+                project_id,
+                db,
+                reason="Thông tin nội dung project đã thay đổi.",
+            )
     project.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(project)
@@ -760,6 +1131,7 @@ def reset_generated_data(project_id: str, db: Session) -> models.VideoGeneratedD
         "render_jobs": db.query(func.count(DBVideoRenderJob.id)).filter(DBVideoRenderJob.project_id == project_id).scalar() or 0,
         "debug_events": db.query(func.count(DBVideoDebugEvent.id)).filter(DBVideoDebugEvent.project_id == project_id).scalar() or 0,
         "subtitles": db.query(func.count(DBVideoSubtitle.id)).filter(DBVideoSubtitle.project_id == project_id).scalar() or 0,
+        "publishing_metadata": db.query(func.count(DBVideoPublishingMetadata.id)).filter(DBVideoPublishingMetadata.project_id == project_id).scalar() or 0,
         "scene_assets": db.query(func.count(DBVideoSceneAsset.id)).filter(DBVideoSceneAsset.project_id == project_id).scalar() or 0,
         "shot_prompts": db.query(func.count(DBVideoShotPrompt.id)).filter(DBVideoShotPrompt.project_id == project_id).scalar() or 0,
         "shot_clips": db.query(func.count(DBVideoShotClip.id)).filter(DBVideoShotClip.project_id == project_id).scalar() or 0,
@@ -769,12 +1141,14 @@ def reset_generated_data(project_id: str, db: Session) -> models.VideoGeneratedD
     }
 
     _remove_generation_files(list(dict.fromkeys(scene_generation_ids + shot_generation_ids)), db)
+    db.query(DBVideoCodexRepairAttempt).filter(DBVideoCodexRepairAttempt.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoClipGenerationItem).filter(DBVideoClipGenerationItem.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoClipGenerationJob).filter(DBVideoClipGenerationJob.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoPackageExport).filter(DBVideoPackageExport.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoRenderJob).filter(DBVideoRenderJob.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoDebugEvent).filter(DBVideoDebugEvent.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).delete(synchronize_session=False)
+    db.query(DBVideoPublishingMetadata).filter(DBVideoPublishingMetadata.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoSceneAsset).filter(DBVideoSceneAsset.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project_id).delete(synchronize_session=False)
     db.query(DBVideoShotClip).filter(DBVideoShotClip.project_id == project_id).delete(synchronize_session=False)
@@ -833,6 +1207,7 @@ def delete_project(project_id: str, db: Session, *, check_active: bool = True) -
         "scenes": db.query(func.count(DBVideoScene.id)).filter(DBVideoScene.project_id == project_id).scalar() or 0,
         "shots": db.query(func.count(DBVideoShot.id)).filter(DBVideoShot.project_id == project_id).scalar() or 0,
         "shot_prompts": db.query(func.count(DBVideoShotPrompt.id)).filter(DBVideoShotPrompt.project_id == project_id).scalar() or 0,
+        "publishing_metadata": db.query(func.count(DBVideoPublishingMetadata.id)).filter(DBVideoPublishingMetadata.project_id == project_id).scalar() or 0,
         "clip_generation_jobs": db.query(func.count(DBVideoClipGenerationJob.id)).filter(DBVideoClipGenerationJob.project_id == project_id).scalar() or 0,
         "render_jobs": db.query(func.count(DBVideoRenderJob.id)).filter(DBVideoRenderJob.project_id == project_id).scalar() or 0,
     }
@@ -845,6 +1220,8 @@ def delete_project(project_id: str, db: Session, *, check_active: bool = True) -
         counts=counts,
     )
 
+    db.query(DBVideoCodexRepairAttempt).filter(DBVideoCodexRepairAttempt.project_id == project_id).delete()
+    db.query(DBVideoProviderProjectBinding).filter(DBVideoProviderProjectBinding.project_id == project_id).delete()
     db.query(DBVideoClipGenerationItem).filter(DBVideoClipGenerationItem.project_id == project_id).delete()
     db.query(DBVideoClipGenerationJob).filter(DBVideoClipGenerationJob.project_id == project_id).delete()
     db.query(DBVideoPackageExport).filter(DBVideoPackageExport.project_id == project_id).delete()
@@ -856,6 +1233,7 @@ def delete_project(project_id: str, db: Session, *, check_active: bool = True) -
     db.query(DBVideoRenderJob).filter(DBVideoRenderJob.project_id == project_id).delete()
     db.query(DBVideoDebugEvent).filter(DBVideoDebugEvent.project_id == project_id).delete()
     db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).delete()
+    db.query(DBVideoPublishingMetadata).filter(DBVideoPublishingMetadata.project_id == project_id).delete()
     db.query(DBVideoSceneAsset).filter(DBVideoSceneAsset.project_id == project_id).delete()
     shot_prompts = db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project_id).all()
     for shot_prompt in shot_prompts:
@@ -940,6 +1318,11 @@ def replace_scenes(
     project.planning_status = "script_ready"
     video_rendering.mark_render_outputs_stale(project_id, db)
     video_state.mark_package_stale(project, db)
+    video_publishing_metadata.mark_publishing_metadata_stale(
+        project_id,
+        db,
+        reason="Danh sách scene hoặc kịch bản đã thay đổi.",
+    )
     project.status = "script_ready"
     project.updated_at = now
     db.commit()
@@ -971,6 +1354,11 @@ def update_scene(
         if project is not None:
             video_rendering.mark_render_outputs_stale(project_id, db)
             video_state.mark_package_stale(project, db)
+            video_publishing_metadata.mark_publishing_metadata_stale(
+                project_id,
+                db,
+                reason="Scene hoặc lời thoại đã thay đổi.",
+            )
     scene.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(scene)
@@ -1009,6 +1397,11 @@ def set_scene_approved(
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is not None:
         video_state.mark_package_stale(project, db)
+        video_publishing_metadata.mark_publishing_metadata_stale(
+            project_id,
+            db,
+            reason="Trạng thái narration của scene đã thay đổi.",
+        )
     db.commit()
     db.refresh(scene)
     return models.VideoSceneResponse.model_validate(scene)
@@ -1097,6 +1490,7 @@ def get_project_status(project_id: str, db: Session) -> models.VideoProjectStatu
         missing_voice_shot_ids = []
     subtitle = db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).first()
     missing_subtitle = subtitle is None or subtitle.status != "completed"
+    publishing_summary = video_publishing_metadata.metadata_status_summary(project_id, db)
     missing_scene_ids = sorted(set(missing_prompt + missing_voice))
     has_script_items = bool(scene_ids or shot_rows)
     return models.VideoProjectStatusResponse(
@@ -1123,4 +1517,8 @@ def get_project_status(project_id: str, db: Session) -> models.VideoProjectStatu
         missing_video_prompt_shot_ids=missing_video_prompt_shot_ids,
         stale_prompt_shot_ids=stale_prompt_shot_ids,
         missing_voice_shot_ids=missing_voice_shot_ids,
+        publishing_metadata_status=str(publishing_summary.get("status") or "missing"),
+        publishing_metadata_ready=bool(publishing_summary.get("ready")),
+        publishing_metadata_stale=bool(publishing_summary.get("stale")),
+        publishing_metadata_revision=publishing_summary.get("revision"),
     )

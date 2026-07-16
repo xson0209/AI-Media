@@ -1,18 +1,49 @@
 import asyncio
-from datetime import datetime
+import importlib.machinery
+import sys
+import types
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect
 
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+    torch_stub.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
+
+    class _Tensor:
+        def element_size(self):
+            return 0
+
+        def nelement(self):
+            return 0
+
+    torch_stub.Tensor = _Tensor
+    torch_stub.nn = types.SimpleNamespace(Module=object)
+    torch_stub.load = lambda *args, **kwargs: None
+    torch_stub.save = lambda *args, **kwargs: None
+    sys.modules["torch"] = torch_stub
+
+if "backend.services.transcribe" not in sys.modules:
+    transcribe_stub = types.ModuleType("backend.services.transcribe")
+    transcribe_stub.__spec__ = importlib.machinery.ModuleSpec("backend.services.transcribe", loader=None)
+    transcribe_stub.get_whisper_model = lambda: None
+    sys.modules["backend.services.transcribe"] = transcribe_stub
+
 from backend import config, database, models
 from backend.database import (
+    VideoInspirationAudioEvent as DBVideoInspirationAudioEvent,
+    VideoInspirationHandoff as DBVideoInspirationHandoff,
     VideoInspirationJob as DBVideoInspirationJob,
+    VideoInspirationShot as DBVideoInspirationShot,
+    VideoInspirationTranscriptSegment as DBVideoInspirationTranscriptSegment,
     VideoProject as DBVideoProject,
     VideoSourceBlock as DBVideoSourceBlock,
     session as database_session,
 )
 from backend.services import video_inspiration, video_rendering
+from backend.services import video_language
 
 
 @pytest.fixture
@@ -26,6 +57,50 @@ def db(tmp_path):
         session.close()
         database_session.engine.dispose()
 
+def _iter_schema_nodes(schema):
+    if not isinstance(schema, dict):
+        return
+    yield schema
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for child in properties.values():
+            yield from _iter_schema_nodes(child)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        yield from _iter_schema_nodes(items)
+    for combinator in ("anyOf", "oneOf", "allOf"):
+        children = schema.get(combinator)
+        if isinstance(children, list):
+            for child in children:
+                yield from _iter_schema_nodes(child)
+
+def test_video_inspiration_output_schemas_are_strict_json_schema_objects():
+    schemas = [
+        video_inspiration.VISUAL_SCHEMA,
+        video_inspiration.ANALYSIS_SCHEMA,
+        video_inspiration.RETENTION_PLAN_SCHEMA,
+        video_inspiration.SOUND_CUE_SCHEMA,
+        video_inspiration.SOUND_DESIGN_PLAN_SCHEMA,
+        video_inspiration.REWRITE_SEGMENT_SCHEMA,
+        video_inspiration.AI_VIDEO_SOURCE_BLOCKS_SCHEMA,
+        video_inspiration.REWRITE_PAYLOAD_SCHEMA,
+        video_inspiration.CREATIVE_BRIEF_SCHEMA,
+        video_inspiration.REWRITE_CANDIDATES_SCHEMA,
+        video_inspiration.REWRITE_REVIEW_SCHEMA,
+    ]
+
+    for schema in schemas:
+        for node in _iter_schema_nodes(schema):
+            type_value = node.get("type")
+            assert not isinstance(type_value, list), f"Use anyOf/oneOf instead of type unions: {node}"
+            if type_value == "object":
+                assert node.get("additionalProperties") is False, f"Object schema is not strict: {node}"
+                properties = node.get("properties") or {}
+                if properties:
+                    assert set(node.get("required") or []) == set(properties), f"Object schema required keys do not match properties: {node}"
+            if type_value == "array":
+                assert isinstance(node.get("items"), dict), f"Array schema is missing item schema: {node}"
+
 
 def test_video_inspiration_tables_are_created(db):
     inspector = inspect(database_session.engine)
@@ -33,6 +108,11 @@ def test_video_inspiration_tables_are_created(db):
 
     assert "video_inspiration_jobs" in tables
     assert "video_inspiration_frames" in tables
+    assert "video_inspiration_shots" in tables
+    assert "video_inspiration_transcript_segments" in tables
+    assert "video_inspiration_audio_events" in tables
+    assert "video_inspiration_text_events" in tables
+    assert "video_inspiration_retention_beats" in tables
 
     job_columns = {column["name"] for column in inspector.get_columns("video_inspiration_jobs")}
     assert {
@@ -46,13 +126,20 @@ def test_video_inspiration_tables_are_created(db):
             "transcript_text",
         "visual_summary",
         "analysis_json",
+        "analysis_schema_version",
+        "analysis_mode",
+        "analysis_package_json",
+        "coverage_metrics_json",
+        "limitations_json",
+        "retention_source",
+        "analysis_completeness",
         "rewritten_script",
         "created_video_project_id",
         "latest_auto_run_id",
     }.issubset(job_columns)
 
     frame_columns = {column["name"] for column in inspector.get_columns("video_inspiration_frames")}
-    assert {"job_id", "frame_path", "timestamp_seconds", "description_vi"}.issubset(
+    assert {"job_id", "shot_id", "shot_order", "frame_role", "frame_path", "timestamp_seconds", "description_vi"}.issubset(
         frame_columns,
     )
 
@@ -97,6 +184,25 @@ def test_upload_accepts_mp4_and_stores_source_duration(db, monkeypatch):
     assert job.source_duration_seconds == 12.5
     assert job.source_path is not None
     assert config.resolve_storage_path(job.source_path).exists()
+
+
+def test_video_inspiration_accepts_extended_content_language():
+    assert video_inspiration._validate_target_language("ja") == "ja"
+    assert video_language.normalize_video_language("ja", default="") == "ja"
+    assert video_language.normalize_video_language("khong-hop-le", default="") == ""
+
+    prompt = video_inspiration._rewrite_prompt(
+        types.SimpleNamespace(
+            target_language="ja",
+            transcript_text="Một transcript gốc.",
+            analysis_json={"main_idea_vi": "Ý chính"},
+            visual_summary="Một video mẫu.",
+            user_direction=None,
+        )
+    )
+
+    assert "Ngôn ngữ kịch bản mới: tiếng Nhật / Japanese" in prompt
+    assert "Ngôn ngữ kịch bản mới: English" not in prompt
 
 
 def test_social_link_without_downloader_returns_friendly_error(db, monkeypatch):
@@ -192,6 +298,48 @@ def test_probe_video_falls_back_to_ffmpeg_without_ffprobe(tmp_path, monkeypatch)
     assert metadata["height"] == 1920
     assert metadata["codec"] == "h264"
     assert metadata["has_audio"] is True
+
+def test_extract_frames_creates_shot_timeline_and_keyframes(db, tmp_path, monkeypatch):
+    job = _seed_video_job(db, tmp_path, job_id="shot-detection-job")
+    monkeypatch.setattr(
+        video_inspiration,
+        "_tools",
+        lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg-bin", ffprobe=None),
+    )
+    monkeypatch.setattr(
+        video_inspiration,
+        "_probe_video",
+        lambda path: {"duration_seconds": 8.0, "width": 1280, "height": 720, "has_audio": True},
+    )
+
+    def fake_run_command(command, *, timeout_seconds=video_inspiration.FFMPEG_TIMEOUT_SECONDS):
+        if "-vf" in command:
+            return video_inspiration.subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr="showinfo pts_time:2.000\nshowinfo pts_time:5.000\n",
+            )
+        output_path = Path(command[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"jpeg")
+        return video_inspiration.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_inspiration, "_run_command", fake_run_command)
+
+    frames = video_inspiration._extract_frames(job, db)
+    shots = (
+        db.query(DBVideoInspirationShot)
+        .filter(DBVideoInspirationShot.job_id == job.id)
+        .order_by(DBVideoInspirationShot.shot_order.asc())
+        .all()
+    )
+
+    assert len(shots) == 3
+    assert [(shot.start_seconds, shot.end_seconds) for shot in shots] == [(0.0, 2.0), (2.0, 5.0), (5.0, 8.0)]
+    assert len(frames) == 3
+    assert {frame.shot_id for frame in frames} == {shot.id for shot in shots}
+    assert all(shot.keyframe_ids_json for shot in shots)
 
 def test_social_link_retries_with_fallback_format(db, monkeypatch):
     monkeypatch.setattr(video_inspiration, "_yt_dlp_command", lambda: ["yt-dlp"])
@@ -351,6 +499,43 @@ def _seed_video_job(db, tmp_path, *, job_id="job-to-analyze") -> DBVideoInspirat
     return job
 
 
+def test_active_video_inspiration_job_response_marks_stale(db, tmp_path, monkeypatch):
+    job = _seed_video_job(db, tmp_path, job_id="stale-analyze")
+    now = datetime(2026, 7, 13, 10, 0, 0)
+    monkeypatch.setattr(video_inspiration, "_now", lambda: now)
+
+    job.status = "analyzing"
+    job.current_step = "visual_analysis"
+    job.progress = 0.62
+    job.updated_at = now - timedelta(seconds=video_inspiration.ACTIVE_JOB_STALE_SECONDS + 1)
+    db.commit()
+
+    result = video_inspiration.get_job(job.id, db)
+
+    assert result is not None
+    assert result.status == "analyzing"
+    assert result.is_stale is True
+    assert result.stale_reason
+
+
+def test_fresh_active_video_inspiration_job_response_is_not_stale(db, tmp_path, monkeypatch):
+    job = _seed_video_job(db, tmp_path, job_id="fresh-analyze")
+    now = datetime(2026, 7, 13, 10, 0, 0)
+    monkeypatch.setattr(video_inspiration, "_now", lambda: now)
+
+    job.status = "analyzing"
+    job.current_step = "visual_analysis"
+    job.progress = 0.62
+    job.updated_at = now
+    db.commit()
+
+    result = video_inspiration.get_job(job.id, db)
+
+    assert result is not None
+    assert result.is_stale is False
+    assert result.stale_reason is None
+
+
 def test_analyze_uses_audio_transcript_stub_and_saves_analysis(db, tmp_path, monkeypatch):
     job = _seed_video_job(db, tmp_path)
     audio_path = tmp_path / "speech.wav"
@@ -405,6 +590,14 @@ def test_analyze_uses_audio_transcript_stub_and_saves_analysis(db, tmp_path, mon
     assert result.audio_path is not None
     assert result.status == "analyzed"
     assert result.analysis_json["main_idea_vi"] == "Ý chính"
+    assert result.analysis_schema_version == video_inspiration.ANALYSIS_SCHEMA_VERSION
+    assert result.analysis_package_json is not None
+    assert result.analysis_package_json["retention_source"] == "predicted_from_content"
+    assert result.coverage_metrics_json["transcript_segment_count"] == 1
+    assert result.transcript_segments[0].timestamp_precision == "file"
+    assert result.audio_events[0].event_type == "speech"
+    assert result.content_retention_beats
+    assert result.created_video_project_id is None
 
 
 def test_transcribe_audio_chunks_long_wav_before_whisper(tmp_path, monkeypatch):
@@ -447,12 +640,71 @@ def test_transcribe_audio_chunks_long_wav_before_whisper(tmp_path, monkeypatch):
     assert fake_whisper.loaded_model == "turbo"
     assert model_size == "turbo"
     assert text == "chunk text 1\nchunk text 2\nchunk text 3"
+    segments = getattr(video_inspiration._transcribe_audio, "last_segments")
+    assert [segment["timestamp_precision"] for segment in segments] == ["chunk", "chunk", "chunk"]
+    assert [(segment["start_seconds"], segment["end_seconds"]) for segment in segments] == [
+        (0.0, 25.0),
+        (25.0, 50.0),
+        (50.0, 61.0),
+    ]
     assert [call[0] for call in transcribe_calls] == ["chunk-001.wav", "chunk-002.wav", "chunk-003.wav"]
     assert [call[1] for call in transcribe_calls] == [None, None, None]
     assert [call[2] for call in transcribe_calls] == ["turbo", "turbo", "turbo"]
     assert len(commands) == 3
     assert [command[command.index("-ss") + 1] for command in commands] == ["0.000", "25.000", "50.000"]
     assert [command[command.index("-t") + 1] for command in commands] == ["25.000", "25.000", "11.000"]
+
+def test_transcribe_audio_filters_music_only_label(tmp_path, monkeypatch):
+    audio_path = tmp_path / "speech.wav"
+    audio_path.write_bytes(b"fake wav")
+
+    class FakeWhisper:
+        model_size = "tiny"
+
+        async def load_model_async(self, model_size):
+            pass
+
+        async def transcribe(self, path, language, model_size):
+            return "Music"
+
+    monkeypatch.setattr(video_inspiration, "get_whisper_model", lambda: FakeWhisper())
+    monkeypatch.setattr(video_inspiration, "_audio_duration_seconds", lambda path: 10.0)
+
+    text, model_size = asyncio.run(video_inspiration._transcribe_audio(audio_path, model_size="turbo"))
+
+    assert text == ""
+    assert model_size == "turbo"
+
+def test_transcribe_audio_skips_music_chunks_but_keeps_speech(tmp_path, monkeypatch):
+    audio_path = tmp_path / "speech.wav"
+    audio_path.write_bytes(b"fake wav")
+    outputs = iter(["[Music]", "Actual spoken line", "music music"])
+
+    class FakeWhisper:
+        model_size = "tiny"
+
+        async def load_model_async(self, model_size):
+            pass
+
+        async def transcribe(self, path, language, model_size):
+            return next(outputs)
+
+    def fake_run_command(command, *, timeout_seconds=video_inspiration.FFMPEG_TIMEOUT_SECONDS):
+        Path(command[-1]).write_bytes(b"fake chunk")
+        return video_inspiration.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(video_inspiration, "get_whisper_model", lambda: FakeWhisper())
+    monkeypatch.setattr(video_inspiration, "_audio_duration_seconds", lambda path: 61.0)
+    monkeypatch.setattr(
+        video_inspiration,
+        "_tools",
+        lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg-bin", ffprobe=None),
+    )
+    monkeypatch.setattr(video_inspiration, "_run_command", fake_run_command)
+
+    text, _model_size = asyncio.run(video_inspiration._transcribe_audio(audio_path, model_size="turbo"))
+
+    assert text == "Actual spoken line"
 
 def test_analyze_requires_vision_provider_unless_audio_only_allowed(db, tmp_path, monkeypatch):
     job = _seed_video_job(db, tmp_path, job_id="job-needs-vision")
@@ -490,6 +742,55 @@ def test_analyze_requires_vision_provider_unless_audio_only_allowed(db, tmp_path
     assert job.error_code == "AI_PLANNING_PROVIDER_NOT_READY"
 
 
+def _optimized_rewrite_payload(*, title="New title", hook_3_5s=None):
+    hook_text = hook_3_5s or (
+        "Open on a tiny stick figure facing a huge cracked wall, with one hammer tap and a silence drop."
+    )
+    return {
+        "title": title,
+        "big_idea": "New idea",
+        "hook": "A strong hook",
+        "hook_3_5s": hook_text,
+        "viewer_question": "Can one small action break the wall?",
+        "curiosity_gap": "The viewer waits to see whether the crack becomes a path.",
+        "script": "New English script",
+        "segments": [
+            {
+                "title": "First strike",
+                "narration": "One small hit is still a beginning.",
+                "visual_suggestion": "Minimal stick figure lifts a hammer beside a dark wall.",
+                "retention_role": "cold open",
+                "audio_cue": "single hammer tap, brief silence drop",
+            }
+        ],
+        "visual_suggestions": ["Minimal stick figure, ivory paper, black ink wall."],
+        "retention_plan": {
+            "viewer_question": "Can one small action break the wall?",
+            "curiosity_gap": "The crack may become a path.",
+            "beat_curve": ["0-5s wall/hit", "5-15s cracks grow", "15-30s stones become steps"],
+            "pattern_interrupts": ["Silence drop before hammer tap"],
+            "payoff": "The fallen wall becomes stairs.",
+            "drop_off_risks": ["Opening too slow"],
+        },
+        "sound_design_plan": {
+            "music_mood": "quiet tension then hopeful lift",
+            "ambience": "paper room tone",
+            "sfx_cues": [{"timing": "0-3s", "cue": "hammer tap", "purpose": "mark the hook"}],
+            "silence_drops": ["before first tap"],
+            "mixing_notes": "Voice must stay above music and SFX.",
+        },
+        "audio_direction": "Use sparse taps and stone crumble; do not cover narration.",
+        "ai_video_source_blocks": {
+            "idea": "New idea\nHook 3-5s: tiny figure, huge wall, hammer tap.",
+            "rough_script": "New English script",
+            "character_notes": "Stick figure, cracked wall, paper background.",
+            "style_notes": "Retention: crack becomes a path.\nSound design: hammer tap, silence, crumble.",
+            "must_have": "Hook 3-5s, hammer tap, wall becomes stairs.",
+            "avoid": "Do not copy original; avoid loud SFX over narration.",
+        },
+        "originality_note": "New work, not a copy.",
+    }
+
 def test_rewrite_prompt_uses_target_language_and_bold_remix(db, monkeypatch):
     now = datetime.utcnow()
     job = DBVideoInspirationJob(
@@ -510,25 +811,44 @@ def test_rewrite_prompt_uses_target_language_and_bold_remix(db, monkeypatch):
     db.add(job)
     db.commit()
 
-    captured = {}
+    captured = []
 
     def fake_structured_ai(session, prompt, schema, *, timeout_seconds=600):
-        captured["prompt"] = prompt
-        return {
-            "title": "New title",
-            "big_idea": "New idea",
-            "hook": "New hook",
-            "script": "New English script",
-            "segments": [
-                {
-                    "title": "Segment 1",
-                    "narration": "Narration",
-                    "visual_suggestion": "Visual suggestion",
-                }
-            ],
-            "visual_suggestions": ["Visual suggestion"],
-            "originality_note": "New work, not a copy.",
-        }
+        captured.append((prompt, schema))
+        if schema is video_inspiration.CREATIVE_BRIEF_SCHEMA:
+            return {
+                "strategy_summary": "Make the visual metaphor more active.",
+                "core_insight": "Small actions compound.",
+                "audience_promise": "A simple action can become a path.",
+                "visual_direction": "Minimal stick figure and cracked wall.",
+                "constraints": ["Do not copy the original."],
+                "candidate_angles": ["hook-led wall strike", "emotional perseverance"],
+            }
+        if schema is video_inspiration.REWRITE_CANDIDATES_SCHEMA:
+            return {"candidates": [_optimized_rewrite_payload(title="Candidate 1"), _optimized_rewrite_payload(title="Candidate 2")]}
+        if schema is video_inspiration.REWRITE_REVIEW_SCHEMA:
+            return {
+                "reviews": [
+                    {
+                        "candidate_index": 1,
+                        "score": 8.5,
+                        "strengths": ["Strong hook"],
+                        "weaknesses": ["Needs clearer payoff"],
+                        "best_parts": ["Hammer tap hook"],
+                    },
+                    {
+                        "candidate_index": 2,
+                        "score": 8.0,
+                        "strengths": ["Good emotion"],
+                        "weaknesses": ["Slower open"],
+                        "best_parts": ["Stairs payoff"],
+                    },
+                ],
+                "synthesis_direction": "Use the first hook and second payoff.",
+            }
+        if schema is video_inspiration.REWRITE_SCHEMA:
+            return _optimized_rewrite_payload()
+        raise AssertionError("unexpected schema")
 
     monkeypatch.setattr(video_inspiration, "_provider_ready", lambda session: (True, "ready", None))
     monkeypatch.setattr(video_inspiration, "_run_structured_ai", fake_structured_ai)
@@ -543,14 +863,92 @@ def test_rewrite_prompt_uses_target_language_and_bold_remix(db, monkeypatch):
     )
 
     assert result is not None
-    assert "bold_remix" in captured["prompt"]
-    assert "English" in captured["prompt"]
-    assert "3D stick figure story about karma" in captured["prompt"]
+    prompts = "\n\n".join(prompt for prompt, _schema in captured)
+    assert len(captured) == 4
+    assert "bold_remix" in prompts
+    assert "English" in prompts
+    assert "3D stick figure story about karma" in prompts
     assert result.target_language == "en"
     assert result.user_direction == "Make it a 3D stick figure story about karma."
     assert result.script_title == "New title"
+    assert "tiny stick figure facing a huge cracked wall" in result.hook
     assert "New English script" in result.rewritten_script
+    assert "Hook 3-5 giây" in result.rewritten_script
+    assert "Nhịp giữ chân" in result.rewritten_script
+    assert "Âm thanh / sound design" in result.rewritten_script
+    assert result.analysis_json["rewrite_creative_brief"]["core_insight"] == "Small actions compound."
+    assert len(result.analysis_json["rewrite_candidates"]["candidates"]) == 2
+    assert result.analysis_json["rewrite_review"]["synthesis_direction"] == "Use the first hook and second payoff."
+    assert result.analysis_json["rewrite"]["retention_plan"]["payoff"] == "The fallen wall becomes stairs."
+    assert result.analysis_json["rewrite"]["sound_design_plan"]["mixing_notes"] == "Voice must stay above music and SFX."
+    assert "rough_script" in result.analysis_json["rewrite"]["ai_video_source_blocks"]
 
+
+def test_rewrite_incomplete_final_payload_does_not_overwrite_existing_script(db, monkeypatch):
+    now = datetime.utcnow()
+    job = DBVideoInspirationJob(
+        id="rewrite-job-incomplete",
+        source_type="upload",
+        source_platform="upload",
+        status="rewritten",
+        current_step="completed",
+        progress=1.0,
+        target_language="en",
+        rewrite_mode="bold_remix",
+        transcript_text="Original transcript",
+        visual_summary="Visual summary",
+        analysis_json={"main_idea_vi": "Ý chính"},
+        rewritten_script="Old valid script",
+        script_title="Old title",
+        big_idea="Old idea",
+        hook="Old hook",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(job)
+    db.commit()
+
+    def fake_structured_ai(session, prompt, schema, *, timeout_seconds=600):
+        if schema is video_inspiration.CREATIVE_BRIEF_SCHEMA:
+            return {
+                "strategy_summary": "Brief",
+                "core_insight": "Insight",
+                "audience_promise": "Promise",
+                "visual_direction": "Visual",
+                "constraints": ["Constraint"],
+                "candidate_angles": ["Angle 1", "Angle 2"],
+            }
+        if schema is video_inspiration.REWRITE_CANDIDATES_SCHEMA:
+            return {"candidates": [_optimized_rewrite_payload(title="Candidate 1"), _optimized_rewrite_payload(title="Candidate 2")]}
+        if schema is video_inspiration.REWRITE_REVIEW_SCHEMA:
+            return {
+                "reviews": [
+                    {
+                        "candidate_index": 1,
+                        "score": 8,
+                        "strengths": ["Strong"],
+                        "weaknesses": ["Weak"],
+                        "best_parts": ["Hook"],
+                    }
+                ],
+                "synthesis_direction": "Improve final.",
+            }
+        payload = _optimized_rewrite_payload()
+        payload.pop("hook_3_5s")
+        return payload
+
+    monkeypatch.setattr(video_inspiration, "_provider_ready", lambda session: (True, "ready", None))
+    monkeypatch.setattr(video_inspiration, "_run_structured_ai", fake_structured_ai)
+
+    with pytest.raises(video_inspiration.VideoInspirationError) as exc:
+        video_inspiration.rewrite_job(job.id, models.VideoInspirationRewriteRequest(), db)
+
+    assert exc.value.error_code == "VIDEO_INSPIRATION_REWRITE_INCOMPLETE"
+    db.refresh(job)
+    assert job.rewritten_script == "Old valid script"
+    assert job.script_title == "Old title"
+    assert job.big_idea == "Old idea"
+    assert job.hook == "Old hook"
 
 def test_update_direction_is_optional_and_clears_stale_script(db, tmp_path):
     job = _seed_video_job(db, tmp_path, job_id="job-direction")
@@ -578,6 +976,44 @@ def test_update_direction_is_optional_and_clears_stale_script(db, tmp_path):
     assert result.status == "direction_edited"
 
 
+def test_update_transcript_keeps_raw_segment_and_adds_user_edit(db, tmp_path):
+    job = _seed_video_job(db, tmp_path, job_id="job-transcript-edit")
+    raw_segment = DBVideoInspirationTranscriptSegment(
+        id="raw-segment-1",
+        job_id=job.id,
+        segment_order=1,
+        start_seconds=0.0,
+        end_seconds=4.0,
+        text="Lời nhận diện ban đầu",
+        raw_text="Lời nhận diện ban đầu",
+        source="stt_raw",
+        timestamp_precision="chunk",
+        shot_ids_json=[],
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(raw_segment)
+    db.commit()
+
+    result = video_inspiration.update_transcript(
+        job.id,
+        models.VideoInspirationTranscriptUpdate(transcript_text="Bản người dùng đã sửa"),
+        db,
+    )
+
+    assert result is not None
+    rows = (
+        db.query(DBVideoInspirationTranscriptSegment)
+        .filter(DBVideoInspirationTranscriptSegment.job_id == job.id)
+        .all()
+    )
+    assert {row.source for row in rows} == {"stt_raw", "user_edited"}
+    assert next(row for row in rows if row.source == "stt_raw").text == "Lời nhận diện ban đầu"
+    assert next(row for row in rows if row.source == "user_edited").text == "Bản người dùng đã sửa"
+    assert result.analysis_package_json is None
+    assert result.analysis_completeness == "not_started"
+
+
 def test_handoff_creates_ai_video_project_and_full_materials_auto_run(db, monkeypatch):
     now = datetime.utcnow()
     job = DBVideoInspirationJob(
@@ -591,9 +1027,27 @@ def test_handoff_creates_ai_video_project_and_full_materials_auto_run(db, monkey
         target_language="en",
         rewrite_mode="bold_remix",
         transcript_text="Original transcript",
-        visual_summary="Visual notes",
+        visual_summary="Visual notes " * 500,
         user_direction="Use 3D stick figure visuals and keep the karma theme.",
-        analysis_json={"main_idea_vi": "Y chinh"},
+        analysis_json={"main_idea_vi": "Y chinh", "rewrite": _optimized_rewrite_payload()},
+        analysis_package_json={
+            "schema_version": "video_analysis_package.v1",
+            "content_retention_beats": [
+                {
+                    "order": 1,
+                    "role": "hook",
+                    "why_continue": "A wall strike creates an open loop.",
+                    "viewer_question_before": "Can the tiny figure break the wall?",
+                    "new_information": "The crack grows.",
+                    "micro_payoff": "The wall becomes stairs.",
+                    "evidence_refs": [{"type": "shot", "id": "shot-1"}],
+                }
+            ],
+            "transcript_segments": [{"id": "segment-1", "text": "Original transcript"}],
+            "limitations": ["Predicted retention only."],
+        },
+        analysis_package_path="video_inspiration/inspiration-job-1/package.json",
+        analysis_completeness="full",
         rewritten_script="New script for AI Video",
         script_title="New script title",
         big_idea="A stronger new idea",
@@ -638,6 +1092,7 @@ def test_handoff_creates_ai_video_project_and_full_materials_auto_run(db, monkey
     assert project.phase == "phase2"
     assert project.title == "New script title"
     assert "3D stick figure visuals" in (project.visual_style or "")
+    assert len(project.visual_style or "") <= 2000
 
     blocks = (
         db.query(DBVideoSourceBlock)
@@ -645,13 +1100,75 @@ def test_handoff_creates_ai_video_project_and_full_materials_auto_run(db, monkey
         .all()
     )
     block_types = {row.block_type for row in blocks}
-    assert {"script", "user_direction", "analysis", "visual_notes", "transcript"}.issubset(block_types)
-    user_direction_block = next(row for row in blocks if row.block_type == "user_direction")
-    assert "karma theme" in user_direction_block.content
+    assert {"idea", "rough_script", "character_notes", "style_notes", "must_have", "avoid", "analysis", "transcript"}.issubset(block_types)
+    idea_block = next(row for row in blocks if row.block_type == "idea")
+    assert "A stronger new idea" in idea_block.content
+    assert "A new hook" in idea_block.content
+    rough_script_block = next(row for row in blocks if row.block_type == "rough_script")
+    assert "New script for AI Video" in rough_script_block.content
+    assert "source_transcript_is_evidence_only" in rough_script_block.content
+    style_notes_block = next(row for row in blocks if row.block_type == "style_notes")
+    assert "Retention" in style_notes_block.content
+    assert "Sound design" in style_notes_block.content
+    transcript_block = next(row for row in blocks if row.block_type == "transcript")
+    assert "source_transcript_for_evidence_only" in transcript_block.content
 
     db.refresh(job)
     assert job.created_video_project_id == result.project.id
     assert job.status == "ai_video_ready"
+
+
+def test_handoff_project_title_ignores_generic_download_filename(db):
+    now = datetime.utcnow()
+    job = DBVideoInspirationJob(
+        id="inspiration-download-name",
+        source_type="url",
+        source_url="https://www.youtube.com/watch?v=example",
+        source_platform="youtube",
+        original_filename="download.mp4",
+        status="rewritten",
+        current_step="completed",
+        progress=1.0,
+        target_language="vi",
+        rewrite_mode="bold_remix",
+        transcript_text="Một câu chuyện về sống thật với chính mình.",
+        visual_summary="Visual notes",
+        user_direction="Tạo kịch bản video người que.",
+        analysis_json={
+            "main_idea_vi": "Bài học về tự chấp nhận bản thân",
+            "rewrite": {"title": "download mp4"},
+        },
+        analysis_package_json={
+            "schema_version": "video_analysis_package.v1",
+            "content_retention_beats": [],
+            "transcript_segments": [{"id": "segment-1", "text": "Transcript"}],
+            "limitations": [],
+        },
+        analysis_package_path="video_inspiration/inspiration-download-name/package.json",
+        analysis_completeness="partial",
+        rewritten_script="Kịch bản mới cho AI Video",
+        script_title="download.mp4",
+        big_idea="Bài học về tự chấp nhận bản thân",
+        hook="Nếu cuộn giấy trống thì bạn còn lại gì?",
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(job)
+    db.commit()
+
+    result = asyncio.run(
+        video_inspiration.create_ai_video_project(
+            job.id,
+            models.VideoInspirationCreateProjectRequest(),
+            db,
+        ),
+    )
+
+    assert result is not None
+    assert result.project.title == "Bài học về tự chấp nhận bản thân"
+    assert "download" not in result.project.title.lower()
+    handoff = db.query(DBVideoInspirationHandoff).filter(DBVideoInspirationHandoff.job_id == job.id).one()
+    assert handoff.payload_json["target_content"]["approved_script"]["title"] == "Bài học về tự chấp nhận bản thân"
 
 
 def test_handoff_default_does_not_start_auto_run(db, monkeypatch):
@@ -670,6 +1187,23 @@ def test_handoff_default_does_not_start_auto_run(db, monkeypatch):
         visual_summary="Visual notes",
         user_direction="Use 3D stick figure visuals and keep the karma theme.",
         analysis_json={"main_idea_vi": "Y chinh"},
+        analysis_package_json={
+            "schema_version": "video_analysis_package.v1",
+            "content_retention_beats": [
+                {
+                    "order": 1,
+                    "role": "hook",
+                    "why_continue": "The opening creates a clear question.",
+                    "viewer_question_before": "What changes next?",
+                    "new_information": "The target story introduces a new choice.",
+                    "micro_payoff": "The choice becomes visible.",
+                }
+            ],
+            "transcript_segments": [{"id": "segment-1", "text": "Original transcript"}],
+            "limitations": ["Predicted retention only."],
+        },
+        analysis_package_path="video_inspiration/inspiration-job-manual/package.json",
+        analysis_completeness="full",
         rewritten_script="New script for AI Video",
         script_title="New script title",
         big_idea="A stronger new idea",

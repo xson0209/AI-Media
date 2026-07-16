@@ -290,6 +290,7 @@ async def generate_audio_sync(
     from ..utils.audio import normalize_audio, trim_tts_output
     from . import tts
     from . import qwen_vietnamese, tada_vietnamese
+    from .task_queue import generation_inference_slot
 
     tada_vietnamese.ensure_tada_vietnamese_allowed(
         engine=engine,
@@ -298,44 +299,45 @@ async def generate_audio_sync(
         allow_evaluation=allow_experimental_tada_vietnamese,
     )
 
-    bg_db = next(get_db())
-    try:
-        profile = await profiles.get_profile(profile_id, bg_db)
-        qwen_vietnamese.ensure_qwen_vietnamese_allowed(
-            profile=profile,
-            engine=engine,
-            model_size=model_size,
+    async with generation_inference_slot():
+        bg_db = next(get_db())
+        try:
+            profile = await profiles.get_profile(profile_id, bg_db)
+            qwen_vietnamese.ensure_qwen_vietnamese_allowed(
+                profile=profile,
+                engine=engine,
+                model_size=model_size,
+                language=language,
+            )
+            tts_model = get_tts_backend_for_engine(engine)
+            await load_engine_model(engine, model_size)
+
+            voice_prompt = await profiles.create_voice_prompt_for_profile(
+                profile_id,
+                bg_db,
+                use_cache=True,
+                engine=engine,
+                language=language,
+            )
+        finally:
+            bg_db.close()
+
+        trim_fn = trim_tts_output if engine_needs_trim(engine) else None
+
+        gen_kwargs: dict = dict(
             language=language,
+            seed=seed,
+            instruct=instruct,
+            trim_fn=trim_fn,
         )
-        tts_model = get_tts_backend_for_engine(engine)
-        await load_engine_model(engine, model_size)
+        if max_chunk_chars is not None:
+            gen_kwargs["max_chunk_chars"] = max_chunk_chars
+        if crossfade_ms is not None:
+            gen_kwargs["crossfade_ms"] = crossfade_ms
 
-        voice_prompt = await profiles.create_voice_prompt_for_profile(
-            profile_id,
-            bg_db,
-            use_cache=True,
-            engine=engine,
-            language=language,
+        audio, sample_rate = await generate_chunked(
+            tts_model, text, voice_prompt, **gen_kwargs
         )
-    finally:
-        bg_db.close()
-
-    trim_fn = trim_tts_output if engine_needs_trim(engine) else None
-
-    gen_kwargs: dict = dict(
-        language=language,
-        seed=seed,
-        instruct=instruct,
-        trim_fn=trim_fn,
-    )
-    if max_chunk_chars is not None:
-        gen_kwargs["max_chunk_chars"] = max_chunk_chars
-    if crossfade_ms is not None:
-        gen_kwargs["crossfade_ms"] = crossfade_ms
-
-    audio, sample_rate = await generate_chunked(
-        tts_model, text, voice_prompt, **gen_kwargs
-    )
 
     if normalize:
         audio = normalize_audio(audio)

@@ -62,7 +62,7 @@ def test_path_helpers_and_compat_wrapper(tmp_path):
         config.set_data_dir(tmp_path)
         profile_path = config.get_profiles_dir() / "sample.wav"
 
-        assert config.to_storage_path(profile_path) == str(Path("profiles") / "sample.wav")
+        assert config.to_storage_path(profile_path) == "profiles/sample.wav"
         assert config.resolve_storage_path("profiles/sample.wav") == profile_path.resolve()
         assert compat_config.get_data_dir() == tmp_path.resolve()
     finally:

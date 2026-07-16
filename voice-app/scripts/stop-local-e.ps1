@@ -19,7 +19,7 @@ Get-CimInstance Win32_Process | Where-Object {
     Add-ProcessId $ProcessIds $_.ProcessId
 }
 
-Get-NetTCPConnection -LocalPort 17493,5173 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
+Get-NetTCPConnection -LocalPort 17493,209 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
     Add-ProcessId $ProcessIds $_.OwningProcess
 }
 

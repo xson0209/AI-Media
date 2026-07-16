@@ -13,7 +13,7 @@ LOG_DIR="$REPO_ROOT/.run-logs"
 ALL_LOG="$LOG_DIR/dev-all.log"
 API_LOG="$LOG_DIR/api-dev.log"
 API_BUG_LOG="$LOG_DIR/api-bugs.log"
-DEV_PORTS_CONFIG="${DEV_PORTS:-17493 5173}"
+DEV_PORTS_CONFIG="${DEV_PORTS:-17493 209}"
 DEV_PORTS=()
 
 for port in $DEV_PORTS_CONFIG; do
@@ -372,7 +372,7 @@ kill_other_dev_environments
 
 log_marker "==> Starting dev servers"
 printf 'Backend API expected at http://localhost:17493\n'
-printf 'Frontend expected at http://localhost:5173\n'
+printf 'Frontend expected at http://localhost:209\n'
 
 # Start backend in background
 log_marker "==> Starting backend server"

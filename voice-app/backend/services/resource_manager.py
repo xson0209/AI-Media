@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..database import (
     VideoAutoRun as DBVideoAutoRun,
+    VideoInspirationJob as DBVideoInspirationJob,
     VideoRenderJob as DBVideoRenderJob,
     get_db,
 )
@@ -177,6 +178,9 @@ class ResourceManager:
     def status(self, db: Session | None = None) -> dict[str, Any]:
         memory = memory_pressure_snapshot(self.policy())
         queue = generation_queue_snapshot()
+        workflow_pool = workflow_pool_snapshot()
+        planning_pool = planning_pool_snapshot()
+        stt_pool = stt_pool_snapshot()
         active = active_job_snapshot(db)
         voice_cache = voice_prompt_cache_snapshot()
         render_cache = render_cache_snapshot()
@@ -189,6 +193,9 @@ class ResourceManager:
             "policy": self.policy(),
             "memory": memory,
             "generation_queue": queue,
+            "workflow_pool": workflow_pool,
+            "planning_pool": planning_pool,
+            "stt_pool": stt_pool,
             "active_jobs": active,
             "models": sorted(models, key=lambda item: item.get("key") or ""),
             "voice_prompt_cache": voice_cache,
@@ -582,6 +589,33 @@ def generation_queue_snapshot() -> dict[str, Any]:
         return {"queued": 0, "running": 0, "available": False}
 
 
+def workflow_pool_snapshot() -> dict[str, Any]:
+    try:
+        from .video_workflow_pool import snapshot
+
+        return snapshot()
+    except Exception:
+        return {"queued": 0, "running": 0, "max_concurrency": 3, "available": False}
+
+
+def planning_pool_snapshot() -> dict[str, Any]:
+    try:
+        from .video_planning_pool import resource_snapshot
+
+        return resource_snapshot()
+    except Exception:
+        return {"queued": 0, "running": 0, "max_concurrency": 3, "available": False}
+
+
+def stt_pool_snapshot() -> dict[str, Any]:
+    try:
+        from .video_inspiration_runs import get_stt_pool_snapshot
+
+        return get_stt_pool_snapshot()
+    except Exception:
+        return {"queued": 0, "running": 0, "max_concurrency": 1, "available": False}
+
+
 def has_active_generation_work() -> bool:
     queue = generation_queue_snapshot()
     if int(queue.get("queued") or 0) or int(queue.get("running") or 0):
@@ -594,17 +628,24 @@ def has_active_generation_work() -> bool:
 def active_resource_snapshot(db: Session | None = None) -> dict[str, Any]:
     return {
         "generation_queue": generation_queue_snapshot(),
+        "workflow_pool": workflow_pool_snapshot(),
+        "planning_pool": planning_pool_snapshot(),
+        "stt_pool": stt_pool_snapshot(),
         "active_jobs": active_job_snapshot(db),
     }
 
 def has_active_resource_work(db: Session | None = None) -> bool:
     if has_active_generation_work():
         return True
+    for pool in (workflow_pool_snapshot(), planning_pool_snapshot(), stt_pool_snapshot()):
+        if int(pool.get("queued") or 0) or int(pool.get("running") or 0):
+            return True
     active = active_job_snapshot(db)
     return bool(
         int(active.get("generation_count") or 0)
         or int(active.get("render_count") or 0)
         or int(active.get("auto_run_count") or 0)
+        or int(active.get("video_inspiration_count") or 0)
     )
 
 
@@ -625,6 +666,7 @@ def active_job_snapshot(db: Session | None = None) -> dict[str, Any]:
 
     render_count = 0
     auto_run_count = 0
+    video_inspiration_count = 0
     close_db = False
     if db is None:
         try:
@@ -636,11 +678,15 @@ def active_job_snapshot(db: Session | None = None) -> dict[str, Any]:
         try:
             render_count = db.query(DBVideoRenderJob).filter(DBVideoRenderJob.status.in_(["queued", "running"])).count()
             auto_run_count = db.query(DBVideoAutoRun).filter(
-                DBVideoAutoRun.status.in_(["queued", "running", "waiting_planning", "waiting_voice"])
+                DBVideoAutoRun.status.in_(["queued", "waiting_workflow", "running", "waiting_planning", "waiting_voice"])
+            ).count()
+            video_inspiration_count = db.query(DBVideoInspirationJob).filter(
+                DBVideoInspirationJob.status.in_(["analyzing", "rewriting", "handoff"])
             ).count()
         except Exception:
             render_count = 0
             auto_run_count = 0
+            video_inspiration_count = 0
         finally:
             if close_db:
                 db.close()
@@ -649,6 +695,7 @@ def active_job_snapshot(db: Session | None = None) -> dict[str, Any]:
         "generation_count": len(active_generations),
         "render_count": int(render_count or 0),
         "auto_run_count": int(auto_run_count or 0),
+        "video_inspiration_count": int(video_inspiration_count or 0),
     }
 
 

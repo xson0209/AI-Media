@@ -20,6 +20,7 @@ from . import (
     history,
     profiles,
     qwen_vietnamese,
+    series_brain,
     tada_vietnamese,
     video_errors,
     video_language,
@@ -27,9 +28,10 @@ from . import (
     video_rendering,
     video_state,
     video_storage,
+    video_subtitles,
 )
 from .generation import run_generation
-from .task_queue import enqueue_generation
+from .task_queue import cancel_generation as cancel_generation_job, enqueue_generation
 
 
 class VideoVoiceError(ValueError):
@@ -232,6 +234,9 @@ def sync_scene_voice_status(project_id: str, scene_id: str, db: Session) -> mode
         return _status_response(scene)
 
     generation = db.query(DBGeneration).filter(DBGeneration.id == scene.generation_id).first()
+    previous_voice_status = scene.voice_status
+    previous_audio_path = scene.audio_path
+    previous_audio_duration = scene.audio_duration
     if generation is None:
         scene.voice_status = "failed"
         scene.voice_failure_reason = "Không tìm thấy generation đã liên kết với scene."
@@ -240,6 +245,15 @@ def sync_scene_voice_status(project_id: str, scene_id: str, db: Session) -> mode
         scene.audio_path = generation.audio_path
         scene.audio_duration = generation.duration
         scene.voice_failure_reason = None
+        if previous_voice_status == "completed" and (
+            previous_audio_path != generation.audio_path or previous_audio_duration != generation.duration
+        ):
+            scene.subtitle_status = "stale"
+            video_subtitles.mark_subtitle_stale(
+                project_id,
+                db,
+                reason="Audio scene đã đổi path hoặc duration nên phụ đề project cần tạo lại.",
+            )
     elif generation.status == "failed":
         scene.voice_status = "failed"
         scene.voice_failure_reason = generation.error or "Tạo giọng đọc thất bại."
@@ -259,6 +273,9 @@ def sync_shot_voice_status(project_id: str, shot_id: str, db: Session) -> models
         return _shot_status_response(shot)
 
     generation = db.query(DBGeneration).filter(DBGeneration.id == shot.generation_id).first()
+    previous_voice_status = shot.voice_status
+    previous_audio_path = shot.audio_path
+    previous_audio_duration = shot.audio_duration
     if generation is None:
         shot.voice_status = "failed"
         shot.voice_failure_reason = "Không tìm thấy generation đã liên kết với shot."
@@ -267,6 +284,15 @@ def sync_shot_voice_status(project_id: str, shot_id: str, db: Session) -> models
         shot.audio_path = generation.audio_path
         shot.audio_duration = generation.duration
         shot.voice_failure_reason = None
+        if previous_voice_status == "completed" and (
+            previous_audio_path != generation.audio_path or previous_audio_duration != generation.duration
+        ):
+            shot.subtitle_status = "stale"
+            video_subtitles.mark_subtitle_stale(
+                project_id,
+                db,
+                reason="Audio segment đã đổi path hoặc duration nên phụ đề project cần tạo lại.",
+            )
     elif generation.status == "failed":
         shot.voice_status = "failed"
         shot.voice_failure_reason = generation.error or "Tạo giọng đọc cho shot thất bại."
@@ -276,6 +302,94 @@ def sync_shot_voice_status(project_id: str, shot_id: str, db: Session) -> models
     db.commit()
     db.refresh(shot)
     return _shot_status_response(shot)
+
+
+def cancel_project_voice_generations(project_id: str, db: Session) -> dict:
+    """Cancel active scene/shot voice generations for one AI Video project.
+
+    Completed generations and their audio files are deliberately left intact.
+    Queued/orphaned rows are made terminal immediately; running coroutines use
+    the existing cancellation path and persist their own terminal status.
+    """
+    active_statuses = {"queued", "loading_model", "generating"}
+    scenes = (
+        db.query(DBVideoScene)
+        .filter(DBVideoScene.project_id == project_id, DBVideoScene.generation_id.isnot(None))
+        .all()
+    )
+    shots = (
+        db.query(DBVideoShot)
+        .filter(DBVideoShot.project_id == project_id, DBVideoShot.generation_id.isnot(None))
+        .all()
+    )
+    targets_by_generation: dict[str, list[DBVideoScene | DBVideoShot]] = {}
+    for target in [*scenes, *shots]:
+        if target.generation_id:
+            targets_by_generation.setdefault(target.generation_id, []).append(target)
+
+    generation_ids = list(targets_by_generation)
+    if not generation_ids:
+        return {
+            "project_id": project_id,
+            "queued_cancelled": 0,
+            "running_cancel_requested": 0,
+            "orphaned_cancelled": 0,
+            "scene_count": 0,
+            "shot_count": 0,
+            "generation_ids": [],
+        }
+
+    generations = (
+        db.query(DBGeneration)
+        .filter(DBGeneration.id.in_(generation_ids), DBGeneration.status.in_(active_statuses))
+        .all()
+    )
+    queued_cancelled = 0
+    running_cancel_requested = 0
+    orphaned_cancelled = 0
+    cancelled_scene_ids: set[str] = set()
+    cancelled_shot_ids: set[str] = set()
+    cancelled_generation_ids: list[str] = []
+    task_manager = get_task_manager()
+    now = datetime.utcnow()
+
+    for generation in generations:
+        cancellation_state = cancel_generation_job(generation.id)
+        if cancellation_state == "running":
+            running_cancel_requested += 1
+        else:
+            # A queued coroutine will never execute its own status writer. The
+            # same applies to an active DB row no longer tracked by the worker.
+            generation.status = "cancelled"
+            generation.error = "Generation cancelled"
+            task_manager.complete_generation(generation.id)
+            if cancellation_state == "queued":
+                queued_cancelled += 1
+            else:
+                orphaned_cancelled += 1
+
+        cancelled_generation_ids.append(generation.id)
+        for target in targets_by_generation.get(generation.id, []):
+            target.voice_status = "cancelled"
+            target.voice_failure_reason = "Người dùng đã hủy tạo giọng đọc."
+            target.updated_at = now
+            if isinstance(target, DBVideoScene):
+                cancelled_scene_ids.add(target.id)
+            else:
+                cancelled_shot_ids.add(target.id)
+
+    if cancelled_generation_ids:
+        db.commit()
+
+    return {
+        "project_id": project_id,
+        "queued_cancelled": queued_cancelled,
+        "running_cancel_requested": running_cancel_requested,
+        "orphaned_cancelled": orphaned_cancelled,
+        "scene_count": len(cancelled_scene_ids),
+        "shot_count": len(cancelled_shot_ids),
+        "generation_ids": sorted(cancelled_generation_ids),
+    }
 
 
 async def create_scene_narration(
@@ -316,6 +430,36 @@ async def create_scene_narration(
     _ensure_profile_language_allowed(profile, language)
     allow_tada_vi_bypass = _ensure_language_allowed(profile, engine, model_size, language)
     text = scene.dialogue.strip()
+    if project.series_id:
+        try:
+            series_brain.compile_prompt_context(
+                project.series_id,
+                db,
+                task_type="voice",
+                episode_number=project.episode_number,
+                project_id=project_id,
+                target_ref_type="scene",
+                target_ref_id=scene_id,
+                user_input=text,
+                current_payload={
+                    "language": language,
+                    "profile_id": profile_id,
+                    "scene_order": scene.scene_order,
+                    "narration": text,
+                },
+                persist_trace=True,
+            )
+        except Exception as exc:
+            video_observability.log_event(
+                db,
+                step_name="voice_series_context_trace",
+                status="warning",
+                project_id=project_id,
+                scene_id=scene_id,
+                error_code="SERIES_CONTEXT_TRACE_FAILED",
+                exc=exc,
+                message="Khong luu duoc trace bo nho series cho voice scene.",
+            )
 
     await history.create_generation(
         profile_id=profile_id,
@@ -327,14 +471,14 @@ async def create_scene_narration(
         db=db,
         instruct=data.instruct,
         generation_id=generation_id,
-        status="generating",
+        status="queued",
         engine=engine,
         model_size=model_size,
         source="ai_video_scene",
     )
 
     scene.generation_id = generation_id
-    scene.voice_status = "generating"
+    scene.voice_status = "queued"
     scene.audio_path = None
     scene.audio_duration = None
     scene.voice_failure_reason = None
@@ -343,6 +487,11 @@ async def create_scene_narration(
     project.voice_profile_id = profile_id
     video_rendering.mark_render_outputs_stale(project_id, db)
     video_state.mark_package_stale(project, db)
+    video_subtitles.mark_subtitle_stale(
+        project_id,
+        db,
+        reason="Voice scene được tạo lại nên phụ đề project cần tạo lại.",
+    )
     db.commit()
     db.refresh(scene)
 
@@ -458,6 +607,36 @@ async def create_shot_narration(
             details={"shot_order": shot.shot_order, "voice_profile_id": profile_id, "engine": engine, "language": language},
         )
         raise
+    if project.series_id:
+        try:
+            series_brain.compile_prompt_context(
+                project.series_id,
+                db,
+                task_type="voice",
+                episode_number=project.episode_number,
+                project_id=project_id,
+                target_ref_type="shot",
+                target_ref_id=shot_id,
+                user_input=text,
+                current_payload={
+                    "language": language,
+                    "profile_id": profile_id,
+                    "shot_order": shot.shot_order,
+                    "narration": text,
+                },
+                persist_trace=True,
+            )
+        except Exception as exc:
+            video_observability.log_event(
+                db,
+                step_name="voice_series_context_trace",
+                status="warning",
+                project_id=project_id,
+                shot_id=shot_id,
+                error_code="SERIES_CONTEXT_TRACE_FAILED",
+                exc=exc,
+                message="Khong luu duoc trace bo nho series cho voice shot.",
+            )
 
     await history.create_generation(
         profile_id=profile_id,
@@ -469,14 +648,14 @@ async def create_shot_narration(
         db=db,
         instruct=data.instruct,
         generation_id=generation_id,
-        status="generating",
+        status="queued",
         engine=engine,
         model_size=model_size,
         source="ai_video_shot",
     )
 
     shot.generation_id = generation_id
-    shot.voice_status = "generating"
+    shot.voice_status = "queued"
     shot.audio_path = None
     shot.audio_duration = None
     shot.voice_failure_reason = None
@@ -485,6 +664,11 @@ async def create_shot_narration(
     project.voice_profile_id = profile_id
     video_rendering.mark_render_outputs_stale(project_id, db)
     video_state.mark_package_stale(project, db)
+    video_subtitles.mark_subtitle_stale(
+        project_id,
+        db,
+        reason="Voice segment được tạo lại nên phụ đề project cần tạo lại.",
+    )
     db.commit()
     db.refresh(shot)
 

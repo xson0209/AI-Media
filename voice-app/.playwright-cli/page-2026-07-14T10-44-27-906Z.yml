@@ -1,0 +1,92 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Phân tích truyện tranh" [ref=e33] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e38] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Dự án prompt video" [ref=e41] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Mô hình" [ref=e47] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e51] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e55]: v0.5.0
+    - main [ref=e57]:
+      - generic [ref=e59]:
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - heading "Phân tích truyện tranh" [level=1] [ref=e62]
+            - paragraph [ref=e63]: Dán liên kết hoặc upload ảnh để phân tích và tạo Series truyện.
+          - generic [ref=e81]: "Thiếu codec: svg"
+        - generic [ref=e65]:
+          - generic [ref=e66]:
+            - textbox "https://... link chương truyện" [ref=e70]
+            - combobox [ref=e71]:
+              - option "Tự động" [selected]
+              - option "Truyện dọc"
+              - option "Trang trái → phải"
+              - option "Trang phải → trái"
+            - button "Tạo từ link" [disabled]
+            - generic [ref=e72]: Upload ảnh
+          - generic [ref=e74]:
+            - checkbox "Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này." [checked] [ref=e75]
+            - text: Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này.
+        - generic [ref=e76]:
+          - list [ref=e84]:
+            - listitem [ref=e110]:
+              - button "a13ca0aa Nháp Nguồn web" [ref=e111]:
+                - generic [ref=e112]:
+                  - generic [ref=e113]: a13ca0aa
+                  - generic [ref=e114]: Nháp
+                - paragraph [ref=e115]: Nguồn web
+            - listitem [ref=e85]:
+              - button "I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga Sẵn sàng review Nguồn web" [ref=e86]:
+                - generic [ref=e87]:
+                  - generic [ref=e88]: I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga
+                  - generic [ref=e89]: Sẵn sàng review
+                - paragraph [ref=e90]: Nguồn web
+            - listitem [ref=e91]:
+              - button "I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga Sẵn sàng review Nguồn web" [ref=e92]:
+                - generic [ref=e93]:
+                  - generic [ref=e94]: I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga
+                  - generic [ref=e95]: Sẵn sàng review
+                - paragraph [ref=e96]: Nguồn web
+            - listitem [ref=e97]:
+              - button "b5ee74a0 Lỗi Nguồn web" [ref=e98]:
+                - generic [ref=e99]:
+                  - generic [ref=e100]: b5ee74a0
+                  - generic [ref=e101]: Lỗi
+                - paragraph [ref=e102]: Nguồn web
+            - listitem [ref=e103]:
+              - button "687e5e24 Lỗi Nguồn web" [ref=e104]:
+                - generic [ref=e105]:
+                  - generic [ref=e106]: 687e5e24
+                  - generic [ref=e107]: Lỗi
+                - paragraph [ref=e108]: Nguồn web
+          - generic [ref=e80]:
+            - generic [ref=e116]:
+              - heading "Truyện chưa đặt tên" [level=2] [ref=e117]
+              - generic [ref=e118]: Nháp
+            - generic [ref=e119]:
+              - paragraph [ref=e120]: Đang kiểm tra nguồn · Chưa lấy được dữ liệu
+              - progressbar [ref=e121]
+            - generic [ref=e123]:
+              - button "Chạy phân tích" [disabled]
+              - button "Xóa" [ref=e125]
+  - region "Notifications (F8)":
+    - list

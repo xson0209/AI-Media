@@ -1,0 +1,77 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - img "Voicebox" [ref=e8]
+      - generic [ref=e9]:
+        - link "Tạo giọng" [ref=e10] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e15] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e17] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e21] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e25] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e29] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Phân tích truyện tranh" [ref=e34] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e39] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Dự án prompt video" [ref=e42] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Mô hình" [ref=e48] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e52] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e56]: v0.5.0
+    - main [ref=e58]:
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - generic [ref=e63]:
+            - heading "Phân tích truyện tranh" [level=1] [ref=e65]
+            - paragraph [ref=e66]: Đọc hình ảnh, chữ, nhân vật và bối cảnh; viết kịch bản tối ưu rồi chuyển sang Story Studio.
+          - generic [ref=e67]:
+            - generic [ref=e68]:
+              - generic [ref=e69]: Chưa chọn job
+              - generic [ref=e70]: 0%
+            - progressbar [ref=e71]
+            - paragraph [ref=e73]: Tạo hoặc chọn một lần phân tích.
+        - generic [ref=e74]:
+          - complementary [ref=e75]:
+            - generic [ref=e76]:
+              - generic [ref=e82]:
+                - heading "Nguồn truyện" [level=2] [ref=e83]
+                - paragraph [ref=e84]: Link chương truyện hoặc upload ảnh thủ công
+              - generic [ref=e85]:
+                - generic [ref=e86]:
+                  - textbox "Liên kết chương truyện" [ref=e87]:
+                    - /placeholder: https://... link chương truyện
+                  - combobox "Chế độ đọc truyện" [ref=e88]:
+                    - option "Tự động" [selected]
+                    - option "Truyện dọc"
+                    - option "Trang trái → phải"
+                    - option "Trang phải → trái"
+                - generic [ref=e89]:
+                  - button "Tạo từ link" [disabled]
+                  - generic [ref=e90]: Upload ảnh
+                - generic [ref=e92]:
+                  - checkbox "Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này." [ref=e93]
+                  - text: Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này.
+            - heading "Các lần phân tích" [level=2] [ref=e96]
+            - generic [ref=e102]:
+              - generic [ref=e108]:
+                - heading "Sẵn sàng phân tích" [level=2] [ref=e109]
+                - paragraph [ref=e110]: Codec ảnh và handoff Story Studio
+              - generic [ref=e111]:
+                - generic [ref=e112]:
+                  - generic [ref=e113]: SVG
+                  - generic [ref=e114]: checking
+                - generic [ref=e115]:
+                  - generic [ref=e116]: HEIF / AVIF
+                  - generic [ref=e117]: checking · checking
+          - main [ref=e118]:
+            - generic [ref=e119]: Chọn một lần phân tích để xem kết quả và tiếp tục luồng.
+  - region "Notifications (F8)":
+    - list

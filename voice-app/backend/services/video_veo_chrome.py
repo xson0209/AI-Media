@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from . import chrome_cdp, video_provider_sessions, video_provider_storage, video_storage
@@ -58,9 +59,17 @@ class ProviderClipResult:
     provider_project_url: str | None = None
     provider_project_ref_hash: str | None = None
     download_url_hash: str | None = None
+    observed_model_label: str | None = None
+    observed_model_cost_label: str | None = None
     provider_duration_seconds: float | None = None
     credit_cost: int | None = None
     metadata: dict[str, Any] | None = None
+
+@dataclass(frozen=True)
+class FlowModelObservation:
+    label: str | None = None
+    cost_label: str | None = None
+    source: str = "unreadable"
 
 def make_download_context(
     *,
@@ -155,6 +164,28 @@ def _stable_file(path: Path, *, checks: int = 2, interval_seconds: float = 1.0) 
         time.sleep(interval_seconds)
     return True
 
+def _looks_like_supported_video_file(path: Path) -> bool:
+    try:
+        with path.open("rb") as file:
+            header = file.read(64)
+    except OSError:
+        return False
+    suffix = path.suffix.lower()
+    if suffix in {".mp4", ".m4v", ".mov"}:
+        return len(header) >= 12 and header[4:8] == b"ftyp"
+    if suffix in {".webm", ".mkv"}:
+        return header.startswith(b"\x1a\x45\xdf\xa3")
+    return False
+
+def _is_direct_download_video_response(info: dict[str, Any]) -> bool:
+    content_type = str(info.get("contentType") or "").split(";", 1)[0].strip().lower()
+    if content_type.startswith("video/"):
+        return True
+    if content_type in {"application/octet-stream", "binary/octet-stream"}:
+        suffix = _suffix_from_download_info(info)
+        return suffix in SUPPORTED_VIDEO_SUFFIXES
+    return False
+
 def _configure_download_behavior(client: chrome_cdp.CDPClient, download_dir: Path) -> None:
     download_dir.mkdir(parents=True, exist_ok=True)
     errors: list[Exception] = []
@@ -206,7 +237,16 @@ def wait_for_downloaded_video(
                 details={"download_correlation_id": context.download_correlation_id},
             )
         if len(files) == 1 and _stable_file(files[0]):
-            return files[0]
+            if _looks_like_supported_video_file(files[0]):
+                return files[0]
+            raise VeoChromeError(
+                "File tải về từ Veo có đuôi video nhưng nội dung không phải MP4/WEBM hợp lệ.",
+                error_code="VIDEO_DOWNLOAD_INVALID_FILE",
+                details={
+                    "download_correlation_id": context.download_correlation_id,
+                    "filename": video_storage.sanitize_download_filename(files[0].name, fallback="download"),
+                },
+            )
         temp_files = _temporary_download_files(context.expected_download_dir)
         temp_signature = _download_signature(temp_files)
         if temp_signature:
@@ -592,16 +632,99 @@ def _open_new_flow_project(client: chrome_cdp.CDPClient) -> dict[str, str]:
         details={"url_hash": chrome_cdp.sha256_short(last_snapshot.get("url", ""), length=24)},
     )
 
+def _is_valid_flow_project_url(provider_project_url: str) -> bool:
+    try:
+        parsed = urlparse(str(provider_project_url or "").strip())
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and (parsed.hostname or "").lower() == "labs.google"
+        and "/tools/flow/project/" in (parsed.path or "").lower()
+    )
+
+def _looks_like_flow_auth_challenge(snapshot: dict[str, str]) -> bool:
+    text = _normalize_text(f"{snapshot.get('title', '')}\n{snapshot.get('text', '')}")
+    if video_provider_sessions._looks_like_login(snapshot):
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "captcha",
+            "recaptcha",
+            "xac minh",
+            "xác minh",
+            "verify",
+            "verification",
+            "2fa",
+            "two step",
+            "2-step",
+            "chon tai khoan",
+            "chọn tài khoản",
+            "choose an account",
+        )
+    )
+
+def _looks_like_flow_project_invalid(snapshot: dict[str, str]) -> bool:
+    text = _normalize_text(f"{snapshot.get('title', '')}\n{snapshot.get('text', '')}")
+    url = snapshot.get("url", "").lower()
+    invalid_text = any(
+        marker in text
+        for marker in (
+            "khong tim thay",
+            "không tìm thấy",
+            "da bi xoa",
+            "đã bị xóa",
+            "project not found",
+            "not found",
+            "deleted",
+            "no longer exists",
+            "does not exist",
+        )
+    )
+    redirected_out = "/tools/flow/project/" not in url and "accounts.google" not in url
+    return invalid_text or redirected_out
+
 def _open_existing_flow_project(client: chrome_cdp.CDPClient, provider_project_url: str) -> dict[str, str]:
+    if not _is_valid_flow_project_url(provider_project_url):
+        raise VeoChromeError(
+            "Flow project URL đã lưu không hợp lệ, cần tạo binding mới.",
+            error_code="VIDEO_PROVIDER_PROJECT_INVALID",
+            details={"url_hash": chrome_cdp.sha256_short(str(provider_project_url or ""), length=24)},
+        )
     client.navigate(provider_project_url, timeout=20.0)
     snapshot = _wait_for_flow_project_ready(client)
+    if _looks_like_flow_auth_challenge(snapshot):
+        raise VeoChromeError(
+            "Flow yêu cầu đăng nhập, chọn tài khoản, 2FA hoặc CAPTCHA. Hãy thao tác trong Chrome rồi resume job.",
+            error_code="VIDEO_PROVIDER_PROJECT_NEEDS_LOGIN",
+            details={"url_hash": chrome_cdp.sha256_short(provider_project_url, length=24)},
+        )
     if video_provider_sessions._looks_like_flow_application_error(snapshot):
         if video_provider_sessions._recover_flow_application_error(client, snapshot):
             time.sleep(FLOW_STEP_DELAY_SECONDS)
             client.navigate(provider_project_url, timeout=20.0)
             snapshot = _wait_for_flow_project_ready(client)
+        if video_provider_sessions._looks_like_flow_application_error(snapshot):
+            raise VeoChromeError(
+                "Flow bị Application error khi mở project đã gắn. Voicebox giữ binding cũ để người dùng kiểm tra, không tạo project mới.",
+                error_code="VIDEO_PROVIDER_FLOW_APP_ERROR",
+                details={"url_hash": chrome_cdp.sha256_short(provider_project_url, length=24)},
+            )
+    if _looks_like_flow_auth_challenge(snapshot):
+        raise VeoChromeError(
+            "Flow yêu cầu đăng nhập, chọn tài khoản, 2FA hoặc CAPTCHA. Hãy thao tác trong Chrome rồi resume job.",
+            error_code="VIDEO_PROVIDER_PROJECT_NEEDS_LOGIN",
+            details={"url_hash": chrome_cdp.sha256_short(provider_project_url, length=24)},
+        )
     if _looks_like_flow_project_workspace(snapshot):
         return snapshot
+    if _looks_like_flow_project_invalid(snapshot):
+        raise VeoChromeError(
+            "Flow project đã lưu không còn tồn tại hoặc không còn là project hợp lệ. Voicebox sẽ tạo binding mới.",
+            error_code="VIDEO_PROVIDER_PROJECT_INVALID",
+            details={"url_hash": chrome_cdp.sha256_short(provider_project_url, length=24)},
+        )
     raise VeoChromeError(
         "Không mở lại được Flow project đã gắn với project/job này.",
         error_code="VIDEO_PROVIDER_PROJECT_NOT_READY",
@@ -611,6 +734,61 @@ def _open_existing_flow_project(client: chrome_cdp.CDPClient, provider_project_u
 def _body_text(client: chrome_cdp.CDPClient, *, timeout: float = 10.0) -> str:
     result = _eval_flow_action(client, "return helpers.bodyText();", timeout=timeout)
     return str(result or "")
+
+def _sanitize_flow_label(value: Any, *, max_chars: int = 120) -> str | None:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return None
+    for sensitive in ("@", "cookie", "token", "password", "authorization"):
+        if sensitive in text.lower():
+            return None
+    return text[:max_chars].rstrip()
+
+def _read_current_flow_model(client: chrome_cdp.CDPClient) -> FlowModelObservation:
+    try:
+        result = client.evaluate(
+            """
+            (() => {
+              const visible = (el) => {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' &&
+                  style.visibility !== 'hidden' &&
+                  rect.width > 20 &&
+                  rect.height > 10;
+              };
+              const textOf = (el) => (el.innerText || el.textContent || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
+              const selected = Array.from(document.querySelectorAll(
+                '[aria-selected="true"],[aria-checked="true"],[data-state="checked"],button[aria-pressed="true"],[role="button"][aria-label*="model" i],button[aria-label*="model" i]'
+              ))
+                .filter(visible)
+                .map((el) => {
+                  const text = textOf(el);
+                  const parentText = textOf(el.closest('button,[role="button"],[role="menuitem"],[role="option"],div') || el);
+                  const label = parentText || text;
+                  const lower = label.toLowerCase();
+                  const modelish = /\\b(veo|model|flash|quality|fast|omni|credits?|tín dụng|tin dung)\\b/.test(lower);
+                  return modelish && label.length <= 120 ? {label, source: 'selected'} : null;
+                })
+                .filter(Boolean);
+              const unique = Array.from(new Map(selected.map((item) => [item.label, item])).values());
+              if (unique.length !== 1) return null;
+              const label = unique[0].label;
+              const costMatch = label.match(/(?:\\d+\\s*(?:credits?|tín dụng|tin dung)|(?:free|miễn phí|mien phi))/i);
+              return {label, costLabel: costMatch ? costMatch[0] : null, source: unique[0].source};
+            })()
+            """,
+            timeout=5.0,
+        )
+    except Exception:
+        return FlowModelObservation()
+    if not isinstance(result, dict):
+        return FlowModelObservation()
+    return FlowModelObservation(
+        label=_sanitize_flow_label(result.get("label")),
+        cost_label=_sanitize_flow_label(result.get("costLabel"), max_chars=80),
+        source=_sanitize_flow_label(result.get("source"), max_chars=40) or "selected",
+    )
 
 def _wait_for_prompt_input(client: chrome_cdp.CDPClient, *, timeout: float = FLOW_PROMPT_READY_TIMEOUT_SECONDS) -> bool:
     deadline = time.monotonic() + timeout
@@ -1383,6 +1561,10 @@ def _generated_media_urls(client: chrome_cdp.CDPClient) -> set[str]:
         return set()
     return {str(url) for url in result if str(url or "").strip()}
 
+def _new_generated_media_urls(client: chrome_cdp.CDPClient, baseline_media_urls: set[str] | None) -> set[str]:
+    urls = _generated_media_urls(client)
+    return urls if baseline_media_urls is None else urls - baseline_media_urls
+
 def _generated_media_download_info(client: chrome_cdp.CDPClient, *, baseline_media_urls: set[str] | None = None) -> dict[str, Any] | None:
     baseline_json = json.dumps(sorted(baseline_media_urls or set()))
     script = """
@@ -1420,7 +1602,7 @@ def _generated_media_download_info(client: chrome_cdp.CDPClient, *, baseline_med
                   const media = el.closest('video') || el;
                   const rect = media.getBoundingClientRect();
                   return {
-                    url: new URL(raw, location.origin).href,
+                    url: mediaUrlFromThumbnail(raw),
                     area: visible(media) ? rect.width * rect.height : 1,
                     top: rect.top || Number.MAX_SAFE_INTEGER,
                     left: rect.left || Number.MAX_SAFE_INTEGER
@@ -1430,6 +1612,13 @@ def _generated_media_download_info(client: chrome_cdp.CDPClient, *, baseline_med
               const candidates = [...visibleImages, ...videoUrls]
                 .filter((candidate) => !baseline.has(candidate.url))
                 .sort((a, b) => b.area - a.area || a.top - b.top || a.left - b.left);
+              if (candidates.length > 1) {
+                return {
+                  ambiguous: true,
+                  candidateCount: candidates.length,
+                  sourceUrlHashes: candidates.map((candidate) => candidate.url.slice(-24)),
+                };
+              }
               const src = candidates[0]?.url || null;
               if (!src) return null;
               try {
@@ -1475,7 +1664,18 @@ def _download_generated_media_direct(
     baseline_media_urls: set[str] | None = None,
 ) -> bool:
     info = _generated_media_download_info(client, baseline_media_urls=baseline_media_urls)
+    if info and info.get("ambiguous"):
+        raise VeoChromeError(
+            "Flow có nhiều media mới sau prompt. Voicebox dừng để tránh import nhầm clip vào shot.",
+            error_code="VIDEO_DOWNLOAD_AMBIGUOUS",
+            details={
+                "download_correlation_id": context.download_correlation_id,
+                "candidate_count": info.get("candidateCount"),
+            },
+        )
     if not info or not info.get("ok") or not info.get("downloadUrl"):
+        return False
+    if not _is_direct_download_video_response(info):
         return False
     suffix = _suffix_from_download_info(info)
     context.expected_download_dir.mkdir(parents=True, exist_ok=True)
@@ -1500,6 +1700,9 @@ def _download_generated_media_direct(
         if temp_target.stat().st_size <= 0:
             temp_target.unlink(missing_ok=True)
             return False
+        if not _looks_like_supported_video_file(temp_target):
+            temp_target.unlink(missing_ok=True)
+            return False
         temp_target.replace(target)
         return True
     except Exception as exc:
@@ -1515,6 +1718,45 @@ def _download_generated_media_direct(
                 "download_url_hash": chrome_cdp.sha256_short(str(info.get("downloadUrl") or ""), length=24),
             },
         ) from exc
+
+def _raise_provider_limit_or_policy_if_present(text: str) -> None:
+    if any(marker in text for marker in ("billing", "payment", "thanh toan", "thanh toán", "mua credit", "buy credits")):
+        raise VeoChromeError(
+            "Flow/Veo yêu cầu xử lý billing/payment. Voicebox dừng để người dùng thao tác trong Flow.",
+            error_code="VIDEO_PROVIDER_BILLING_REQUIRED",
+        )
+    if any(
+        marker in text
+        for marker in (
+            "quota",
+            "het quota",
+            "hết quota",
+            "het credit",
+            "hết credit",
+            "out of credits",
+            "not enough credits",
+            "insufficient credits",
+            "credit limit",
+            "khong du tin dung",
+            "không đủ tín dụng",
+            "het tin dung",
+            "hết tín dụng",
+        )
+    ):
+        raise VeoChromeError(
+            "Model Flow đang chọn đã hết quota/credit hoặc bị giới hạn. Hãy tự đổi model trong Flow rồi resume job.",
+            error_code="VIDEO_PROVIDER_MODEL_QUOTA_EXHAUSTED",
+        )
+    if any(marker in text for marker in ("model unavailable", "model is unavailable", "model khong kha dung", "model không khả dụng")):
+        raise VeoChromeError(
+            "Model Flow đang chọn hiện không khả dụng. Hãy tự đổi model trong Flow rồi resume job.",
+            error_code="VIDEO_PROVIDER_MODEL_UNAVAILABLE",
+        )
+    if any(marker in text for marker in ("policy", "vi pham", "vi phạm", "blocked", "khong duoc phep", "không được phép")):
+        raise VeoChromeError(
+            "Flow/Veo chặn request vì chính sách nội dung. Voicebox không tự sửa code để vượt policy.",
+            error_code="VIDEO_PROVIDER_POLICY_BLOCKED",
+        )
 
 def _click_download_when_ready(
     client: chrome_cdp.CDPClient,
@@ -1549,8 +1791,7 @@ def _click_download_when_ready(
                 "Veo chặn prompt vì có thể liên quan người nổi tiếng/public figure. Hãy dùng mô tả cổ động viên hoặc nhân vật hư cấu, không dùng tên/biểu tượng người nổi tiếng.",
                 error_code="VIDEO_PROVIDER_POLICY_PUBLIC_FIGURE",
             )
-        if any(marker in text for marker in ("quota", "billing", "policy", "vi pham", "vi phạm")):
-            raise VeoChromeError("Veo báo lỗi quota/billing/policy.", error_code="VIDEO_PROVIDER_QUOTA_OR_POLICY")
+        _raise_provider_limit_or_policy_if_present(text)
         if (
             not credit_approved
             and credit_approval_policy is not None
@@ -1587,16 +1828,20 @@ def _click_download_when_ready(
                 "Flow báo lỗi khi tạo video và yêu cầu thử lại. Voicebox đã thử bấm Thử lại một lần nhưng chưa tạo được clip.",
                 error_code="VIDEO_PROVIDER_GENERATION_FAILED",
             )
-        if any(marker in text for marker in ("tai xuong", "tải xuống", "download")) and _click_text(
-            client,
-            ["Tải xuống", "Download"],
-            timeout=5.0,
-        ):
-            return approved_credit_cost
         media_count = _generated_media_count(client)
+        new_media_urls = _new_generated_media_urls(client, baseline_media_urls)
+        if baseline_media_urls is not None and len(new_media_urls) > 1:
+            raise VeoChromeError(
+                "Flow có nhiều media mới sau prompt. Voicebox dừng để tránh import nhầm clip vào shot.",
+                error_code="VIDEO_DOWNLOAD_AMBIGUOUS",
+                details={
+                    "download_correlation_id": download_context.download_correlation_id if download_context else None,
+                    "candidate_count": len(new_media_urls),
+                },
+            )
         has_new_media = baseline_media_count is None or media_count > baseline_media_count
         has_media_preview = _has_generated_media_preview(client)
-        has_new_media_url = baseline_media_urls is None or bool(_generated_media_urls(client) - baseline_media_urls)
+        has_new_media_url = baseline_media_urls is None or bool(new_media_urls)
         can_download_media = has_media_preview and (has_new_media if baseline_media_urls is None else has_new_media_url)
         if can_download_media and download_context is not None and _download_generated_media_direct(
             client,
@@ -1604,7 +1849,7 @@ def _click_download_when_ready(
             baseline_media_urls=baseline_media_urls,
         ):
             return approved_credit_cost
-        if can_download_media and _click_generated_media_download(client):
+        if can_download_media and (baseline_media_urls is None or len(new_media_urls) == 1) and _click_generated_media_download(client):
             return approved_credit_cost
         if is_generation_pending:
             saw_generation_pending = True
@@ -1618,7 +1863,7 @@ def _click_download_when_ready(
             baseline_media_urls=baseline_media_urls,
         ):
             return approved_credit_cost
-        if can_download_stable_media and _click_generated_media_download(client):
+        if can_download_stable_media and (baseline_media_urls is None or len(new_media_urls) == 1) and _click_generated_media_download(client):
             return approved_credit_cost
         if has_media_preview and _click_action_row_by_text(client, ["Phê duyệt", "Approve"]):
             time.sleep(FLOW_STEP_DELAY_SECONDS)
@@ -1666,6 +1911,7 @@ def submit_prompt_and_download(
     credit_cost: int | None = None
     current_project_url: str | None = None
     project_ref_hash: str | None = None
+    model_observation = FlowModelObservation()
     with chrome_cdp.CDPClient(target.web_socket_debugger_url) as client:
         _configure_download_behavior(client, download_context.expected_download_dir)
         if provider_project_url:
@@ -1685,6 +1931,7 @@ def submit_prompt_and_download(
         if on_provider_project and current_project_url:
             on_provider_project(current_project_url, project_ref_hash)
         _configure_download_behavior(client, download_context.expected_download_dir)
+        model_observation = _read_current_flow_model(client)
         baseline_media_count = _generated_media_count(client)
         baseline_media_urls = _generated_media_urls(client)
         time.sleep(FLOW_STEP_DELAY_SECONDS)
@@ -1730,6 +1977,8 @@ def submit_prompt_and_download(
         download_correlation_id=download_context.download_correlation_id,
         provider_project_url=current_project_url,
         provider_project_ref_hash=project_ref_hash,
+        observed_model_label=model_observation.label,
+        observed_model_cost_label=model_observation.cost_label,
         provider_duration_seconds=provider_duration,
         credit_cost=credit_cost,
         metadata={
@@ -1743,5 +1992,12 @@ def submit_prompt_and_download(
                 "download_correlation_id": download_context.download_correlation_id,
             },
             "mime_type": guessed_type,
+            "observed_model": {
+                "label": model_observation.label,
+                "cost_label": model_observation.cost_label,
+                "source": model_observation.source,
+                "selection_mode": "use_current_flow_selection",
+                "automatic_model_change": False,
+            },
         },
     )

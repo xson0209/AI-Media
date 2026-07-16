@@ -19,7 +19,7 @@ if (backendOnly && frontendOnly) {
 
 const backendHost = process.env.VOICEBOX_BACKEND_HOST || '127.0.0.1';
 const backendPort = process.env.VOICEBOX_BACKEND_PORT || process.env.VOICEBOX_PORT || '17493';
-const frontendPort = process.env.VOICEBOX_FRONTEND_PORT || '5173';
+const frontendPort = process.env.VOICEBOX_FRONTEND_PORT || '4000';
 const browserBackendHost = backendHost === '0.0.0.0' ? '127.0.0.1' : backendHost;
 const backendUrl = `http://${browserBackendHost}:${backendPort}`;
 const backendReadyUrl = `${backendUrl}/health/ready`;

@@ -7,3 +7,9 @@ soundfile
 librosa
 python-multipart
 huggingface_hub
+beautifulsoup4
+lxml
+pillow-heif>=0.18.0
+pillow-avif-plugin>=1.4.6
+defusedxml>=0.7.1
+resvg-py>=0.3.3

@@ -33,21 +33,34 @@ from . import (
     video_observability,
     video_phase2,
     video_planning_pool,
+    video_publishing_metadata,
     video_rendering,
     video_storage,
     video_subtitles,
     video_voice,
+    video_workflow_pool,
 )
 from .task_queue import create_background_task
 
-ACTIVE_STATUSES = {"queued", "running", "waiting_planning", "waiting_voice", "waiting_clips", "waiting_render", "needs_review", "needs_input"}
+ACTIVE_STATUSES = {
+    "queued",
+    "waiting_workflow",
+    "running",
+    "waiting_planning",
+    "waiting_voice",
+    "waiting_clips",
+    "waiting_render",
+    "needs_review",
+    "needs_input",
+}
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 MATERIAL_TARGET_FULL = "full_materials"
 MATERIAL_TARGET_PROMPTS_ONLY = "prompts_only"
+MATERIAL_TARGET_PUBLISHING_KIT = "publishing_kit"
 MATERIAL_TARGET_VIDEO_CLIPS = "video_clips"
-MATERIAL_TARGETS = {MATERIAL_TARGET_FULL, MATERIAL_TARGET_PROMPTS_ONLY, MATERIAL_TARGET_VIDEO_CLIPS}
+MATERIAL_TARGETS = {MATERIAL_TARGET_FULL, MATERIAL_TARGET_PROMPTS_ONLY, MATERIAL_TARGET_PUBLISHING_KIT, MATERIAL_TARGET_VIDEO_CLIPS}
 VOICE_BUSY_STATUSES = {"queued", "generating", "loading_model"}
-VOICE_RETRYABLE_STATUSES = {"missing", "stale", "failed"}
+VOICE_RETRYABLE_STATUSES = {"missing", "stale", "failed", "cancelled"}
 VOICE_ENQUEUE_BATCH_SIZE = 2
 INTERRUPTED_VOICE_FAILURE_MARKERS = (
     "server was shut down during generation",
@@ -62,6 +75,7 @@ STEP_ORDER = [
     "review_story",
     "generate_shots",
     "generate_prompts",
+    "generate_publishing_metadata",
     "review_prompts",
     "generate_clips",
     "waiting_clips",
@@ -78,9 +92,10 @@ STEP_PROGRESS = {
     "waiting_planning": 0.18,
     "review_story": 0.28,
     "generate_shots": 0.40,
-    "generate_prompts": 0.55,
-    "review_prompts": 0.62,
-    "generate_clips": 0.64,
+    "generate_prompts": 0.53,
+    "generate_publishing_metadata": 0.59,
+    "review_prompts": 0.64,
+    "generate_clips": 0.66,
     "waiting_clips": 0.74,
     "generate_voice": 0.80,
     "waiting_voice": 0.86,
@@ -91,7 +106,8 @@ STEP_PROGRESS = {
 }
 TRANSIENT_STEPS = {"waiting_planning"}
 FULL_MATERIALS_SKIPPED_STEPS = {"generate_clips", "waiting_clips", "generate_render", "waiting_render"}
-PROMPTS_ONLY_SKIPPED_STEPS = {"generate_clips", "waiting_clips", "generate_voice", "waiting_voice", "generate_subtitle", "generate_render", "waiting_render"}
+PROMPTS_ONLY_SKIPPED_STEPS = {"generate_publishing_metadata", "generate_clips", "waiting_clips", "generate_voice", "waiting_voice", "generate_subtitle", "generate_render", "waiting_render"}
+PUBLISHING_KIT_SKIPPED_STEPS = {"generate_clips", "waiting_clips", "generate_voice", "waiting_voice", "generate_subtitle", "generate_render", "waiting_render"}
 VIDEO_CLIPS_SKIPPED_STEPS: set[str] = set()
 
 class VideoAutoRunError(ValueError):
@@ -122,6 +138,8 @@ def _material_target(row: DBVideoAutoRun) -> str:
 def _step_order(row: DBVideoAutoRun) -> list[str]:
     if _material_target(row) == MATERIAL_TARGET_PROMPTS_ONLY:
         return [step for step in STEP_ORDER if step not in PROMPTS_ONLY_SKIPPED_STEPS]
+    if _material_target(row) == MATERIAL_TARGET_PUBLISHING_KIT:
+        return [step for step in STEP_ORDER if step not in PUBLISHING_KIT_SKIPPED_STEPS]
     if _material_target(row) == MATERIAL_TARGET_VIDEO_CLIPS:
         return [step for step in STEP_ORDER if step not in VIDEO_CLIPS_SKIPPED_STEPS]
     return [step for step in STEP_ORDER if step not in FULL_MATERIALS_SKIPPED_STEPS]
@@ -307,7 +325,7 @@ def _active_run(project_id: str, db: Session) -> DBVideoAutoRun | None:
         .first()
     )
 
-async def start_auto_run(
+def start_auto_run_record(
     project_id: str,
     data: models.VideoAutoRunStartRequest,
     db: Session,
@@ -342,6 +360,13 @@ async def start_auto_run(
     db.refresh(row)
     create_background_task(_run_auto_run(row.id))
     return auto_run_response(row, db)
+
+async def start_auto_run(
+    project_id: str,
+    data: models.VideoAutoRunStartRequest,
+    db: Session,
+) -> models.VideoAutoRunResponse | None:
+    return start_auto_run_record(project_id, data, db)
 
 def get_latest_auto_run(project_id: str, db: Session) -> models.VideoAutoRunResponse | None:
     row = (
@@ -383,13 +408,13 @@ async def continue_auto_run(
         if row.review_stage == "story":
             row.current_step = "generate_shots"
         target = _material_target(row)
-        if target == MATERIAL_TARGET_PROMPTS_ONLY:
+        if target in {MATERIAL_TARGET_PROMPTS_ONLY, MATERIAL_TARGET_PUBLISHING_KIT}:
             row.current_step = "completed"
         elif target == MATERIAL_TARGET_VIDEO_CLIPS:
             row.current_step = "generate_clips"
         else:
             row.current_step = "generate_voice"
-    row.status = "running"
+    row.status = "waiting_workflow"
     row.review_stage = None
     row.failure_reason = None
     row.error_code = None
@@ -414,7 +439,7 @@ async def retry_auto_run(
     active = _active_run(project_id, db)
     if active is not None and active.id != row.id:
         raise VideoAutoRunError("Project đang có auto-run khác còn active.", error_code="VIDEO_AUTO_RUN_ACTIVE_EXISTS")
-    row.status = "running"
+    row.status = "waiting_workflow"
     row.force = bool(data.force)
     row.create_package = False
     row.review_stage = None
@@ -438,12 +463,19 @@ def cancel_auto_run(project_id: str, run_id: str, db: Session) -> models.VideoAu
     row.completed_at = now
     row.updated_at = now
     db.commit()
+    video_workflow_pool.cancel_waiting(f"ai-video:{project_id}")
+    try:
+        video_voice.cancel_project_voice_generations(project_id, db)
+    except Exception:
+        # The auto-run itself is already cancelled. Voice cleanup is
+        # best-effort so a secondary database/worker race cannot undo it.
+        pass
     _log(row, db, step_name="auto_run_cancelled", status="cancelled", message="Người dùng đã hủy auto-run.")
     return auto_run_response(row, db)
 
 def sync_stale_running_runs(db: Session) -> int:
     now = datetime.utcnow()
-    result = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.status.in_(["queued", "running", "waiting_planning", "waiting_voice", "waiting_clips", "waiting_render"])).update(
+    result = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.status.in_(["queued", "waiting_workflow", "running", "waiting_planning", "waiting_voice", "waiting_clips", "waiting_render"])).update(
         {
             "status": "failed",
             "failure_reason": "Auto-run bị gián đoạn khi ứng dụng đóng.",
@@ -496,7 +528,56 @@ def resume_interrupted_auto_run_after_clip_job(job_id: str, db: Session) -> str 
         return row.id
     return None
 
+def _workflow_context(run_id: str) -> tuple[str, str] | None:
+    db = next(get_db())
+    try:
+        row = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.id == run_id).first()
+        if row is None or row.status in TERMINAL_STATUSES or row.status in {"needs_review", "needs_input"}:
+            return None
+        return row.project_id, row.current_step or "validate"
+    finally:
+        db.close()
+
+
+def _workflow_acquired(run_id: str) -> bool:
+    db = next(get_db())
+    try:
+        row = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.id == run_id).first()
+        if row is None or row.status in TERMINAL_STATUSES or row.status in {"needs_review", "needs_input"}:
+            return False
+        if row.status == "waiting_workflow":
+            row.status = "running"
+            row.updated_at = datetime.utcnow()
+            db.commit()
+        return True
+    finally:
+        db.close()
+
+
 async def _run_auto_run(run_id: str) -> None:
+    context = await asyncio.to_thread(_workflow_context, run_id)
+    if context is None:
+        return
+    project_id, operation_name = context
+    try:
+        async with video_workflow_pool.workflow_slot(
+            work_key=f"ai-video:{project_id}",
+            workflow_type="ai_video",
+            operation_name=operation_name,
+        ):
+            if not await asyncio.to_thread(_workflow_acquired, run_id):
+                return
+            await _run_auto_run_in_slot(run_id)
+    except video_workflow_pool.WorkflowAlreadyActiveError:
+        # A near-simultaneous request may create a duplicate fire-and-forget
+        # task. The original task remains the single owner for this project.
+        return
+    except asyncio.CancelledError:
+        # The cancel endpoint has already persisted the terminal state.
+        return
+
+
+async def _run_auto_run_in_slot(run_id: str) -> None:
     started = time.monotonic()
     while True:
         action = await asyncio.to_thread(_advance_auto_run_sync, run_id)
@@ -605,6 +686,38 @@ def _advance_steps(row: DBVideoAutoRun, db: Session) -> dict[str, Any]:
             video_phase2.generate_video_prompt_pack(project.id, db)
         _mark_completed(row, "generate_prompts")
 
+    if _metadata_required(row):
+        if _needs_publishing_metadata(project.id, db, row):
+            _ensure_planning_ready(db)
+            wait_action = _wait_for_project_planning(row, db, "generate_publishing_metadata")
+            if wait_action is not None:
+                return wait_action
+            _set_step(row, db, "generate_publishing_metadata")
+            with _auto_run_planning_callbacks(row, db, "generate_publishing_metadata"):
+                video_publishing_metadata.generate_publishing_metadata(
+                    project.id,
+                    models.VideoPublishingMetadataGenerateRequest(platform="all", force=bool(row.force)),
+                    db,
+                )
+            metadata_summary = video_publishing_metadata.metadata_status_summary(project.id, db)
+            _mark_completed(
+                row,
+                "generate_publishing_metadata",
+                status=metadata_summary.get("status"),
+                revision=metadata_summary.get("revision"),
+                platforms_ready=metadata_summary.get("platforms_ready"),
+            )
+        elif not _step_completed(row, "generate_publishing_metadata"):
+            metadata_summary = video_publishing_metadata.metadata_status_summary(project.id, db)
+            _mark_completed(
+                row,
+                "generate_publishing_metadata",
+                skipped=True,
+                status=metadata_summary.get("status"),
+                revision=metadata_summary.get("revision"),
+                platforms_ready=metadata_summary.get("platforms_ready"),
+            )
+
     if row.mode == "review_gated" and not _reviewed(row, "prompts"):
         _set_step(row, db, "review_prompts", status="needs_review", review_stage="prompts")
         return {"action": "stop"}
@@ -619,6 +732,15 @@ def _advance_steps(row: DBVideoAutoRun, db: Session) -> dict[str, Any]:
             db,
             project,
             message="Auto-run đã tạo xong prompt video. Bạn có thể upload ảnh và để AI tạo thoại từ prompt.",
+        )
+        return {"action": "stop"}
+
+    if _material_target(row) == MATERIAL_TARGET_PUBLISHING_KIT:
+        _complete_run(
+            row,
+            db,
+            project,
+            message="Auto-run đã tạo xong prompt video và bộ nội dung đăng.",
         )
         return {"action": "stop"}
 
@@ -729,6 +851,21 @@ def _needs_prompts(project_id: str, db: Session, row: DBVideoAutoRun) -> bool:
         .all()
     }
     return any(shot.id not in prompt_shot_ids or shot.prompt_status in {"missing", "stale"} for shot in shots)
+
+def _metadata_required(row: DBVideoAutoRun) -> bool:
+    return _material_target(row) in {
+        MATERIAL_TARGET_FULL,
+        MATERIAL_TARGET_PUBLISHING_KIT,
+        MATERIAL_TARGET_VIDEO_CLIPS,
+    }
+
+def _needs_publishing_metadata(project_id: str, db: Session, row: DBVideoAutoRun) -> bool:
+    if not _metadata_required(row):
+        return False
+    if _force_pending(row, "generate_publishing_metadata"):
+        return True
+    summary = video_publishing_metadata.metadata_status_summary(project_id, db)
+    return not bool(summary.get("ready"))
 
 def _approve_prompt_review(project_id: str, db: Session, *, auto_approved: bool) -> None:
     now = datetime.utcnow()
@@ -941,6 +1078,9 @@ async def _enqueue_voice(run_id: str, shot_ids: list[str]) -> None:
         if project is None:
             return
         for shot_id in shot_ids:
+            db.refresh(row)
+            if row.status in TERMINAL_STATUSES or row.status == "cancelled":
+                return
             shot = db.query(DBVideoShot).filter(DBVideoShot.project_id == project.id, DBVideoShot.id == shot_id).first()
             if shot is None or not (shot.english_narration or "").strip():
                 continue
@@ -956,6 +1096,9 @@ async def _enqueue_voice(run_id: str, shot_ids: list[str]) -> None:
                 ),
                 db,
             )
+        db.refresh(row)
+        if row.status in TERMINAL_STATUSES or row.status == "cancelled":
+            return
         row.status = "waiting_voice"
         row.current_step = "waiting_voice"
         row.progress = STEP_PROGRESS["waiting_voice"]
@@ -1030,12 +1173,22 @@ def _summary(
     clip_job = _latest_clip_job(project_id, db)
     clip_job_completed = bool(clip_job and clip_job.status == "completed")
     render_job = _latest_render_job(project_id, db)
+    metadata_summary = video_publishing_metadata.metadata_status_summary(project_id, db)
+    metadata_ready = bool(metadata_summary.get("ready"))
     if material_target == MATERIAL_TARGET_PROMPTS_ONLY:
         core_ready = prompt_ready
+    elif material_target == MATERIAL_TARGET_PUBLISHING_KIT:
+        core_ready = prompt_ready and metadata_ready
     elif material_target == MATERIAL_TARGET_VIDEO_CLIPS:
-        core_ready = prompt_ready and bool(shots) and clip_completed_count == len(shots) and bool(render_job and render_job.status == "completed" and render_job.output_path)
+        core_ready = (
+            prompt_ready
+            and metadata_ready
+            and bool(shots)
+            and clip_completed_count == len(shots)
+            and bool(render_job and render_job.status == "completed" and render_job.output_path)
+        )
     else:
-        core_ready = prompt_ready and len(voice_completed) == len(narrated) and subtitle_status == "completed"
+        core_ready = prompt_ready and metadata_ready and len(voice_completed) == len(narrated) and subtitle_status == "completed"
     return models.VideoAutoRunSummary(
         shot_count=len(shots),
         prompt_completed_count=len(prompt_completed),
@@ -1053,6 +1206,11 @@ def _summary(
         render_job_error_code=render_job.error_code if render_job else None,
         render_job_failure_reason=render_job.failure_reason if render_job else None,
         render_output_path=render_job.output_path if render_job else None,
+        publishing_metadata_status=str(metadata_summary.get("status") or "missing"),
+        publishing_metadata_ready=metadata_ready,
+        publishing_metadata_stale=bool(metadata_summary.get("stale")),
+        publishing_metadata_revision=metadata_summary.get("revision"),
+        publishing_metadata_platforms_ready=int(metadata_summary.get("platforms_ready") or 0),
         subtitle_status=subtitle_status,
         package_status=package.status if package else None,
         package_id=package.id if package else None,

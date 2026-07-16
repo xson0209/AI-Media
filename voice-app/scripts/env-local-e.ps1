@@ -45,7 +45,7 @@ $env:VOICEBOX_MODELS_DIR = $ModelsRoot
 $env:VOICEBOX_CACHE_DIR = Join-Path $DataRoot "cache"
 $env:VOICEBOX_BACKEND_HOST = "127.0.0.1"
 $env:VOICEBOX_BACKEND_PORT = "17493"
-$env:VOICEBOX_FRONTEND_PORT = "5173"
+$env:VOICEBOX_FRONTEND_PORT = "4000"
 $env:VITE_SERVER_URL = "http://127.0.0.1:17493"
 
 $SoxDir = Join-Path $ProjectRoot "tools\sox-14.4.2"

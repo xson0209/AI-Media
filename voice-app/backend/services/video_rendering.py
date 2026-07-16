@@ -8,6 +8,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -158,8 +159,13 @@ def _select_preferred_ffmpeg(candidates: list[str]) -> str | None:
 def _matching_sibling_tool(selected_tool: str | None, sibling_binary: str) -> str | None:
     if not selected_tool:
         return None
-    sibling = Path(selected_tool).with_name(sibling_binary)
-    return str(sibling) if sibling.exists() else None
+    selected_path = Path(selected_tool)
+    candidates = [selected_path.with_name(sibling_binary)]
+    if selected_path.suffix:
+        candidates.insert(0, selected_path.with_name(f"{sibling_binary}{selected_path.suffix}"))
+    if os.name == "nt":
+        candidates.append(selected_path.with_name(f"{sibling_binary}.exe"))
+    return _first_existing_tool([str(candidate) for candidate in candidates])
 
 @lru_cache(maxsize=8)
 def _ffmpeg_filter_names(ffmpeg: str) -> frozenset[str]:
@@ -208,12 +214,61 @@ def _run_command(args: list[str], *, timeout: int = 600) -> subprocess.Completed
     return result
 
 
-def probe_clip(path: Path, *, ffprobe_path: str | None = None) -> ClipMetadata:
-    """Read clip metadata via ffprobe."""
-    ffprobe = ffprobe_path or detect_tools().ffprobe
-    if not ffprobe:
+def _duration_from_ffmpeg_text(text: str) -> float | None:
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+def _ffmpeg_probe_text(path: Path, ffmpeg: str) -> str:
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-i",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    return "\n".join(part for part in (result.stderr, result.stdout) if part)
+
+def _probe_clip_with_ffmpeg(path: Path, ffmpeg: str) -> ClipMetadata:
+    text = _ffmpeg_probe_text(path, ffmpeg)
+    video_line = next((line for line in text.splitlines() if "Video:" in line), "")
+    if not video_line:
         raise VideoRenderError(
-            "Chưa tìm thấy FFprobe. Hãy cài FFmpeg hoặc cấu hình đường dẫn FFmpeg trước khi upload clip.",
+            "Không đọc được metadata video. Hãy kiểm tra lại file clip.",
+            error_code="VIDEO_RENDER_CLIP_INVALID",
+        ) from RuntimeError(_truncate_stderr(text) or "ffmpeg probe failed")
+    size_match = re.search(r"(?<![\w])(\d{2,5})x(\d{2,5})(?![\w])", video_line)
+    codec_match = re.search(r"Video:\s*([^,\s]+)", video_line)
+    fps_match = re.search(r"(\d+(?:\.\d+)?)\s*fps", video_line)
+    return ClipMetadata(
+        duration_seconds=_duration_from_ffmpeg_text(text),
+        width=int(size_match.group(1)) if size_match else None,
+        height=int(size_match.group(2)) if size_match else None,
+        fps=float(fps_match.group(1)) if fps_match else None,
+        codec=codec_match.group(1) if codec_match else None,
+        has_audio=any("Audio:" in line for line in text.splitlines()),
+    )
+
+def probe_clip(path: Path, *, ffprobe_path: str | None = None, ffmpeg_path: str | None = None) -> ClipMetadata:
+    """Read clip metadata via ffprobe, falling back to ffmpeg's input banner."""
+    ffprobe = ffprobe_path
+    ffmpeg = ffmpeg_path
+    if ffprobe is None:
+        tools = detect_tools()
+        ffprobe = tools.ffprobe
+        ffmpeg = ffmpeg or tools.ffmpeg
+    if not ffprobe:
+        if ffmpeg:
+            return _probe_clip_with_ffmpeg(path, ffmpeg)
+        raise VideoRenderError(
+            "Chưa tìm thấy FFprobe hoặc FFmpeg. Hãy cài FFmpeg hoặc cấu hình đường dẫn FFmpeg trước khi upload clip.",
             error_code="VIDEO_RENDER_FFPROBE_MISSING",
         )
     result = subprocess.run(
@@ -258,10 +313,28 @@ def probe_clip(path: Path, *, ffprobe_path: str | None = None) -> ClipMetadata:
         has_audio=audio_stream is not None,
     )
 
-def probe_audio_asset(path: Path, *, ffprobe_path: str | None = None) -> AudioMetadata:
-    """Read SFX/BGM audio metadata via ffprobe."""
-    ffprobe = ffprobe_path or detect_tools().ffprobe
+def _probe_audio_with_ffmpeg(path: Path, ffmpeg: str) -> AudioMetadata:
+    text = _ffmpeg_probe_text(path, ffmpeg)
+    audio_line = next((line for line in text.splitlines() if "Audio:" in line), "")
+    if not audio_line:
+        raise VideoRenderError(
+            "Không đọc được metadata audio. Hãy kiểm tra lại file SFX/BGM.",
+            error_code="VIDEO_RENDER_SFX_INVALID",
+        ) from RuntimeError(_truncate_stderr(text) or "ffmpeg probe failed")
+    codec_match = re.search(r"Audio:\s*([^,\s]+)", audio_line)
+    return AudioMetadata(duration_seconds=_duration_from_ffmpeg_text(text), codec=codec_match.group(1) if codec_match else None)
+
+def probe_audio_asset(path: Path, *, ffprobe_path: str | None = None, ffmpeg_path: str | None = None) -> AudioMetadata:
+    """Read SFX/BGM audio metadata via ffprobe, falling back to ffmpeg's input banner."""
+    ffprobe = ffprobe_path
+    ffmpeg = ffmpeg_path
+    if ffprobe is None:
+        tools = detect_tools()
+        ffprobe = tools.ffprobe
+        ffmpeg = ffmpeg or tools.ffmpeg
     if not ffprobe:
+        if ffmpeg:
+            return _probe_audio_with_ffmpeg(path, ffmpeg)
         raise VideoRenderError(
             "Chưa tìm thấy FFprobe để kiểm tra asset âm thanh.",
             error_code="VIDEO_RENDER_FFPROBE_MISSING",
@@ -354,6 +427,28 @@ def get_active_clip(project_id: str, shot_id: str, db: Session) -> models.VideoS
         .first()
     )
     return _clip_response(clip) if clip else None
+
+
+def get_active_clip_download(project_id: str, shot_id: str, db: Session) -> tuple[str, Path, str] | None:
+    clip = (
+        db.query(DBVideoShotClip)
+        .filter(DBVideoShotClip.project_id == project_id, DBVideoShotClip.shot_id == shot_id, DBVideoShotClip.is_active.is_(True))
+        .order_by(DBVideoShotClip.created_at.desc())
+        .first()
+    )
+    if clip is None:
+        return None
+    if clip.status != "ready":
+        return None
+    path = video_storage.resolve_artifact_storage_path(clip.file_path)
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    filename = video_storage.sanitize_download_filename(
+        clip.original_filename or path.name,
+        fallback=f"clip-{shot_id}{path.suffix or '.mp4'}",
+    )
+    media_type = clip.mime_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return filename, path, media_type
 
 
 def _mark_render_outputs_stale(project_id: str, db: Session) -> None:
@@ -1075,8 +1170,6 @@ def get_render_readiness(
         reasons.append("Project chưa có shot để dựng video.")
     if not tools.ffmpeg_ready:
         reasons.append("Chưa tìm thấy FFmpeg.")
-    if not tools.ffprobe_ready:
-        reasons.append("Chưa tìm thấy FFprobe.")
     subtitle_filter_ready = settings.subtitle_mode != "burn_in" or bool(tools.ffmpeg and _select_subtitle_filter(tools.ffmpeg))
     if settings.subtitle_mode == "burn_in" and tools.ffmpeg_ready and not subtitle_filter_ready:
         reasons.append("FFmpeg hiện tại chưa có filter burn-in phụ đề. Hãy dùng SRT rời hoặc cài FFmpeg có libass.")
@@ -1095,7 +1188,6 @@ def get_render_readiness(
         project_id=project_id,
         ready=bool(shots)
         and tools.ffmpeg_ready
-        and tools.ffprobe_ready
         and subtitle_filter_ready
         and not missing_clip
         and not invalid_clip
@@ -1787,8 +1879,8 @@ def _write_enhanced_render_artifacts(
 def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     settings = models.VideoRenderSettings.model_validate_json(job.settings_json or "{}")
     tools = detect_tools()
-    if not tools.ffmpeg_ready or not tools.ffprobe_ready:
-        raise VideoRenderError("Chưa tìm thấy FFmpeg hoặc FFprobe.", error_code="VIDEO_RENDER_FFMPEG_MISSING")
+    if not tools.ffmpeg_ready:
+        raise VideoRenderError("Chưa tìm thấy FFmpeg.", error_code="VIDEO_RENDER_FFMPEG_MISSING")
     project = db.query(DBVideoProject).filter(DBVideoProject.id == job.project_id).first()
     if project is None:
         raise VideoRenderError("Không tìm thấy dự án video.", error_code="VIDEO_PROJECT_NOT_FOUND")

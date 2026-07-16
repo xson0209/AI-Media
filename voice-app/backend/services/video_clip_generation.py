@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import re
 import uuid
 from datetime import datetime
@@ -16,6 +17,7 @@ from ..database import (
     VideoAutoRun as DBVideoAutoRun,
     VideoClipGenerationItem as DBVideoClipGenerationItem,
     VideoClipGenerationJob as DBVideoClipGenerationJob,
+    VideoCodexRepairAttempt as DBVideoCodexRepairAttempt,
     VideoProject as DBVideoProject,
     VideoProviderSession as DBVideoProviderSession,
     VideoRenderJob as DBVideoRenderJob,
@@ -26,6 +28,8 @@ from ..database import (
 )
 from . import (
     video_observability,
+    video_codex_repair,
+    video_provider_project_bindings,
     video_provider_sessions,
     video_provider_storage,
     video_rendering,
@@ -34,7 +38,7 @@ from . import (
 )
 from .task_queue import create_background_task
 
-ACTIVE_STATUSES = {"queued", "running", "needs_login", "needs_user_action", "needs_credit_approval"}
+ACTIVE_STATUSES = {"queued", "running", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair"}
 TERMINAL_STATUSES = {"completed", "completed_with_render_blocked", "failed", "cancelled"}
 RENDER_BUSY_STATUSES = {"queued", "running"}
 ITEM_ACTIVE_STATUSES = {
@@ -47,7 +51,7 @@ ITEM_ACTIVE_STATUSES = {
     "downloading",
     "importing",
 }
-ITEM_RETRYABLE_STATUSES = {"pending", "failed", "needs_login", "needs_user_action", "needs_credit_approval"}
+ITEM_RETRYABLE_STATUSES = {"pending", "failed", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair"}
 MAX_ATTEMPTS = 4
 PROVIDER_PROJECT_URL_RESULT_KEY = "provider_project_url"
 PROVIDER_PROJECT_HASH_RESULT_KEY = "provider_project_ref_hash"
@@ -121,6 +125,22 @@ FLOW_PROVIDER_PROMPT_KEEP_SECTIONS = (
     "Sound design notes:",
     "Negative prompt:",
 )
+FLOW_PROVIDER_CONTEXT_ONLY_NOTE = (
+    "Narration/subtitle text is provided only so you understand the story context and timing. "
+    "Do not render subtitles, captions, spoken audio, text overlays, letters, words, UI text, "
+    "logos, or watermarks in the video."
+)
+FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS = (
+    (re.compile(r"\bAnimation and subtitle-safe rule:\s*", re.IGNORECASE), "Motion and context rule: "),
+    (re.compile(r"\balign visible action beats with(?: the)? narration timing\b", re.IGNORECASE), "align visible action beats with the provided story timing"),
+    (
+        re.compile(r"\bUse (?!the provided\b)([^.]*?)\b(?:voice[-\s]?over|narration|narrator|spoken audio)\b[^.]*\.\s*", re.IGNORECASE),
+        r"Use the provided \1narration/subtitle context only to guide the visuals. ",
+    ),
+    (re.compile(r"\s*(?:while|so that|so)\s+(?:the\s+)?(?:voice[-\s]?over|narration|narrator|spoken audio)[^.,;\n]*(?=[.,;\n]|$)", re.IGNORECASE), ""),
+    (re.compile(r",?\s*(?:and\s+)?leave the lower caption area[^.\n]*(?:\.|$)", re.IGNORECASE), "."),
+    (re.compile(r"\b(?:yellow\s+)?karaoke\s+subtitle\s+added\s+during\s+render\b", re.IGNORECASE), "post-render subtitle added by Voicebox"),
+)
 
 class VideoClipGenerationError(ValueError):
     """Raised when a clip generation job cannot start or continue."""
@@ -145,6 +165,44 @@ def _normalize_flow_provider_prompt(prompt: str) -> str:
         lines.append(line)
         previous_blank = False
     return "\n".join(lines).strip()
+
+def _truncate_provider_context(value: str, max_chars: int = 1200) -> str:
+    text = _normalize_flow_provider_prompt(value)
+    if len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars].rstrip()
+    sentence_cut = max(clipped.rfind(". "), clipped.rfind("\n"))
+    if sentence_cut > max_chars * 0.55:
+        clipped = clipped[: sentence_cut + 1].rstrip()
+    else:
+        clipped = clipped.rstrip(" ,;:-") + "."
+    return clipped
+
+def _append_provider_context_note(prompt: str, narration_context: str | None = None) -> str:
+    safe = prompt.strip()
+    parts = [safe] if safe else []
+    context = _truncate_provider_context(narration_context or "")
+    if context:
+        parts.extend(["Narration/subtitle context only:", context])
+    if FLOW_PROVIDER_CONTEXT_ONLY_NOTE not in safe:
+        parts.append(FLOW_PROVIDER_CONTEXT_ONLY_NOTE)
+    return "\n\n".join(part for part in parts if part).strip()
+
+def _strip_provider_post_render_cues(prompt: str, *, add_context_note: bool = False, narration_context: str | None = None) -> str:
+    safe = str(prompt or "")
+    if not safe.strip():
+        return ""
+    for pattern, replacement in FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS:
+        safe = pattern.sub(replacement, safe)
+    safe = re.sub(r"[ \t]+([.,;:])", r"\1", safe)
+    safe = re.sub(r"(?:,\s*){2,}", ", ", safe)
+    safe = re.sub(r"\bavoid\s+avoid\b", "avoid", safe, flags=re.IGNORECASE)
+    safe = re.sub(r"\bno\s+no\b", "no", safe, flags=re.IGNORECASE)
+    safe = re.sub(r"\bprovided\s+the\s+provided\b", "provided", safe, flags=re.IGNORECASE)
+    safe = _normalize_flow_provider_prompt(safe)
+    if add_context_note:
+        safe = _append_provider_context_note(safe, narration_context)
+    return safe.strip()
 
 def _extract_flow_provider_section(prompt: str, heading: str) -> str | None:
     start = prompt.find(heading)
@@ -200,7 +258,7 @@ def compact_prompt_for_veo_provider(prompt: str) -> str:
     compact = _normalize_flow_provider_prompt("\n\n".join(sections))
     return _truncate_flow_provider_prompt(compact)
 
-def provider_safe_prompt_for_veo(prompt: str) -> tuple[str, bool]:
+def provider_safe_prompt_for_veo(prompt: str, *, narration_context: str | None = None) -> tuple[str, bool]:
     """Remove risky cues and provider-unfriendly duplicate notes before sending to Veo/Flow."""
     safe = prompt
     for pattern, replacement in PUBLIC_FIGURE_PROVIDER_REPLACEMENTS:
@@ -208,7 +266,9 @@ def provider_safe_prompt_for_veo(prompt: str) -> tuple[str, bool]:
     for pattern, replacement in PUBLIC_FIGURE_CONTEXT_REPLACEMENTS:
         safe = pattern.sub(replacement, safe)
     replaced_public_figure_cues = safe != prompt
+    safe = _strip_provider_post_render_cues(safe)
     safe = compact_prompt_for_veo_provider(safe)
+    safe = _strip_provider_post_render_cues(safe, add_context_note=True, narration_context=narration_context)
     if replaced_public_figure_cues:
         safe = (
             safe.strip()
@@ -338,32 +398,7 @@ def _save_results(row: DBVideoClipGenerationJob, value: dict[str, Any]) -> None:
     flag_modified(row, "step_results_json")
 
 def _safe_provider_project_url(value: Any) -> str | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    lowered = text.lower()
-    if "labs.google" not in lowered or "/tools/flow/project/" not in lowered:
-        return None
-    return text
-
-def _provider_project_url_from_results(row: DBVideoClipGenerationJob) -> str | None:
-    return _safe_provider_project_url(_results(row).get(PROVIDER_PROJECT_URL_RESULT_KEY))
-
-def _find_reusable_provider_project_url(project: DBVideoProject, db: Session) -> str | None:
-    rows = (
-        db.query(DBVideoClipGenerationJob)
-        .filter(DBVideoClipGenerationJob.project_id == project.id, DBVideoClipGenerationJob.provider == "veo")
-        .order_by(DBVideoClipGenerationJob.updated_at.desc(), DBVideoClipGenerationJob.created_at.desc())
-        .limit(20)
-        .all()
-    )
-    for row in rows:
-        if row.status in {"failed", "cancelled"}:
-            continue
-        url = _provider_project_url_from_results(row)
-        if url:
-            return url
-    return None
+    return video_provider_project_bindings.safe_provider_project_url(value)
 
 def _save_provider_project_url(
     job: DBVideoClipGenerationJob,
@@ -374,12 +409,30 @@ def _save_provider_project_url(
     safe_url = _safe_provider_project_url(provider_project_url)
     if not safe_url:
         return
+    ref_hash = provider_project_ref_hash or video_provider_project_bindings.provider_project_ref_hash(safe_url)
     results = _results(job)
-    results[PROVIDER_PROJECT_URL_RESULT_KEY] = safe_url
-    if provider_project_ref_hash:
-        results[PROVIDER_PROJECT_HASH_RESULT_KEY] = provider_project_ref_hash
+    results.pop(PROVIDER_PROJECT_URL_RESULT_KEY, None)
+    results[PROVIDER_PROJECT_HASH_RESULT_KEY] = ref_hash
+    results["provider_project_binding"] = {
+        "provider": "veo",
+        "provider_tool": "flow",
+        "provider_project_ref_hash": ref_hash,
+    }
     _save_results(job, results)
     db.commit()
+
+def _redacted_results(row: DBVideoClipGenerationJob) -> dict[str, Any]:
+    value = copy.deepcopy(_results(row))
+    url = _safe_provider_project_url(value.pop(PROVIDER_PROJECT_URL_RESULT_KEY, None))
+    if url and PROVIDER_PROJECT_HASH_RESULT_KEY not in value:
+        value[PROVIDER_PROJECT_HASH_RESULT_KEY] = video_provider_project_bindings.provider_project_ref_hash(url)
+    for event in value.get("events", []) if isinstance(value.get("events"), list) else []:
+        if not isinstance(event, dict):
+            continue
+        event_url = _safe_provider_project_url(event.pop(PROVIDER_PROJECT_URL_RESULT_KEY, None))
+        if event_url and "provider_project_ref_hash" not in event:
+            event["provider_project_ref_hash"] = video_provider_project_bindings.provider_project_ref_hash(event_url)
+    return value
 
 def _record_event(row: DBVideoClipGenerationJob, event: dict[str, Any]) -> None:
     results = _results(row)
@@ -441,7 +494,19 @@ def _set_item(
     db.commit()
 
 def _item_summary(items: list[DBVideoClipGenerationItem], readiness: models.VideoRenderReadinessResponse | None) -> models.VideoClipGenerationSummary:
-    counts = {status: 0 for status in ["pending", "completed", "skipped", "failed", "needs_login", "needs_credit_approval"]}
+    counts = {
+        status: 0
+        for status in [
+            "pending",
+            "completed",
+            "skipped",
+            "failed",
+            "needs_login",
+            "needs_user_action",
+            "needs_credit_approval",
+            "paused_for_repair",
+        ]
+    }
     active = 0
     credit_spent = 0
     for item in items:
@@ -458,7 +523,9 @@ def _item_summary(items: list[DBVideoClipGenerationItem], readiness: models.Vide
         skipped_items=counts["skipped"],
         failed_items=counts["failed"],
         needs_login_items=counts["needs_login"],
+        needs_user_action_items=counts["needs_user_action"],
         needs_credit_approval_items=counts["needs_credit_approval"],
+        paused_for_repair_items=counts["paused_for_repair"],
         credit_spent_estimate=credit_spent,
         render_ready=bool(readiness and readiness.ready),
         render_missing_reasons=list(readiness.missing_reasons if readiness else []),
@@ -473,6 +540,18 @@ def job_response(row: DBVideoClipGenerationJob, db: Session) -> models.VideoClip
     )
     readiness = video_rendering.get_render_readiness(row.project_id, db)
     response = models.VideoClipGenerationJobResponse.model_validate(row)
+    response.step_results_json = _redacted_results(row)
+    project = db.query(DBVideoProject).filter(DBVideoProject.id == row.project_id).first()
+    if project is not None:
+        response.provider_project_binding = video_provider_project_bindings.binding_for_project_response(project, db)
+    attempts = (
+        db.query(DBVideoCodexRepairAttempt)
+        .filter(DBVideoCodexRepairAttempt.job_id == row.id)
+        .order_by(DBVideoCodexRepairAttempt.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    response.repair_attempts = [models.VideoCodexRepairAttemptResponse.model_validate(attempt) for attempt in attempts]
     if row.status == "completed":
         response.failure_reason = None
         response.error_code = None
@@ -564,10 +643,21 @@ def _start_job_sync(
     now = _now()
     job_id = str(uuid.uuid4())
     download_dir = video_provider_storage.get_job_download_dir(project_id, job_id)
-    step_results = {"events": [], "credit_approval_policy": data.credit_approval_policy}
-    reusable_provider_project_url = _find_reusable_provider_project_url(project, db)
-    if reusable_provider_project_url:
-        step_results[PROVIDER_PROJECT_URL_RESULT_KEY] = reusable_provider_project_url
+    step_results = {
+        "events": [],
+        "credit_approval_policy": data.credit_approval_policy,
+        "model_selection_mode": video_provider_project_bindings.FLOW_MODEL_SELECTION_MODE,
+        "allow_automatic_model_change": video_provider_project_bindings.FLOW_ALLOW_AUTOMATIC_MODEL_CHANGE,
+    }
+    active_binding = video_provider_project_bindings.active_binding_for_project(project, db)
+    if active_binding is not None:
+        step_results["provider_project_binding"] = {
+            "scope": "series" if active_binding.series_id else "project",
+            "provider": active_binding.provider,
+            "provider_tool": active_binding.provider_tool,
+            "provider_project_ref_hash": active_binding.provider_project_ref_hash,
+            "status": active_binding.status,
+        }
     job = DBVideoClipGenerationJob(
         id=job_id,
         project_id=project_id,
@@ -578,6 +668,7 @@ def _start_job_sync(
         progress=0.0,
         force=data.force,
         auto_render=data.auto_render,
+        enable_codex_repair=data.enable_codex_repair,
         credit_approval_policy=data.credit_approval_policy,
         max_credit_per_job=data.max_credit_per_job,
         credit_spent_estimate=0,
@@ -645,7 +736,7 @@ async def retry_job(
     if row is None:
         return None
     _ensure_project_can_start_clip_generation(project_id, db)
-    if row.status not in {"failed", "needs_login", "needs_user_action", "needs_credit_approval", "completed_with_render_blocked"}:
+    if row.status not in {"failed", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair", "completed_with_render_blocked"}:
         raise VideoClipGenerationError("Job hiện không ở trạng thái có thể retry.", error_code="VIDEO_CLIP_JOB_INVALID_STATE")
     active = _active_job(project_id, db)
     if active is not None and active.id != row.id:
@@ -658,7 +749,7 @@ async def retry_job(
     row.error_code = None
     row.completed_at = None
     row.updated_at = now
-    retryable_reset_statuses = {"failed", "needs_login", "needs_user_action", "needs_credit_approval", *ITEM_ACTIVE_STATUSES}
+    retryable_reset_statuses = {"failed", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair", *ITEM_ACTIVE_STATUSES}
     for item in db.query(DBVideoClipGenerationItem).filter(DBVideoClipGenerationItem.job_id == row.id).all():
         if item.status in retryable_reset_statuses:
             item.status = "pending"
@@ -678,7 +769,7 @@ async def resume_job(
     if row is None:
         return None
     _ensure_project_can_start_clip_generation(project_id, db)
-    if row.status not in {"needs_login", "needs_user_action", "needs_credit_approval", "failed"}:
+    if row.status not in {"needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair", "failed"}:
         raise VideoClipGenerationError("Job hiện không cần resume.", error_code="VIDEO_CLIP_JOB_INVALID_STATE")
     session = db.query(DBVideoProviderSession).filter(DBVideoProviderSession.id == row.session_id).first()
     if session is None or session.status != "ready":
@@ -695,7 +786,7 @@ async def resume_job(
     row.completed_at = None
     row.updated_at = _now()
     for item in db.query(DBVideoClipGenerationItem).filter(DBVideoClipGenerationItem.job_id == row.id).all():
-        if item.status in {"failed", "needs_login", "needs_user_action", "needs_credit_approval", *ITEM_ACTIVE_STATUSES}:
+        if item.status in {"failed", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair", *ITEM_ACTIVE_STATUSES}:
             item.status = "pending"
             item.failure_reason = None
             item.updated_at = row.updated_at
@@ -850,36 +941,97 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
             try:
                 _set_item(item, db, status="submitting_prompt")
                 _set_job(job, db, current_step=f"Đang gửi prompt Segment {item.shot_order:02d}")
-                # Keep each shot generation isolated. Reusing a Flow project lets
-                # old selected media and failed chat messages bleed into the next
-                # item, which can make downloads map to the wrong shot.
-                provider_project_url = None
-                provider_prompt, provider_prompt_sanitized = provider_safe_prompt_for_veo(prompt.prompt)
+                project = db.query(DBVideoProject).filter(DBVideoProject.id == job.project_id).first()
+                if project is None:
+                    raise VideoClipGenerationError("Không tìm thấy project để resolve Flow binding.", error_code="VIDEO_PROJECT_NOT_FOUND")
+                active_binding = video_provider_project_bindings.active_binding_for_project(project, db)
+                provider_project_url = active_binding.provider_project_url if active_binding else None
+                provider_prompt, provider_prompt_sanitized = provider_safe_prompt_for_veo(
+                    prompt.prompt,
+                    narration_context=shot.english_narration,
+                )
                 def remember_provider_project(provider_project_url: str, provider_project_ref_hash: str | None = None) -> None:
+                    nonlocal active_binding
+                    active_binding = video_provider_project_bindings.upsert_binding_for_project(
+                        project,
+                        db,
+                        provider_project_url=provider_project_url,
+                        provider_project_ref_hash_value=provider_project_ref_hash,
+                    )
                     _save_provider_project_url(job, db, provider_project_url, provider_project_ref_hash)
 
-                result = video_veo_chrome.submit_prompt_and_download(
-                    prompt=provider_prompt,
-                    requested_duration_seconds=prompt.duration_seconds or shot.duration_seconds,
-                    download_context=context,
-                    credit_approval_policy=job.credit_approval_policy,
-                    provider_project_url=provider_project_url,
-                    max_credit_per_job=job.max_credit_per_job,
-                    credit_spent_estimate=job.credit_spent_estimate,
-                    on_status=update_item_status,
-                    on_provider_project=remember_provider_project,
-                )
+                result = None
+                for provider_open_attempt in range(2):
+                    try:
+                        result = video_veo_chrome.submit_prompt_and_download(
+                            prompt=provider_prompt,
+                            requested_duration_seconds=prompt.duration_seconds or shot.duration_seconds,
+                            download_context=context,
+                            credit_approval_policy=job.credit_approval_policy,
+                            provider_project_url=provider_project_url,
+                            max_credit_per_job=job.max_credit_per_job,
+                            credit_spent_estimate=job.credit_spent_estimate,
+                            on_status=update_item_status,
+                            on_provider_project=remember_provider_project,
+                        )
+                        break
+                    except video_veo_chrome.VeoChromeError as exc:
+                        if (
+                            provider_open_attempt == 0
+                            and provider_project_url
+                            and active_binding is not None
+                            and exc.error_code == "VIDEO_PROVIDER_PROJECT_INVALID"
+                        ):
+                            video_provider_project_bindings.mark_binding_invalid(
+                                active_binding,
+                                db,
+                                reason=str(exc),
+                            )
+                            _record_event(
+                                job,
+                                {
+                                    "step": "provider_project_invalidated",
+                                    "item_id": item.id,
+                                    "shot_id": item.shot_id,
+                                    "shot_order": item.shot_order,
+                                    "provider_project_ref_hash": active_binding.provider_project_ref_hash,
+                                    "error_code": exc.error_code,
+                                },
+                            )
+                            provider_project_url = None
+                            active_binding = None
+                            continue
+                        raise
+                if result is None:
+                    raise VideoClipGenerationError("Không nhận được kết quả từ Veo.", error_code="VIDEO_PROVIDER_EMPTY_RESULT")
                 _set_item(item, db, status="importing")
                 item.credit_cost = result.credit_cost
                 item.provider_duration_seconds = result.provider_duration_seconds
                 item.provider_asset_id = result.provider_asset_id
                 item.provider_project_ref_hash = result.provider_project_ref_hash
+                item.observed_model_label = result.observed_model_label
+                item.observed_model_cost_label = result.observed_model_cost_label
                 item.download_url_hash = result.download_url_hash
                 item.original_filename = result.original_filename
                 item.downloaded_file_path = video_provider_storage.to_storage_path(result.downloaded_file_path)
                 job.credit_spent_estimate = int(job.credit_spent_estimate or 0) + int(result.credit_cost or 0)
                 if result.provider_project_url:
+                    active_binding = video_provider_project_bindings.upsert_binding_for_project(
+                        project,
+                        db,
+                        provider_project_url=result.provider_project_url,
+                        provider_project_ref_hash_value=result.provider_project_ref_hash,
+                        observed_model_label=result.observed_model_label,
+                        observed_model_cost_label=result.observed_model_cost_label,
+                    )
                     _save_provider_project_url(job, db, result.provider_project_url, result.provider_project_ref_hash)
+                else:
+                    video_provider_project_bindings.update_model_observation(
+                        active_binding,
+                        db,
+                        observed_model_label=result.observed_model_label,
+                        observed_model_cost_label=result.observed_model_cost_label,
+                    )
                 clip = video_rendering.import_provider_clip(
                     job.project_id,
                     item.shot_id,
@@ -896,6 +1048,10 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
                         "provider_prompt_sanitized": provider_prompt_sanitized,
                         "provider_project_ref_hash": result.provider_project_ref_hash,
                         "download_url_hash": result.download_url_hash,
+                        "observed_model_label": result.observed_model_label,
+                        "observed_model_cost_label": result.observed_model_cost_label,
+                        "model_selection_mode": video_provider_project_bindings.FLOW_MODEL_SELECTION_MODE,
+                        "allow_automatic_model_change": video_provider_project_bindings.FLOW_ALLOW_AUTOMATIC_MODEL_CHANGE,
                     },
                     db=db,
                 )
@@ -920,7 +1076,7 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
         db.refresh(job)
         remaining = db.query(DBVideoClipGenerationItem.id).filter(
             DBVideoClipGenerationItem.job_id == job.id,
-            DBVideoClipGenerationItem.status.in_(["pending", *ITEM_ACTIVE_STATUSES, "failed", "needs_login", "needs_user_action", "needs_credit_approval"]),
+            DBVideoClipGenerationItem.status.in_(["pending", *ITEM_ACTIVE_STATUSES, "failed", "needs_login", "needs_user_action", "needs_credit_approval", "paused_for_repair"]),
         ).first()
         if remaining is None:
             job.failure_reason = None
@@ -945,9 +1101,31 @@ def _handle_provider_error(job: DBVideoClipGenerationJob, item: DBVideoClipGener
         _set_item(item, db, status="needs_credit_approval", failure_reason=str(exc))
         _set_job(job, db, status="needs_credit_approval", current_step="needs_credit_approval", failure_reason=str(exc), error_code=exc.error_code)
         return
-    if exc.error_code in {"VIDEO_PROVIDER_SESSION_NOT_READY", "VIDEO_PROVIDER_CHROME_MISSING", "VIDEO_PROVIDER_PROFILE_LOCKED"}:
+    if exc.error_code in {"VIDEO_PROVIDER_PROJECT_NEEDS_LOGIN", "VIDEO_PROVIDER_SESSION_NOT_READY", "VIDEO_PROVIDER_CHROME_MISSING", "VIDEO_PROVIDER_PROFILE_LOCKED"}:
         _set_item(item, db, status="needs_login", failure_reason=str(exc))
         _set_job(job, db, status="needs_login", current_step="needs_login", failure_reason=str(exc), error_code=exc.error_code)
+        return
+    if exc.error_code in {
+        "VIDEO_PROVIDER_MODEL_QUOTA_EXHAUSTED",
+        "VIDEO_PROVIDER_MODEL_UNAVAILABLE",
+        "VIDEO_PROVIDER_BILLING_REQUIRED",
+        "VIDEO_PROVIDER_PAYMENT_REQUIRED",
+        "VIDEO_PROVIDER_QUOTA_OR_POLICY",
+        "VIDEO_PROVIDER_POLICY_PUBLIC_FIGURE",
+        "VIDEO_PROVIDER_POLICY_BLOCKED",
+        "VIDEO_PROVIDER_FLOW_APP_ERROR",
+        "VIDEO_PROVIDER_PROJECT_NOT_READY",
+    }:
+        _set_item(item, db, status="needs_user_action", failure_reason=str(exc))
+        _set_job(job, db, status="needs_user_action", current_step="needs_user_action", failure_reason=str(exc), error_code=exc.error_code)
+        return
+    repair_attempt = video_codex_repair.create_repair_attempt(job, item, exc, db, step_name=job.current_step)
+    if repair_attempt is not None:
+        reason = str(exc)
+        if repair_attempt.requires_approval:
+            reason = f"{reason}\nCodex repair đã lưu context nhưng cần bật/duyệt runner trước khi tự sửa code."
+        _set_item(item, db, status="paused_for_repair", failure_reason=reason)
+        _set_job(job, db, status="paused_for_repair", current_step="paused_for_repair", failure_reason=reason, error_code=exc.error_code)
         return
     _fail_item_and_job(job, item, str(exc), exc.error_code, db)
 

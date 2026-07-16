@@ -17,6 +17,7 @@ from ..services import llm, transcribe, tts
 from ..services.task_queue import create_background_task, init_queue
 from ..utils.platform_detect import get_backend_type
 from ..utils.progress import get_progress_manager
+from .asyncio_windows import install_proactor_connection_reset_suppression
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,11 @@ def get_gpu_status() -> str:
 
 async def run_startup(application: FastAPI) -> None:
     """Database init, warnings, model-cache prep. Runs on lifespan entry."""
+    try:
+        install_proactor_connection_reset_suppression(asyncio.get_running_loop())
+    except Exception as e:
+        logger.warning("Could not install asyncio Windows compatibility handler: %s", e)
+
     logger.info("Voicebox v%s starting up", __version__)
     logger.info(
         "Python %s on %s %s (%s)",
@@ -85,13 +91,13 @@ async def run_startup(application: FastAPI) -> None:
             sa_text(
                 "UPDATE generations SET status = 'failed', "
                 "error = 'Server was shut down during generation' "
-                "WHERE status IN ('generating', 'loading_model')"
+                "WHERE status IN ('queued', 'generating', 'loading_model')"
             )
         )
         if result.rowcount > 0:
             logger.info("Marked %d stale generation(s) as failed", result.rowcount)
 
-        from ..services import video_auto_runs, video_clip_generation, video_rendering
+        from ..services import video_auto_runs, video_clip_generation, video_inspiration_runs, video_rendering
 
         stale_render_count = video_rendering.sync_stale_running_jobs(db)
         if stale_render_count > 0:
@@ -104,6 +110,19 @@ async def run_startup(application: FastAPI) -> None:
         stale_clip_generation_count = video_clip_generation.sync_stale_running_jobs(db)
         if stale_clip_generation_count > 0:
             logger.info("Marked %d stale AI Video clip generation job(s) as failed", stale_clip_generation_count)
+
+        stale_inspiration_count = video_inspiration_runs.sync_interrupted_jobs(db)
+        if stale_inspiration_count > 0:
+            logger.info("Marked %d interrupted Video Inspiration job(s) as failed", stale_inspiration_count)
+
+        try:
+            from ..services.comic_series_analysis import runner as comic_runner
+
+            stale_comic_count = comic_runner.recover_interrupted_jobs(db)
+            if stale_comic_count > 0:
+                logger.info("Recovered %d interrupted Comic Analysis job(s)", stale_comic_count)
+        except Exception as comic_exc:
+            logger.warning("Could not recover Comic Analysis jobs: %s", comic_exc)
 
         from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile
 

@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Đề xuất tái cấu trúc luồng phân tích và tạo nội dung</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7fb;
+      --card: #ffffff;
+      --ink: #171923;
+      --muted: #5b6475;
+      --line: #d9deea;
+      --blue: #2563eb;
+      --green: #0f766e;
+      --orange: #c2410c;
+      --purple: #7c3aed;
+      --red: #b91c1c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #eef2ff 0%, var(--bg) 280px);
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 40px 0 72px;
+    }
+
+    header {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 28px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(31, 41, 55, 0.08);
+      backdrop-filter: blur(10px);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(30px, 5vw, 54px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: clamp(22px, 3vw, 32px);
+      letter-spacing: -0.02em;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 19px;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    .lead {
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 7px 12px;
+      background: #e0e7ff;
+      color: #3730a3;
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 18px;
+    }
+
+    section {
+      margin-top: 28px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+    }
+
+    .card {
+      grid-column: span 12;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 22px;
+      box-shadow: 0 10px 32px rgba(31, 41, 55, 0.05);
+    }
+
+    .half {
+      grid-column: span 6;
+    }
+
+    .third {
+      grid-column: span 4;
+    }
+
+    .note {
+      border-left: 5px solid var(--blue);
+      background: #eff6ff;
+    }
+
+    .warning {
+      border-left: 5px solid var(--orange);
+      background: #fff7ed;
+    }
+
+    .good {
+      border-left: 5px solid var(--green);
+      background: #ecfdf5;
+    }
+
+    .danger {
+      border-left: 5px solid var(--red);
+      background: #fef2f2;
+    }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 16px;
+      background: #ffffff;
+      position: relative;
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .arrow {
+      text-align: center;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .three {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .candidate {
+      border: 2px dashed #a5b4fc;
+      background: #f5f7ff;
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .candidate strong {
+      color: #3730a3;
+    }
+
+    .mini {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    ul, ol {
+      margin: 10px 0 0 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-size: 14px;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: #f1f5f9;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 28px;
+      text-align: center;
+    }
+
+    @media (max-width: 820px) {
+      .half, .third {
+        grid-column: span 12;
+      }
+
+      .three {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="tag">Bản tiếng Việt · Dễ đọc cho người không code</div>
+      <h1>Đề xuất tái cấu trúc luồng phân tích, tạo truyện và tạo video</h1>
+      <p class="lead">
+        Mục tiêu là làm hệ thống bớt rối: mọi luồng phân tích đều đưa ra một <strong>Gói nguồn</strong>
+        chung, sau đó luồng tạo truyện và luồng tạo video chỉ đọc gói này để tạo nội dung.
+      </p>
+    </header>
+
+    <section class="grid">
+      <article class="card note">
+        <h2>Kết luận chính</h2>
+        <p>
+          Điểm cần refactor quan trọng nhất là tạo một lớp trung gian gọi là
+          <strong>Source Package / Gói nguồn</strong>.
+        </p>
+        <p>
+          Nói đơn giản: sau khi phân tích truyện, phân tích video hoặc phân tích nội dung,
+          hệ thống phải gom kết quả về một dạng chuẩn. Từ đó tạo truyện, tạo video, tạo lời thoại,
+          tạo prompt hình ảnh, tạo nhịp giữ người xem đều dùng chung một nguồn sự thật.
+        </p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Sơ đồ tổng sau khi refactor</h2>
+        <div class="flow">
+          <div class="step">
+            <strong>Nguồn đầu vào</strong>
+            Truyện tranh, video tham khảo, nội dung người dùng nhập, tài liệu, ý tưởng.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step">
+            <strong>Luồng phân tích</strong>
+            Đọc nguồn, tách bằng chứng, nhân vật, bối cảnh, cảm xúc, timeline, điểm đáng chú ý.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step" style="border-color: #2563eb; background: #eff6ff;">
+            <strong>Gói nguồn / Source Package</strong>
+            Một bản chuẩn, có thể kiểm tra lại: nguồn nào, bằng chứng nào, đoạn nào quan trọng,
+            nhân vật nào, mâu thuẫn nào, cảm xúc nào, đoạn nào nên dùng.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="three">
+            <div class="candidate">
+              <strong>Tạo truyện</strong>
+              Outline, chương, cảnh, lời thoại, phong cách kể chuyện.
+            </div>
+            <div class="candidate">
+              <strong>Tạo video</strong>
+              Kịch bản video, shot, prompt hình ảnh, âm thanh, nhịp giữ người xem.
+            </div>
+            <div class="candidate">
+              <strong>Tái sử dụng</strong>
+              Làm lại phần bị cũ, so sánh bản, tiếp tục series, giữ nhất quán.
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card warning">
+        <h2>Về câu hỏi: tạo các phần song song có ảnh hưởng chất lượng không?</h2>
+        <p>
+          Có thể ảnh hưởng nếu tách sai. Không nên để <strong>lời thoại</strong>,
+          <strong>hình cảnh</strong>, và <strong>nhịp nội dung</strong> tự chạy riêng từ đầu,
+          vì ba phần này phụ thuộc lẫn nhau.
+        </p>
+        <p>
+          Cách an toàn hơn là: tạo <strong>3 bản hoàn chỉnh</strong> song song, mỗi bản đều có đủ
+          ý tưởng, nhịp, hình cảnh, lời thoại. Sau đó chấm điểm, chọn bản master tốt nhất,
+          rồi mới render chi tiết từng phần.
+        </p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card half good">
+        <h2>Cách nên làm</h2>
+        <div class="flow">
+          <div class="step"><strong>Tạo 3 bản hoàn chỉnh song song</strong> Mỗi bản là một hướng đầy đủ.</div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Chấm điểm</strong> So theo tiêu chí: đúng nguồn, hấp dẫn, nhất quán, dễ render.</div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Chọn bản master</strong> Lấy bản cao nhất hoặc trộn có kiểm soát.</div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Render lại</strong> Biến master thành outline, cảnh, lời thoại, prompt, âm thanh.</div>
+        </div>
+      </article>
+
+      <article class="card half danger">
+        <h2>Cách không nên làm</h2>
+        <div class="flow">
+          <div class="step"><strong>Chạy lời thoại riêng</strong> Không biết hình cảnh cuối là gì.</div>
+          <div class="step"><strong>Chạy hình cảnh riêng</strong> Không biết nhịp cảm xúc cuối ra sao.</div>
+          <div class="step"><strong>Chạy nhịp riêng</strong> Không biết nội dung thật sẽ đổi thế nào.</div>
+          <div class="arrow">↓</div>
+          <div class="step"><strong>Ghép lại cuối cùng</strong> Dễ lệch tone, lặp ý, thiếu logic, prompt không ăn với thoại.</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Luồng 1: Tạo truyện</h2>
+        <div class="flow">
+          <div class="step">
+            <strong>1. Lấy Gói nguồn</strong>
+            Hệ thống không đọc lung tung từ nhiều nơi nữa. Nó lấy bản phân tích chuẩn đã được chốt.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="three">
+            <div class="candidate">
+              <strong>Bản truyện A</strong>
+              Tập trung cảm xúc, mâu thuẫn nhân vật, cao trào.
+            </div>
+            <div class="candidate">
+              <strong>Bản truyện B</strong>
+              Tập trung nhịp chương, cliffhanger, tốc độ đọc.
+            </div>
+            <div class="candidate">
+              <strong>Bản truyện C</strong>
+              Tập trung hình ảnh, cảnh quan trọng, khoảnh khắc đáng nhớ.
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step">
+            <strong>2. Chọn master truyện</strong>
+            Chấm điểm 3 bản theo tiêu chí: đúng nguồn, hấp dẫn, giữ nhân vật nhất quán, có thể triển khai thành chương/cảnh.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step">
+            <strong>3. Render truyện cuối</strong>
+            Từ master đã chốt, hệ thống tạo outline, danh sách chương, cảnh, lời thoại, mô tả hình ảnh,
+            prompt ảnh nếu cần, và bản cuối để người dùng sửa.
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Luồng 2: Tạo video</h2>
+        <div class="flow">
+          <div class="step">
+            <strong>1. Lấy Gói nguồn</strong>
+            Video không tự phân tích lại từ đầu nếu đã có gói nguồn. Nó dùng cùng dữ liệu đã chuẩn hóa.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="three">
+            <div class="candidate">
+              <strong>Bản video A</strong>
+              Tập trung hook, nhịp giữ người xem, cao trào.
+            </div>
+            <div class="candidate">
+              <strong>Bản video B</strong>
+              Tập trung hình ảnh, shot, chuyển cảnh, bố cục.
+            </div>
+            <div class="candidate">
+              <strong>Bản video C</strong>
+              Tập trung voiceover, lời thoại, âm thanh, nhạc nền.
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step">
+            <strong>2. Chọn master video</strong>
+            Chấm theo tiêu chí: bám nguồn, dễ hiểu, giữ chân người xem, khả thi khi render bằng model video.
+          </div>
+          <div class="arrow">↓</div>
+          <div class="step">
+            <strong>3. Render video cuối</strong>
+            Từ master đã chốt, hệ thống tạo shot list, prompt video, voiceover, mô tả âm thanh,
+            nhịp chuyển cảnh, metadata xuất bản và các clip cần render.
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card half">
+        <h2>“Render lại” nghĩa là gì?</h2>
+        <p>
+          Trong ngữ cảnh này, “render lại” không chỉ là xuất video. Nó nghĩa là:
+          lấy <strong>bản master đã chốt</strong> rồi biến thành các đầu ra cụ thể để hệ thống dùng tiếp.
+        </p>
+        <ul>
+          <li>Với truyện: outline, chương, cảnh, lời thoại, prompt ảnh.</li>
+          <li>Với video: shot list, prompt video, voiceover, âm thanh, transition, metadata.</li>
+          <li>Với chỉnh sửa: phần nào bị đổi thì render lại phần phụ thuộc, không cần làm lại toàn bộ.</li>
+        </ul>
+      </article>
+
+      <article class="card half">
+        <h2>Luồng phân tích có phải chạy lần lượt không?</h2>
+        <p>
+          Một số bước phải chạy lần lượt, vì bước sau cần kết quả của bước trước.
+          Ví dụ: phải biết nguồn và nhân vật trước khi tạo timeline, phải biết timeline trước khi chọn cảnh hay.
+        </p>
+        <p>
+          Nhưng sau khi đã có Gói nguồn đủ rõ, các bản ứng viên có thể tạo song song để tăng lựa chọn.
+        </p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Sau refactor, các luồng nên để như này</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Luồng</th>
+              <th>Vai trò</th>
+              <th>Đầu ra chuẩn</th>
+              <th>Ghi chú</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="pill">Phân tích truyện</span></td>
+              <td>Đọc truyện, hiểu nhân vật, cốt truyện, bằng chứng.</td>
+              <td>Gói nguồn.</td>
+              <td>Không tạo video/truyện trực tiếp trong bước này.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">Phân tích video</span></td>
+              <td>Hiểu timeline, hình ảnh, âm thanh, hook, nhịp.</td>
+              <td>Gói nguồn.</td>
+              <td>Không tự quyết định format cuối.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">Tạo truyện</span></td>
+              <td>Dùng Gói nguồn để tạo 3 bản truyện, chọn master, render truyện.</td>
+              <td>Bản truyện cuối + prompt/hình nếu cần.</td>
+              <td>Được phép chạy ứng viên song song.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">Tạo video</span></td>
+              <td>Dùng Gói nguồn để tạo 3 bản video, chọn master, render video.</td>
+              <td>Shot list, prompt video, voiceover, metadata.</td>
+              <td>Được phép chạy ứng viên song song.</td>
+            </tr>
+            <tr>
+              <td><span class="pill">Làm lại khi đổi nguồn</span></td>
+              <td>Biết phần nào đã cũ sau khi nguồn đổi.</td>
+              <td>Danh sách phần cần rebuild.</td>
+              <td>Không làm lại toàn bộ nếu chỉ đổi một phần nhỏ.</td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card third">
+        <h3>Giai đoạn 1</h3>
+        <p><strong>Tạo Gói nguồn.</strong></p>
+        <p class="mini">Đây là móng. Nếu móng chưa rõ thì các luồng sau vẫn rối.</p>
+      </article>
+      <article class="card third">
+        <h3>Giai đoạn 2</h3>
+        <p><strong>Chuyển từng luồng sang dùng Gói nguồn.</strong></p>
+        <p class="mini">Làm từng luồng, không sửa tất cả cùng lúc.</p>
+      </article>
+      <article class="card third">
+        <h3>Giai đoạn 3</h3>
+        <p><strong>Chuẩn hóa chọn master và render lại.</strong></p>
+        <p class="mini">Khi master rõ, các phần con có thể chạy song song mà ít lệch chất lượng.</p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card note">
+        <h2>Nguyên tắc giữ chất lượng</h2>
+        <ol>
+          <li>Luôn tạo ứng viên từ cùng một Gói nguồn, không để mỗi luồng hiểu nguồn khác nhau.</li>
+          <li>Ứng viên phải là bản hoàn chỉnh, không phải mảnh rời tự chạy riêng.</li>
+          <li>Chấm điểm bằng tiêu chí cố định, không chọn theo cảm giác.</li>
+          <li>Sau khi chọn master, mới tách ra render lời thoại, hình cảnh, âm thanh, prompt.</li>
+          <li>Khi người dùng sửa nguồn hoặc sửa master, chỉ rebuild phần phụ thuộc.</li>
+        </ol>
+      </article>
+    </section>
+
+    <p class="footer">
+      File này là bản tóm tắt tiếng Việt để ra quyết định refactor. Nó không thay thế test hay spec kỹ thuật chi tiết.
+    </p>
+  </main>
+</body>
+</html>

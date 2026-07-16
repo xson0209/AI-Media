@@ -2,10 +2,26 @@ import type { LanguageCode } from '@/lib/constants/languages';
 import { useServerStore } from '@/stores/serverStore';
 import type {
   ActiveTasksResponse,
+  ArtifactDependencyRecordRequest,
+  ArtifactDependencySnapshotResponse,
+  ArtifactStaleEventListResponse,
+  ArtifactStaleMarkRequest,
+  ArtifactTargetedRegenerationRequest,
+  ArtifactTargetedRegenerationResponse,
+  AIPlanningSettings,
+  AIPlanningSettingsUpdate,
+  AIPlanningTestResponse,
   AIPlanningProviderCheckResponse,
   ApplyEffectsRequest,
   AvailableEffectsResponse,
   CaptureCreateResponse,
+  ComicCapabilitiesResponse,
+  ComicHandoffPreview,
+  ComicHandoffResult,
+  ComicJobDetail,
+  ComicAnalysisPackage,
+  ComicJobListResponse,
+  ComicUrlJobRequest,
   CaptureListResponse,
   CaptureReadinessResponse,
   CaptureRefineRequest,
@@ -37,11 +53,49 @@ import type {
   RenderCacheClearResponse,
   PresetVoice,
   ProfileSampleResponse,
+  PlatformRetentionDatasetCreateRequest,
+  PlatformRetentionDatasetListResponse,
+  PlatformRetentionDatasetResponse,
   ResourceCleanupRequest,
   ResourceCleanupResponse,
   ResourceStatusResponse,
+  SeriesCharacterProfileCreate,
+  SeriesCharacterProfileResponse,
+  SeriesCharacterProfileSuggestionResponse,
+  SeriesCharacterProfileUpdate,
+  SeriesCanonCheckRequest,
+  SeriesCanonCheckResponse,
+  SeriesContextCompileRequest,
+  SeriesContextCompileResponse,
+  SeriesContextTraceListResponse,
+  SeriesCurrentStateCreate,
+  SeriesCurrentStateListResponse,
+  SeriesCurrentStateResponse,
+  SeriesCurrentStateStatusRequest,
+  SeriesCurrentStateUpdate,
+  SeriesMemoryCardCreate,
+  SeriesMemoryCardListResponse,
+  SeriesMemoryCardResponse,
+  SeriesMemoryCardStatusRequest,
+  SeriesMemoryCardUpdate,
+  SeriesMemorySuggestionRequest,
+  SeriesMemorySuggestionResponse,
+  SeriesReferenceAssetListResponse,
+  SeriesReferenceAssetResponse,
+  SeriesReferenceAssetStatusRequest,
+  SeriesVersionHistoryResponse,
+  SeriesStateProposalRequest,
   StoryCreate,
+  StoryAdaptationResponse,
+  StoryApprovalRequest,
+  StoryCandidateSelectionRequest,
+  StoryCandidateSynthesisRequest,
   StoryDetailResponse,
+  StoryEpisodeCreate,
+  StoryEpisodeResponse,
+  StoryEpisodeUpdate,
+  StoryImageRenderJobUpdateRequest,
+  StoryImageRenderRequest,
   StoryItemBatchUpdate,
   StoryItemCreate,
   StoryItemDetail,
@@ -51,7 +105,13 @@ import type {
   StoryItemTrim,
   StoryItemVersionUpdate,
   StoryItemVolumeUpdate,
+  StoryPanelPromptApprovalRequest,
+  StoryPanelPromptUpdateRequest,
+  StoryPromptRepairRequest,
   StoryResponse,
+  StorySuggestionApprovalRequest,
+  StorySuggestionResponse,
+  StoryVideoHandoffRequest,
   SystemResourcesResponse,
   TadaVietnameseStatusResponse,
   TranscriptionResponse,
@@ -69,24 +129,40 @@ import type {
   VideoInspirationAnalyzeRequest,
   VideoInspirationCreateProjectRequest,
   VideoInspirationDirectionUpdate,
+  VideoInspirationHandoffListResponse,
   VideoInspirationHandoffResponse,
   VideoInspirationJobResponse,
   VideoInspirationListResponse,
   VideoInspirationRewriteRequest,
   VideoInspirationScriptUpdate,
+  VideoInspirationStructuredHandoffResponse,
   VideoInspirationTargetLanguage,
+  VideoInspirationTextEventUpdate,
+  VideoInspirationTranscriptSegmentUpdate,
   VideoInspirationTranscriptUpdate,
   VideoInspirationUrlRequest,
   VideoPackageExportResponse,
   VideoPackageReadinessResponse,
+  VideoPublishingMetadataGenerateRequest,
+  VideoPublishingMetadataResponse,
+  VideoProviderProjectBindingResponse,
   VideoProviderSessionLabelUpdate,
   VideoProviderSessionOpenRequest,
   VideoProviderSessionResponse,
   VideoProjectCreate,
+  VideoProjectContextCompileRequest,
+  VideoProjectContextSnapshotListResponse,
+  VideoProjectContextSnapshotResponse,
   VideoProjectDetailResponse,
+  VideoProjectMemoryListResponse,
   VideoProjectLocalizeRequest,
+  VideoQualityOverrideRequest,
+  VideoQualityReportListResponse,
+  VideoQualityReportResponse,
+  VideoQualityRunRequest,
   VideoProjectResponse,
   VideoProjectStatusResponse,
+  VideoProjectTargetTimelineResponse,
   VideoProjectUpdate,
   VideoPromptContentResponse,
   VideoRenderJobResponse,
@@ -155,12 +231,13 @@ class ApiClient {
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${this.getBaseUrl()}${endpoint}`;
+    const headers = new Headers(options?.headers);
+    if (!(options?.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
     const response = await fetch(url, {
       ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -606,6 +683,40 @@ class ApiClient {
     );
   }
 
+  async updateVideoInspirationTranscriptSegment(
+    jobId: string,
+    segmentId: string,
+    data: VideoInspirationTranscriptSegmentUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/transcript-segments/${segmentId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateVideoInspirationTextEvent(
+    jobId: string,
+    eventId: string,
+    data: VideoInspirationTextEventUpdate,
+  ): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/on-screen-text/${eventId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async getVideoInspirationAnalysisPackage(jobId: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      `/video-inspiration/jobs/${jobId}/analysis-package`,
+    );
+  }
+
   async updateVideoInspirationDirection(
     jobId: string,
     data: VideoInspirationDirectionUpdate,
@@ -627,6 +738,20 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async cancelVideoInspirationJob(jobId: string): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/cancel`,
+      { method: 'POST' },
+    );
+  }
+
+  async retryVideoInspirationJob(jobId: string): Promise<VideoInspirationJobResponse> {
+    return this.request<VideoInspirationJobResponse>(
+      `/video-inspiration/jobs/${jobId}/retry`,
+      { method: 'POST' },
+    );
   }
 
   async updateVideoInspirationScript(
@@ -652,6 +777,23 @@ class ApiClient {
         method: 'POST',
         body: JSON.stringify(data),
       },
+    );
+  }
+
+  async createVideoInspirationHandoff(
+    jobId: string,
+  ): Promise<VideoInspirationStructuredHandoffResponse> {
+    return this.request<VideoInspirationStructuredHandoffResponse>(
+      `/video-inspiration/jobs/${jobId}/handoffs`,
+      { method: 'POST' },
+    );
+  }
+
+  async listVideoInspirationHandoffs(
+    jobId: string,
+  ): Promise<VideoInspirationHandoffListResponse> {
+    return this.request<VideoInspirationHandoffListResponse>(
+      `/video-inspiration/jobs/${jobId}/handoffs`,
     );
   }
 
@@ -743,6 +885,23 @@ class ApiClient {
     });
   }
 
+  async getAIPlanningSettings(): Promise<AIPlanningSettings> {
+    return this.request<AIPlanningSettings>('/settings/ai-planning');
+  }
+
+  async updateAIPlanningSettings(patch: AIPlanningSettingsUpdate): Promise<AIPlanningSettings> {
+    return this.request<AIPlanningSettings>('/settings/ai-planning', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async testAIPlanningSettings(): Promise<AIPlanningTestResponse> {
+    return this.request<AIPlanningTestResponse>('/settings/ai-planning/test', {
+      method: 'POST',
+    });
+  }
+
   // MCP bindings — per-MCP-client voice/engine/personality mapping.
   async listMCPBindings(): Promise<MCPClientBindingListResponse> {
     return this.request<MCPClientBindingListResponse>('/mcp/bindings');
@@ -789,6 +948,616 @@ class ApiClient {
     });
   }
 
+  async listSeriesCharacterProfiles(seriesId: string): Promise<SeriesCharacterProfileResponse[]> {
+    return this.request<SeriesCharacterProfileResponse[]>(
+      `/ai-video/series/${seriesId}/character-profiles`,
+    );
+  }
+
+  async createSeriesCharacterProfile(
+    seriesId: string,
+    data: SeriesCharacterProfileCreate,
+  ): Promise<SeriesCharacterProfileResponse> {
+    return this.request<SeriesCharacterProfileResponse>(
+      `/ai-video/series/${seriesId}/character-profiles`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateSeriesCharacterProfile(
+    seriesId: string,
+    profileId: string,
+    data: SeriesCharacterProfileUpdate,
+  ): Promise<SeriesCharacterProfileResponse> {
+    return this.request<SeriesCharacterProfileResponse>(
+      `/ai-video/series/${seriesId}/character-profiles/${profileId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async deleteSeriesCharacterProfile(seriesId: string, profileId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(
+      `/ai-video/series/${seriesId}/character-profiles/${profileId}`,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
+
+  async listSeriesReferenceAssets(
+    seriesId: string,
+    query: {
+      entity_type?: string | null;
+      entity_id?: string | null;
+      approval_status?: string | null;
+      active?: boolean | null;
+    } = {},
+  ): Promise<SeriesReferenceAssetListResponse> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<SeriesReferenceAssetListResponse>(
+      `/ai-video/series/${seriesId}/reference-assets${suffix}`,
+    );
+  }
+
+  async uploadSeriesReferenceAsset(
+    seriesId: string,
+    data: {
+      file: File;
+      entity_type: string;
+      entity_id: string;
+      reference_role: string;
+      label?: string | null;
+      source_type?: string | null;
+    },
+  ): Promise<SeriesReferenceAssetResponse> {
+    const formData = new FormData();
+    formData.append('file', data.file);
+    formData.append('entity_type', data.entity_type);
+    formData.append('entity_id', data.entity_id);
+    formData.append('reference_role', data.reference_role);
+    if (data.label) formData.append('label', data.label);
+    if (data.source_type) formData.append('source_type', data.source_type);
+    return this.request<SeriesReferenceAssetResponse>(
+      `/ai-video/series/${seriesId}/reference-assets`,
+      {
+        method: 'POST',
+        body: formData,
+      },
+    );
+  }
+
+  async updateSeriesReferenceAssetStatus(
+    seriesId: string,
+    assetId: string,
+    data: SeriesReferenceAssetStatusRequest,
+  ): Promise<SeriesReferenceAssetResponse> {
+    return this.request<SeriesReferenceAssetResponse>(
+      `/ai-video/series/${seriesId}/reference-assets/${assetId}/status`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async deleteSeriesReferenceAsset(
+    seriesId: string,
+    assetId: string,
+  ): Promise<{ deleted: boolean; archived: boolean; dependency_count: number }> {
+    return this.request<{ deleted: boolean; archived: boolean; dependency_count: number }>(
+      `/ai-video/series/${seriesId}/reference-assets/${assetId}`,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
+
+  async getSeriesVersionHistory(
+    seriesId: string,
+    entityType: string,
+    entityId: string,
+  ): Promise<SeriesVersionHistoryResponse> {
+    return this.request<SeriesVersionHistoryResponse>(
+      `/ai-video/series/${seriesId}/versions/${entityType}/${entityId}`,
+    );
+  }
+
+  async recordSeriesArtifactDependencies(
+    seriesId: string,
+    data: ArtifactDependencyRecordRequest,
+  ): Promise<ArtifactDependencySnapshotResponse[]> {
+    return this.request<ArtifactDependencySnapshotResponse[]>(
+      `/ai-video/series/${seriesId}/dependencies`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async listSeriesArtifactDependencies(
+    seriesId: string,
+    artifactType: string,
+    artifactId: string,
+  ): Promise<ArtifactDependencySnapshotResponse[]> {
+    return this.request<ArtifactDependencySnapshotResponse[]>(
+      `/ai-video/series/${seriesId}/dependencies/${artifactType}/${artifactId}`,
+    );
+  }
+
+  async listSeriesStaleEvents(
+    seriesId: string,
+    query: { status?: string | null; artifact_type?: string | null; limit?: number | null } = {},
+  ): Promise<ArtifactStaleEventListResponse> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<ArtifactStaleEventListResponse>(
+      `/ai-video/series/${seriesId}/stale-events${suffix}`,
+    );
+  }
+
+  async markSeriesDependencyStale(
+    seriesId: string,
+    data: ArtifactStaleMarkRequest,
+  ): Promise<ArtifactStaleEventListResponse> {
+    return this.request<ArtifactStaleEventListResponse>(
+      `/ai-video/series/${seriesId}/stale-events/mark`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async requestSeriesTargetedRegeneration(
+    seriesId: string,
+    data: ArtifactTargetedRegenerationRequest,
+  ): Promise<ArtifactTargetedRegenerationResponse> {
+    return this.request<ArtifactTargetedRegenerationResponse>(
+      `/ai-video/series/${seriesId}/stale-events/regenerate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async suggestSeriesCharacterProfiles(
+    seriesId: string,
+  ): Promise<SeriesCharacterProfileSuggestionResponse> {
+    return this.request<SeriesCharacterProfileSuggestionResponse>(
+      `/ai-video/series/${seriesId}/character-profile-suggestions`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  async listSeriesMemoryCards(
+    seriesId: string,
+    query: {
+      card_type?: string | null;
+      status?: string | null;
+      episode_number?: number | null;
+      entity_ref?: string | null;
+      tag?: string | null;
+      min_importance?: number | null;
+    } = {},
+  ): Promise<SeriesMemoryCardListResponse> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<SeriesMemoryCardListResponse>(
+      `/ai-video/series/${seriesId}/memory-cards${suffix}`,
+    );
+  }
+
+  async createSeriesMemoryCard(
+    seriesId: string,
+    data: SeriesMemoryCardCreate,
+  ): Promise<SeriesMemoryCardResponse> {
+    return this.request<SeriesMemoryCardResponse>(`/ai-video/series/${seriesId}/memory-cards`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async suggestSeriesMemoryCards(
+    seriesId: string,
+    data: SeriesMemorySuggestionRequest = {},
+  ): Promise<SeriesMemorySuggestionResponse> {
+    return this.request<SeriesMemorySuggestionResponse>(
+      `/ai-video/series/${seriesId}/memory-cards/suggestions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateSeriesMemoryCard(
+    seriesId: string,
+    cardId: string,
+    data: SeriesMemoryCardUpdate,
+  ): Promise<SeriesMemoryCardResponse> {
+    return this.request<SeriesMemoryCardResponse>(
+      `/ai-video/series/${seriesId}/memory-cards/${cardId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async setSeriesMemoryCardStatus(
+    seriesId: string,
+    cardId: string,
+    data: SeriesMemoryCardStatusRequest,
+  ): Promise<SeriesMemoryCardResponse> {
+    return this.request<SeriesMemoryCardResponse>(
+      `/ai-video/series/${seriesId}/memory-cards/${cardId}/status`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async deleteSeriesMemoryCard(seriesId: string, cardId: string): Promise<{ deleted: boolean }> {
+    return this.request<{ deleted: boolean }>(
+      `/ai-video/series/${seriesId}/memory-cards/${cardId}`,
+      {
+        method: 'DELETE',
+      },
+    );
+  }
+
+  async listSeriesCurrentStates(seriesId: string): Promise<SeriesCurrentStateListResponse> {
+    return this.request<SeriesCurrentStateListResponse>(
+      `/ai-video/series/${seriesId}/current-states`,
+    );
+  }
+
+  async createSeriesCurrentState(
+    seriesId: string,
+    data: SeriesCurrentStateCreate,
+  ): Promise<SeriesCurrentStateResponse> {
+    return this.request<SeriesCurrentStateResponse>(
+      `/ai-video/series/${seriesId}/current-states`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async proposeSeriesCurrentState(
+    seriesId: string,
+    data: SeriesStateProposalRequest,
+  ): Promise<SeriesCurrentStateResponse> {
+    return this.request<SeriesCurrentStateResponse>(
+      `/ai-video/series/${seriesId}/current-states/propose`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateSeriesCurrentState(
+    seriesId: string,
+    stateId: string,
+    data: SeriesCurrentStateUpdate,
+  ): Promise<SeriesCurrentStateResponse> {
+    return this.request<SeriesCurrentStateResponse>(
+      `/ai-video/series/${seriesId}/current-states/${stateId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async setSeriesCurrentStateStatus(
+    seriesId: string,
+    stateId: string,
+    data: SeriesCurrentStateStatusRequest,
+  ): Promise<SeriesCurrentStateResponse> {
+    return this.request<SeriesCurrentStateResponse>(
+      `/ai-video/series/${seriesId}/current-states/${stateId}/status`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async compileSeriesContext(
+    seriesId: string,
+    data: SeriesContextCompileRequest,
+  ): Promise<SeriesContextCompileResponse> {
+    return this.request<SeriesContextCompileResponse>(
+      `/ai-video/series/${seriesId}/context/compile`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async listSeriesContextTraces(
+    seriesId: string,
+    query: {
+      task_type?: string | null;
+      project_id?: string | null;
+      story_episode_id?: string | null;
+      limit?: number | null;
+    } = {},
+  ): Promise<SeriesContextTraceListResponse> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<SeriesContextTraceListResponse>(
+      `/ai-video/series/${seriesId}/context/traces${suffix}`,
+    );
+  }
+
+  async checkSeriesCanon(
+    seriesId: string,
+    data: SeriesCanonCheckRequest,
+  ): Promise<SeriesCanonCheckResponse> {
+    return this.request<SeriesCanonCheckResponse>(`/ai-video/series/${seriesId}/canon-check`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSeriesCanonChecks(
+    seriesId: string,
+    query: {
+      project_id?: string | null;
+      story_episode_id?: string | null;
+      limit?: number | null;
+    } = {},
+  ): Promise<SeriesCanonCheckResponse[]> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, String(value));
+      }
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request<SeriesCanonCheckResponse[]>(
+      `/ai-video/series/${seriesId}/canon-checks${suffix}`,
+    );
+  }
+
+  async listStoryStudioSeries(): Promise<VideoSeriesResponse[]> {
+    return this.request<VideoSeriesResponse[]>('/story-studio/series');
+  }
+
+  async listStoryEpisodes(seriesId: string): Promise<StoryEpisodeResponse[]> {
+    return this.request<StoryEpisodeResponse[]>(`/story-studio/series/${seriesId}/episodes`);
+  }
+
+  async createStoryEpisode(
+    seriesId: string,
+    data: StoryEpisodeCreate,
+  ): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(`/story-studio/series/${seriesId}/episodes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getStoryEpisode(episodeId: string): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(`/story-studio/episodes/${episodeId}`);
+  }
+
+  async updateStoryEpisode(
+    episodeId: string,
+    data: StoryEpisodeUpdate,
+  ): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(`/story-studio/episodes/${episodeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async generateStoryCandidates(episodeId: string): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(`/story-studio/episodes/${episodeId}/candidates`, {
+      method: 'POST',
+    });
+  }
+
+  async scoreStoryCandidates(episodeId: string): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(
+      `/story-studio/episodes/${episodeId}/candidates/score`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  async selectStoryMaster(
+    episodeId: string,
+    data: StoryCandidateSelectionRequest,
+  ): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(`/story-studio/episodes/${episodeId}/master-story`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async synthesizeStoryMaster(
+    episodeId: string,
+    data: StoryCandidateSynthesisRequest,
+  ): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(
+      `/story-studio/episodes/${episodeId}/master-story/synthesize`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async approveStoryMaster(
+    episodeId: string,
+    data: StoryApprovalRequest,
+  ): Promise<StoryEpisodeResponse> {
+    return this.request<StoryEpisodeResponse>(
+      `/story-studio/episodes/${episodeId}/master-story/approval`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async createStoryImageAdaptation(episodeId: string): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation`,
+      {
+        method: 'POST',
+      },
+    );
+  }
+
+  async approveStoryImagePrompts(
+    episodeId: string,
+    data: StoryPanelPromptApprovalRequest,
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation/prompts/approval`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateStoryImagePanel(
+    episodeId: string,
+    data: StoryPanelPromptUpdateRequest,
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation/panel`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async repairStoryImagePanel(
+    episodeId: string,
+    data: StoryPromptRepairRequest,
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation/panel/repair`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async requestStoryImageRender(
+    episodeId: string,
+    data: StoryImageRenderRequest = {},
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation/render`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async updateStoryImageRenderJob(
+    episodeId: string,
+    renderJobId: string,
+    data: StoryImageRenderJobUpdateRequest,
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/image-adaptation/render/jobs/${renderJobId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async exportStoryImagePrompts(episodeId: string): Promise<string> {
+    const response = await fetch(
+      `${this.getBaseUrl()}/story-studio/episodes/${episodeId}/image-adaptation/prompts/export`,
+    );
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.text();
+  }
+
+  async createStoryVideoAdaptation(
+    episodeId: string,
+    data: StoryVideoHandoffRequest = { open_existing: true },
+  ): Promise<StoryAdaptationResponse> {
+    return this.request<StoryAdaptationResponse>(
+      `/story-studio/episodes/${episodeId}/video-adaptation`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async suggestStoryUpdates(episodeId: string): Promise<StorySuggestionResponse> {
+    return this.request<StorySuggestionResponse>(`/story-studio/episodes/${episodeId}/suggestions`, {
+      method: 'POST',
+    });
+  }
+
+  async approveStoryUpdates(
+    episodeId: string,
+    data: StorySuggestionApprovalRequest,
+  ): Promise<StorySuggestionResponse> {
+    return this.request<StorySuggestionResponse>(
+      `/story-studio/episodes/${episodeId}/suggestions/approval`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
   async deleteVideoSeries(
     seriesId: string,
     options: { deleteEpisodes?: boolean; confirmDeleteEpisodes?: boolean } = {},
@@ -821,6 +1590,105 @@ class ApiClient {
 
   async getVideoProject(projectId: string): Promise<VideoProjectDetailResponse> {
     return this.request<VideoProjectDetailResponse>(`/ai-video/projects/${projectId}`);
+  }
+
+  async getVideoProjectMemory(projectId: string): Promise<VideoProjectMemoryListResponse> {
+    return this.request<VideoProjectMemoryListResponse>(`/ai-video/projects/${projectId}/memory`);
+  }
+
+  async getVideoProjectTargetTimeline(
+    projectId: string,
+  ): Promise<VideoProjectTargetTimelineResponse> {
+    return this.request<VideoProjectTargetTimelineResponse>(
+      `/ai-video/projects/${projectId}/target-timeline`,
+    );
+  }
+
+  async compileVideoProjectContext(
+    projectId: string,
+    data: VideoProjectContextCompileRequest,
+  ): Promise<VideoProjectContextSnapshotResponse> {
+    return this.request<VideoProjectContextSnapshotResponse>(
+      `/ai-video/projects/${projectId}/context/compile`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async listVideoProjectContextSnapshots(
+    projectId: string,
+    limit = 20,
+  ): Promise<VideoProjectContextSnapshotListResponse> {
+    return this.request<VideoProjectContextSnapshotListResponse>(
+      `/ai-video/projects/${projectId}/context/snapshots?limit=${limit}`,
+    );
+  }
+
+  async runVideoProjectQualityReport(
+    projectId: string,
+    data: VideoQualityRunRequest = {},
+  ): Promise<VideoQualityReportResponse> {
+    return this.request<VideoQualityReportResponse>(
+      `/ai-video/projects/${projectId}/quality/reports`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async getLatestVideoProjectQualityReport(
+    projectId: string,
+  ): Promise<VideoQualityReportResponse | null> {
+    return this.request<VideoQualityReportResponse | null>(
+      `/ai-video/projects/${projectId}/quality/reports/latest`,
+    );
+  }
+
+  async listVideoProjectQualityReports(
+    projectId: string,
+    limit = 20,
+  ): Promise<VideoQualityReportListResponse> {
+    return this.request<VideoQualityReportListResponse>(
+      `/ai-video/projects/${projectId}/quality/reports?limit=${limit}`,
+    );
+  }
+
+  async overrideVideoQualityReport(
+    reportId: string,
+    data: VideoQualityOverrideRequest,
+  ): Promise<VideoQualityReportResponse> {
+    return this.request<VideoQualityReportResponse>(
+      `/ai-video/quality/reports/${reportId}/override`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async createVideoProjectRetentionDataset(
+    projectId: string,
+    data: PlatformRetentionDatasetCreateRequest,
+  ): Promise<PlatformRetentionDatasetResponse> {
+    return this.request<PlatformRetentionDatasetResponse>(
+      `/ai-video/projects/${projectId}/retention-datasets`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async listVideoProjectRetentionDatasets(
+    projectId: string,
+    limit = 20,
+  ): Promise<PlatformRetentionDatasetListResponse> {
+    return this.request<PlatformRetentionDatasetListResponse>(
+      `/ai-video/projects/${projectId}/retention-datasets?limit=${limit}`,
+    );
   }
 
   async updateVideoProject(
@@ -872,6 +1740,25 @@ class ApiClient {
 
   async getVideoProjectStatus(projectId: string): Promise<VideoProjectStatusResponse> {
     return this.request<VideoProjectStatusResponse>(`/ai-video/projects/${projectId}/status`);
+  }
+
+  async getVideoPublishingMetadata(projectId: string): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(
+      `/ai-video/projects/${projectId}/publishing-metadata`,
+    );
+  }
+
+  async generateVideoPublishingMetadata(
+    projectId: string,
+    data: VideoPublishingMetadataGenerateRequest = {},
+  ): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(
+      `/ai-video/projects/${projectId}/publishing-metadata`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
   }
 
   async startVideoAutoRun(
@@ -1011,6 +1898,23 @@ class ApiClient {
   ): Promise<VideoClipGenerationJobResponse> {
     return this.request<VideoClipGenerationJobResponse>(
       `/ai-video/projects/${projectId}/clip-generation/jobs/${jobId}`,
+    );
+  }
+
+  async getVideoProviderProjectBinding(
+    projectId: string,
+  ): Promise<VideoProviderProjectBindingResponse | null> {
+    return this.request<VideoProviderProjectBindingResponse | null>(
+      `/ai-video/projects/${projectId}/provider-flow/binding`,
+    );
+  }
+
+  async openVideoProviderProjectBinding(
+    projectId: string,
+  ): Promise<VideoProviderProjectBindingResponse> {
+    return this.request<VideoProviderProjectBindingResponse>(
+      `/ai-video/projects/${projectId}/provider-flow/open`,
+      { method: 'POST' },
     );
   }
 
@@ -1230,6 +2134,21 @@ class ApiClient {
   async getVideoShotClip(projectId: string, shotId: string): Promise<VideoShotClipResponse | null> {
     return this.request<VideoShotClipResponse | null>(
       `/ai-video/projects/${projectId}/shots/${shotId}/clip`,
+    );
+  }
+
+  getVideoShotClipDownloadUrl(projectId: string, shotId: string): string {
+    return `${this.getBaseUrl()}/ai-video/projects/${projectId}/shots/${shotId}/clip/download`;
+  }
+
+  async downloadVideoShotClip(
+    projectId: string,
+    shotId: string,
+    fallbackFilename = 'clip.mp4',
+  ): Promise<DownloadedBlob> {
+    return this.download(
+      `/ai-video/projects/${projectId}/shots/${shotId}/clip/download`,
+      fallbackFilename,
     );
   }
 
@@ -1454,6 +2373,10 @@ class ApiClient {
       `/ai-video/projects/${projectId}/render/jobs/${jobId}/download`,
       'Video hoàn chỉnh.mp4',
     );
+  }
+
+  getVideoRenderJobDownloadUrl(projectId: string, jobId: string): string {
+    return `${this.getBaseUrl()}/ai-video/projects/${projectId}/render/jobs/${jobId}/download`;
   }
 
   async downloadVideoRenderEnhancedArtifact(
@@ -1894,6 +2817,105 @@ class ApiClient {
     }
 
     return response.blob();
+  }
+
+  // --- Comic Series Analysis (change 13) ---------------------------------
+
+  async getComicCapabilities(): Promise<ComicCapabilitiesResponse> {
+    return this.request<ComicCapabilitiesResponse>('/comic-series-analysis/capabilities');
+  }
+
+  async listComicJobs(limit = 20, offset = 0): Promise<ComicJobListResponse> {
+    return this.request<ComicJobListResponse>(
+      `/comic-series-analysis/jobs?limit=${limit}&offset=${offset}`,
+    );
+  }
+
+  async getComicJob(jobId: string): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>(`/comic-series-analysis/jobs/${jobId}`);
+  }
+
+  async createComicUrlJob(payload: ComicUrlJobRequest): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>('/comic-series-analysis/jobs/from-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createComicUploadJob(
+    files: File[],
+    options: { reading_mode?: string; development_mode?: string; rights_attested?: boolean; title?: string } = {},
+  ): Promise<ComicJobDetail> {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    if (options.reading_mode) form.append('reading_mode', options.reading_mode);
+    if (options.development_mode) form.append('development_mode', options.development_mode);
+    if (options.rights_attested !== undefined) form.append('rights_attested', String(options.rights_attested));
+    if (options.title) form.append('title', options.title);
+    const url = `${this.getBaseUrl()}/comic-series-analysis/jobs/from-upload`;
+    const response = await fetch(url, { method: 'POST', body: form });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatErrorDetail(error.detail, `HTTP error! status: ${response.status}`));
+    }
+    return response.json();
+  }
+
+  async runComicJob(jobId: string): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>(`/comic-series-analysis/jobs/${jobId}/run`, { method: 'POST' });
+  }
+
+  async analyzeComicJob(jobId: string): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>(`/comic-series-analysis/jobs/${jobId}/analyze`, { method: 'POST' });
+  }
+
+  async getComicAnalysisPackage(jobId: string): Promise<ComicAnalysisPackage> {
+    return this.request<ComicAnalysisPackage>(`/comic-series-analysis/jobs/${jobId}/analysis-package`);
+  }
+
+  async rewriteComicStory(jobId: string): Promise<ComicAnalysisPackage> {
+    return this.request<ComicAnalysisPackage>(`/comic-series-analysis/jobs/${jobId}/rewrite`, { method: 'POST' });
+  }
+
+  async approveComicJob(jobId: string, payload: Record<string, unknown>): Promise<{ approved: boolean; manifest_id: string }> {
+    return this.request<{ approved: boolean; manifest_id: string }>(`/comic-series-analysis/jobs/${jobId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  getComicAssetPreviewUrl(assetId: string): string {
+    return `${this.getBaseUrl()}/comic-series-analysis/assets/${assetId}/preview`;
+  }
+
+  async cancelComicJob(jobId: string): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>(`/comic-series-analysis/jobs/${jobId}/cancel`, { method: 'POST' });
+  }
+
+  async retryComicJob(jobId: string): Promise<ComicJobDetail> {
+    return this.request<ComicJobDetail>(`/comic-series-analysis/jobs/${jobId}/retry`, { method: 'POST' });
+  }
+
+  async deleteComicJob(jobId: string): Promise<void> {
+    await this.request<void>(`/comic-series-analysis/jobs/${jobId}`, { method: 'DELETE' });
+  }
+
+  async previewComicHandoff(jobId: string, payload: Record<string, unknown>): Promise<ComicHandoffPreview> {
+    return this.request<ComicHandoffPreview>(`/comic-series-analysis/jobs/${jobId}/series-handoff/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async commitComicHandoff(jobId: string, payload: Record<string, unknown>): Promise<ComicHandoffResult> {
+    return this.request<ComicHandoffResult>(`/comic-series-analysis/jobs/${jobId}/series-handoff/commit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   }
 }
 

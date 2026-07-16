@@ -25,6 +25,9 @@ from ..utils.capture_chords import (
 )
 
 SINGLETON_ID = 1
+DEFAULT_CODEX_TIMEOUT_SECONDS = 600
+OLD_DEFAULT_CODEX_TIMEOUT_SECONDS = 60
+CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max", "ultra"}
 
 
 def _get_or_create_capture_row(db: Session) -> DBCaptureSettings:
@@ -96,9 +99,20 @@ def _refresh_codex_path_if_needed(row: DBAIPlanningSettings) -> bool:
 
 def _default_codex_timeout() -> int:
     try:
-        return int(os.environ.get("VOICEBOX_CODEX_TIMEOUT", "60"))
+        parsed = int(os.environ.get("VOICEBOX_CODEX_TIMEOUT", str(DEFAULT_CODEX_TIMEOUT_SECONDS)))
     except ValueError:
-        return 60
+        parsed = DEFAULT_CODEX_TIMEOUT_SECONDS
+    return max(5, min(parsed, DEFAULT_CODEX_TIMEOUT_SECONDS))
+
+def _refresh_codex_timeout_if_needed(row: DBAIPlanningSettings) -> bool:
+    if int(row.timeout_seconds or 0) != OLD_DEFAULT_CODEX_TIMEOUT_SECONDS:
+        return False
+    row.timeout_seconds = _default_codex_timeout()
+    return True
+
+def _default_codex_reasoning_effort() -> str | None:
+    value = (os.environ.get("VOICEBOX_CODEX_REASONING_EFFORT") or "").strip().lower()
+    return value if value in CODEX_REASONING_EFFORTS else None
 
 def _get_or_create_ai_planning_row(db: Session) -> DBAIPlanningSettings:
     row = db.query(DBAIPlanningSettings).filter(DBAIPlanningSettings.id == SINGLETON_ID).first()
@@ -108,14 +122,18 @@ def _get_or_create_ai_planning_row(db: Session) -> DBAIPlanningSettings:
             provider="codex-cli",
             codex_path=_default_codex_path(),
             model=os.environ.get("VOICEBOX_CODEX_MODEL"),
+            model_reasoning_effort=_default_codex_reasoning_effort(),
             timeout_seconds=_default_codex_timeout(),
         )
         db.add(row)
         db.commit()
         db.refresh(row)
-    elif _refresh_codex_path_if_needed(row):
-        db.commit()
-        db.refresh(row)
+    else:
+        changed = _refresh_codex_path_if_needed(row)
+        changed = _refresh_codex_timeout_if_needed(row) or changed
+        if changed:
+            db.commit()
+            db.refresh(row)
     return row
 
 
@@ -168,6 +186,11 @@ def get_ai_planning_settings(db: Session) -> DBAIPlanningSettings:
 
 def update_ai_planning_settings(db: Session, patch: dict[str, Any]) -> DBAIPlanningSettings:
     row = _get_or_create_ai_planning_row(db)
+    if "model_reasoning_effort" in patch and isinstance(patch["model_reasoning_effort"], str):
+        effort = patch["model_reasoning_effort"].strip().lower()
+        if effort and effort not in CODEX_REASONING_EFFORTS:
+            raise ValueError("model_reasoning_effort must be one of low, medium, high, xhigh, max, ultra")
+        patch["model_reasoning_effort"] = effort if effort else None
     _apply_patch(row, patch)
     db.commit()
     db.refresh(row)

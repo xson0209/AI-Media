@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import { changelogPlugin } from '../app/plugins/changelog';
 
-const frontendPort = Number(process.env.VOICEBOX_FRONTEND_PORT ?? 5173);
+const frontendPort = Number(process.env.VOICEBOX_FRONTEND_PORT ?? 4000);
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), changelogPlugin(path.resolve(__dirname, '..'))],

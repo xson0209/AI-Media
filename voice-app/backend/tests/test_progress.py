@@ -14,8 +14,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-from utils.progress import ProgressManager, get_progress_manager
-from utils.hf_progress import HFProgressTracker, create_hf_progress_callback
+from backend.utils.progress import ProgressManager, get_progress_manager
+from backend.utils.hf_progress import HFProgressTracker, create_hf_progress_callback
 
 
 def test_progress_manager_basic():
@@ -139,10 +139,10 @@ def test_hf_progress_tracker():
 
             # Simulate downloading a file
             print("  Simulating download with tqdm...")
-            total_size = 1000
+            total_size = 1_200_000
             with tqdm(total=total_size, desc="model.bin", unit="B", unit_scale=True) as pbar:
-                for chunk in range(0, total_size, 100):
-                    pbar.update(100)
+                for chunk in range(0, total_size, 120_000):
+                    pbar.update(min(120_000, total_size - chunk))
                     time.sleep(0.01)
 
             print(f"  Captured {len(captured_progress)} progress updates")
