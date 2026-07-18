@@ -74,6 +74,33 @@ Một project AI Video chỉ có một `target_language` và một bộ artifact
 
 Luồng này tránh trộn voice tiếng Việt và subtitle tiếng Anh trong cùng một ZIP hoặc MP4. Bản localize có source blocks riêng, artifact riêng và package manifest riêng.
 
+## Bộ não Series và truy xuất ký ức
+
+Với series dài, Voicebox không đưa toàn bộ lịch sử vào mọi lần gọi AI. Thay vào đó, hệ thống lưu lịch sử đầy đủ trong cơ sở dữ liệu rồi biên dịch một gói ngữ cảnh nhỏ hơn cho từng tác vụ. Cơ sở dữ liệu là nguồn chuẩn; file `series-memory.md` chỉ là bản dựng lại để đọc, xuất hoặc chẩn đoán.
+
+Các nhóm dữ liệu chính:
+
+- `Thẻ nhớ`: các mảnh canon có cấu trúc như danh tính series, quan hệ, địa điểm, đạo cụ, mạch truyện, quy tắc canon, phong cách hình ảnh, tóm tắt tập, tóm tắt chặng và tóm tắt toàn series.
+- `Hồ sơ nhân vật`: nguồn chuẩn cho ngoại hình, trang phục, tính cách, cách nói và fixed traits của nhân vật. Bộ chọn ngữ cảnh dùng hồ sơ này trực tiếp, không tạo một bản nhân vật thứ hai để tránh mâu thuẫn.
+- `Trạng thái hiện tại`: ảnh chụp sau tập đã duyệt, gồm trạng thái nhân vật, quan hệ, địa điểm, đạo cụ, mạch truyện mở và xung đột chưa giải quyết.
+- `Trace ngữ cảnh`: nhật ký an toàn cho biết tác vụ AI đã dùng thẻ nào, hồ sơ nào, nhóm dữ liệu nào bị rút gọn và dung lượng từng nhóm.
+- `Canon check`: kết quả kiểm tra prompt ảnh hoặc prompt video trước khi coi prompt là đạt chất lượng.
+
+Khi bạn duyệt Master Story trong Story Studio, Voicebox tạo các thẻ summary đã duyệt cho tập đó, chặng 10 tập tương ứng và toàn series. Các summary này không ghi đè mất lịch sử tập cũ; mỗi tập vẫn có thẻ riêng và chặng/toàn series được dựng lại từ những tập đã duyệt.
+
+Khi AI cần tạo nội dung mới, bộ biên dịch ngữ cảnh chọn dữ liệu theo loại tác vụ:
+
+- `story_candidate` và `master_story` ưu tiên danh tính series, nhân vật, quan hệ, mạch truyện mở, trạng thái hiện tại, tập gần nhất và yêu cầu mới.
+- `image_panel_prompt` ưu tiên nhân vật, trang phục, địa điểm, phong cách, trạng thái và panel liên quan; không nhồi lịch sử không liên quan chỉ để lấp dung lượng.
+- `video_prompt` ưu tiên canon, trạng thái, đạo cụ, địa điểm, continuity segment và điều cấm.
+- `voice` và `subtitle` ưu tiên narration, ngôn ngữ, người nói, cách nói, cảm xúc và thời lượng; không bắt buộc gửi toàn bộ dữ liệu hình ảnh của series.
+
+Gói ngữ cảnh vẫn có giới hạn ký tự để tương thích với pipeline hiện tại, nhưng dung lượng được chia theo nhóm như quy tắc bất biến, nhân vật/quan hệ, địa điểm/đạo cụ, mạch truyện, trạng thái hiện tại, payload tác vụ và điều cấm. Nếu một nhóm quá dài, hệ thống rút gọn trong chính nhóm đó và ghi trace; nhóm bắt buộc không bị mất chỉ vì phần đầu quá dài.
+
+Thẻ nháp hoặc trạng thái chờ duyệt không trở thành canon bắt buộc. Nếu AI đề xuất thay đổi continuity hoặc trạng thái hiện tại, bạn phải duyệt riêng trong khu vực `Bộ não Series`. Bản trạng thái chờ duyệt hiển thị so sánh giá trị cũ và mới trước khi duyệt. Sau khi duyệt, phiên bản cũ vẫn còn để truy vết.
+
+Prompt ảnh và prompt video được kiểm tra canon trước khi duyệt hoặc gửi render. Lỗi fixed traits, đạo cụ, bí mật tiết lộ sớm hoặc trạng thái sai có thể bị chặn. Bạn có thể ghi đè thủ công, nhưng phải nhập lý do; hệ thống lưu lý do, thời điểm và kết quả canon check để truy vết.
+
 ## Ví dụ đầu vào và đầu ra
 
 Bạn có thể nhập nội dung bằng tiếng Việt, sau đó dùng phần tiếng Anh mà AI tạo ra cho video quốc tế.
@@ -142,7 +169,34 @@ Có hai chế độ:
 
 Tùy chọn `Tạo ZIP khi xong` sẽ chạy thêm bước xuất package sau khi nguyên liệu lõi sẵn sàng. Nếu ZIP lỗi sau khi prompt, voice và SRT đã hoàn tất, auto-run vẫn báo summary rằng nguyên liệu lõi đã sẵn sàng để bạn retry package riêng.
 
-Auto-run không tích hợp provider tạo video bên ngoài và không tự render MP4. Phần MP4 vẫn dùng panel `Dựng nhanh MP4` sau khi bạn đã có clip video cho từng segment.
+Nếu bạn dùng panel `Veo3 qua Chrome`, Voicebox có thể gửi prompt sang Flow/Veo bằng Chrome profile riêng, tải clip về từng segment và tự chuyển tiếp sang render MP4 khi đủ điều kiện. Những lỗi cần tài khoản/provider như login, quota, billing hoặc policy vẫn dừng để bạn xử lý trong Chrome.
+
+## Veo3 qua Chrome, Flow project và model
+
+Panel `Veo3 qua Chrome` dùng Chrome profile riêng của Voicebox. App không lưu cookie, không copy credential và không export Chrome profile vào ZIP/debug package.
+
+Luật continuity:
+
+- Project lẻ dùng tối đa một Flow project binding active. Segment đầu tiên tạo binding, các segment sau mở lại đúng Flow project đó.
+- Project thuộc series dùng binding cấp series. Episode sau trong cùng series dùng lại Flow project series để giữ nhân vật, bối cảnh, asset và style.
+- Nếu Flow project cũ mở được, Voicebox không tạo project mới.
+- Nếu Flow yêu cầu login, chọn tài khoản, 2FA hoặc CAPTCHA, job pause và yêu cầu bạn thao tác trong Chrome. Voicebox không tạo project mới để né bước này.
+- Chỉ khi Flow xác nhận link project cũ invalid, bị xóa hoặc không còn là project hợp lệ, Voicebox mới đánh dấu binding cũ invalid và tạo binding mới.
+
+Model provider:
+
+- Voicebox dùng đúng model đang được chọn trong Flow UI của tài khoản hiện tại.
+- App chỉ đọc label model/cost nếu UI cho phép đọc rõ ràng; nếu không đọc được, job vẫn dùng lựa chọn hiện tại trong Flow.
+- Voicebox không hard-code `Omni Flash`, không tự mở dropdown đổi model và không quét fallback model miễn phí/có phí.
+- Khi model đang chọn hết quota/credit hoặc cần billing, job pause bằng tiếng Việt. Bạn tự đổi model trong Flow rồi bấm `Resume`; lần resume tiếp tục dùng đúng model mới trong cùng Flow project.
+
+Codex repair:
+
+- `Cho phép Codex repair lỗi kỹ thuật` mặc định tắt cho mỗi job.
+- Khi bật, Voicebox chỉ lưu context và pause cho lỗi kỹ thuật app thuộc allowlist như selector Flow đổi, download watcher/correlation lỗi hoặc import mapping có thể kiểm thử.
+- Login, 2FA, CAPTCHA, quota, billing, payment, policy block và tài khoản bị giới hạn không bao giờ đi qua Codex repair.
+- Repair context được redaction: không chứa cookie, token, credential, full Flow URL, full DOM hoặc prompt dài nguyên văn.
+- Backend chỉ tự chạy runner repair khi môi trường bật rõ `VOICEBOX_CODEX_REPAIR_AUTORUN=1`; nếu không, job giữ `paused_for_repair` để developer review.
 
 ## Quy trình phase 2
 

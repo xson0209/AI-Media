@@ -21,10 +21,12 @@ class GenerationJob:
     coro: Coroutine
 
 
-DEFAULT_GENERATION_CONCURRENCY = 2
+DEFAULT_GENERATION_CONCURRENCY = 1
 # TTS backends share process-wide model/GPU state. Keep this as a hard safety
 # limit, even when an environment variable or test override requests more.
-MAX_GENERATION_CONCURRENCY = 2
+# Running two Qwen clone inferences against the same loaded model can starve or
+# wedge small local GPUs, leaving AI Video auto-runs stuck at waiting_voice.
+MAX_GENERATION_CONCURRENCY = 1
 
 # Generation queue — limits concurrent TTS inference to avoid GPU contention
 _generation_queue: asyncio.Queue = None  # type: ignore  # initialized at startup

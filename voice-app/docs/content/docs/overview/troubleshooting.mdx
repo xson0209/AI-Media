@@ -152,6 +152,61 @@ Please install flash-attn for faster inference.
 
 ## Generation Issues
 
+## AI Video Veo/Flow Issues
+
+### Job báo cần đăng nhập, 2FA hoặc CAPTCHA
+
+Voicebox dùng Chrome profile riêng cho Flow/Veo và không bypass bước xác minh của Google.
+
+**Solution:**
+- Bấm `Mở Chrome đăng nhập` trong panel `Veo3 qua Chrome`.
+- Hoàn tất đăng nhập, chọn tài khoản, 2FA hoặc CAPTCHA trong Chrome.
+- Quay lại Voicebox và bấm `Resume`.
+
+Voicebox sẽ giữ nguyên Flow project binding hiện tại và không tạo project mới chỉ vì cần đăng nhập lại.
+
+### Job báo quota, credit, billing hoặc model không khả dụng
+
+Voicebox dùng đúng model đang được chọn trong Flow. App không tự đổi sang model khác và không tự mua credit.
+
+**Solution:**
+- Bấm `Mở Flow project để xử lý`.
+- Trong Flow, tự đổi model hoặc xử lý quota/billing theo tài khoản của bạn.
+- Quay lại Voicebox và bấm `Resume`.
+
+Nếu bạn đổi model thủ công trong Flow, Voicebox vẫn dùng cùng Flow project binding và đọc lại model hiện tại ở lần chạy tiếp theo.
+
+### Flow project binding bị invalid
+
+Voicebox chỉ tạo Flow project mới khi link cũ thật sự invalid, bị xóa hoặc không còn mở được workspace sau bước recover giới hạn.
+
+**Solution:**
+- Nếu UI báo `needs_login`, hãy đăng nhập lại thay vì tạo project mới.
+- Nếu UI báo `needs_user_action`, mở đúng Flow project bằng nút trong panel và kiểm tra trạng thái provider.
+- Nếu link thật sự invalid, job retry/resume sẽ tạo binding mới và binding cũ được đánh dấu invalid/rotated.
+
+### Prompt bị policy block
+
+Google/Veo có thể chặn prompt vì policy, public figure hoặc nội dung không được phép.
+
+**Solution:**
+- Sửa prompt/video concept để không dùng tên, chân dung, logo hoặc yêu cầu bị provider chặn.
+- Tạo lại prompt video nếu cần.
+- Retry job sau khi nội dung đã an toàn hơn.
+
+Codex repair không được dùng để vượt qua policy provider.
+
+### Job `paused_for_repair`
+
+Trạng thái này chỉ xuất hiện khi bạn bật `Cho phép Codex repair lỗi kỹ thuật` và lỗi thuộc nhóm kỹ thuật app như selector Flow đổi, download watcher hoặc media correlation.
+
+**Solution:**
+- Xem báo cáo Codex repair trong panel.
+- Nếu backend chưa bật `VOICEBOX_CODEX_REPAIR_AUTORUN=1`, job sẽ giữ paused để developer review thay đổi code.
+- Sau khi lỗi kỹ thuật đã được sửa và test pass, bấm `Resume sau repair`.
+
+Repair context được redaction và không chứa cookie, token, credential, full Flow URL, full DOM hoặc prompt dài nguyên văn.
+
 ### First Generation is Very Slow
 
 **Symptoms:**

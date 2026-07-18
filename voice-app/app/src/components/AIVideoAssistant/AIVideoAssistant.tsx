@@ -2226,6 +2226,25 @@ export function AIVideoAssistant() {
 
   const invalidateProject = () => queryClient.invalidateQueries({ queryKey: ['ai-video'] });
 
+  const upsertProjectListItem = (
+    project: VideoProjectResponse,
+    run?: VideoAutoRunResponse | null,
+  ) => {
+    const nextProject: VideoProjectResponse = run
+      ? {
+          ...project,
+          active_run_status: run.status,
+          active_run_step: run.current_step,
+          active_run_progress: run.progress,
+        }
+      : project;
+
+    queryClient.setQueryData<VideoProjectResponse[]>(['ai-video', 'projects'], (current) => {
+      if (!current?.length) return [nextProject];
+      return [nextProject, ...current.filter((item) => item.id !== project.id)];
+    });
+  };
+
   const openEpisodeDialog = (seriesId?: string | null) => {
     const nextSeriesId = seriesId ?? episodeDraft.seriesId ?? editingSeriesId ?? '';
     const targetSeries = seriesQuery.data?.find((series) => series.id === nextSeriesId);
@@ -2322,6 +2341,7 @@ export function AIVideoAssistant() {
       }
     },
     onSuccess: ({ project, autoRun, autoRunError }) => {
+      upsertProjectListItem(project, autoRun);
       selectProject(project.id);
       if (autoRun) {
         queryClient.setQueryData(['ai-video', 'auto-run', 'latest', project.id], autoRun);
@@ -2395,6 +2415,7 @@ export function AIVideoAssistant() {
       });
     },
     onSuccess: (project) => {
+      upsertProjectListItem(project);
       selectProject(project.id);
       setEpisodeDialogOpen(false);
       setEpisodeDraft((current) => ({ ...current, episodeTitle: '', topic: '' }));
@@ -2481,6 +2502,7 @@ export function AIVideoAssistant() {
     onSuccess: (project) => {
       if (!project) return;
       setProjectMenuId(null);
+      upsertProjectListItem(project);
       selectProject(project.id);
       setNotice(
         'Đã tạo bản dịch riêng. Hãy chọn giọng phù hợp rồi tạo lại kịch bản, giọng đọc và phụ đề cho bản này.',
@@ -2746,6 +2768,9 @@ export function AIVideoAssistant() {
       });
     },
     onSuccess: (run) => {
+      if (selectedProject) {
+        upsertProjectListItem(selectedProject, run);
+      }
       setNotice(
         run.material_target === 'prompts_only'
           ? 'Tự chạy đã bắt đầu tới câu lệnh video. Giọng đọc và phụ đề sẽ bỏ qua.'

@@ -8,7 +8,7 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 set "APP_DIR=%ROOT%\voice-app"
 set "START_SCRIPT=%APP_DIR%\scripts\start-web-e.ps1"
-set "FRONTEND_URL=http://127.0.0.1:209"
+set "FRONTEND_URL=http://127.0.0.1:4000"
 set "BACKEND_DOCS=http://127.0.0.1:17493/docs"
 
 if not exist "%APP_DIR%" (
