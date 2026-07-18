@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import type {
+  AIPlanningSettings,
+  AIPlanningSettingsUpdate,
   CaptureSettings,
   CaptureSettingsUpdate,
   GenerationSettings,
@@ -9,6 +11,7 @@ import type {
 
 const CAPTURE_SETTINGS_KEY = ['settings', 'captures'] as const;
 const GENERATION_SETTINGS_KEY = ['settings', 'generation'] as const;
+const AI_PLANNING_SETTINGS_KEY = ['settings', 'ai-planning'] as const;
 const TADA_VIETNAMESE_STATUS_KEY = ['models', 'tada-vietnamese-status'] as const;
 
 /**
@@ -103,6 +106,49 @@ export function useGenerationSettings() {
     settings: query.data,
     isLoading: query.isLoading,
     update: mutation.mutate,
+  };
+}
+
+export function useAIPlanningSettings() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: AI_PLANNING_SETTINGS_KEY,
+    queryFn: () => apiClient.getAIPlanningSettings(),
+    staleTime: Infinity,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (patch: AIPlanningSettingsUpdate) => apiClient.updateAIPlanningSettings(patch),
+    onMutate: async (patch) => {
+      await queryClient.cancelQueries({ queryKey: AI_PLANNING_SETTINGS_KEY });
+      const previous = queryClient.getQueryData<AIPlanningSettings>(AI_PLANNING_SETTINGS_KEY);
+      if (previous) {
+        queryClient.setQueryData<AIPlanningSettings>(AI_PLANNING_SETTINGS_KEY, {
+          ...previous,
+          ...patch,
+        });
+      }
+      return { previous };
+    },
+    onError: (_err, _patch, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(AI_PLANNING_SETTINGS_KEY, ctx.previous);
+      }
+    },
+    onSettled: (data) => {
+      if (data) queryClient.setQueryData(AI_PLANNING_SETTINGS_KEY, data);
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'planning-check'] });
+    },
+  });
+
+  return {
+    settings: query.data,
+    isLoading: query.isLoading,
+    isUpdating: mutation.isPending,
+    error: query.error ?? mutation.error,
+    update: mutation.mutate,
+    updateAsync: mutation.mutateAsync,
   };
 }
 

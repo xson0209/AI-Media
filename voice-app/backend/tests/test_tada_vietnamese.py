@@ -155,7 +155,7 @@ async def test_generate_speech_uses_qwen_for_legacy_tada_vietnamese_profile(monk
         db,
     )
 
-    assert response.status == "generating"
+    assert response.status == "queued"
     assert response.engine == "qwen"
     assert response.model_size == "1.7B"
     assert enqueued == [response.id]
@@ -201,7 +201,7 @@ async def test_generate_speech_normalizes_qwen_vietnamese_0_6b_to_1_7b(monkeypat
         db,
     )
 
-    assert response.status == "generating"
+    assert response.status == "queued"
     assert response.engine == "qwen"
     assert response.model_size == "1.7B"
     assert enqueued == [response.id]

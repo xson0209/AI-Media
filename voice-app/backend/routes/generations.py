@@ -1,7 +1,9 @@
 """TTS generation endpoints."""
 
 import asyncio
+import contextlib
 import logging
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -10,10 +12,22 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import config, models
-from ..services import history, personality, profiles, qwen_vietnamese, tada_vietnamese, tts
 from ..database import Generation as DBGeneration, VoiceProfile as DBVoiceProfile, get_db
+from ..services import (
+    history,
+    personality,
+    profiles,
+    qwen_vietnamese,
+    tada_vietnamese,
+    tts,
+    video_rendering,
+)
 from ..services.generation import run_generation
-from ..services.task_queue import cancel_generation as cancel_generation_job, enqueue_generation
+from ..services.task_queue import (
+    cancel_generation as cancel_generation_job,
+    enqueue_generation,
+    generation_inference_slot,
+)
 from ..utils.audio import load_audio
 from ..utils.tasks import get_task_manager
 
@@ -23,7 +37,89 @@ router = APIRouter()
 
 IMPORTED_AUDIO_PROFILE_NAME = "Imported Audio"
 IMPORT_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".webm"}
+IMPORT_VIDEO_EXTENSIONS = {".mp4"}
 IMPORT_AUDIO_MAX_BYTES = 200 * 1024 * 1024  # 200 MB
+IMPORT_VIDEO_CONVERT_TIMEOUT_SECONDS = 600
+
+
+def _truncate_process_output(value: str | None, limit: int = 1200) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _cleanup_paths(paths: list[Path]) -> None:
+    for path in paths:
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+
+def _convert_mp4_to_mp3(source_path: Path, target_path: Path) -> None:
+    """Extract the first audio stream from an MP4 upload into an MP3 file."""
+    tools = video_rendering.detect_tools()
+    if not tools.ffmpeg:
+        raise HTTPException(
+            status_code=400,
+            detail="Chưa tìm thấy FFmpeg để chuyển MP4 sang MP3. Hãy cài FFmpeg hoặc cấu hình VOICEBOX_FFMPEG_PATH.",
+        )
+
+    command = [
+        tools.ffmpeg,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-i",
+        str(source_path),
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-codec:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
+        "-f",
+        "mp3",
+        str(target_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=IMPORT_VIDEO_CONVERT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status_code=408,
+            detail="Chuyển MP4 sang MP3 quá lâu. Hãy thử video ngắn hơn hoặc nén file trước khi upload.",
+        ) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không chạy được FFmpeg để chuyển MP4 sang MP3: {exc}",
+        ) from exc
+
+    if result.returncode != 0:
+        stderr = _truncate_process_output(result.stderr)
+        detail = "Không chuyển được MP4 sang MP3. Hãy kiểm tra video có track âm thanh hợp lệ."
+        if stderr:
+            detail = f"{detail} FFmpeg: {stderr}"
+        raise HTTPException(status_code=400, detail=detail)
+
+    if not target_path.exists() or target_path.stat().st_size <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Không chuyển được MP4 sang MP3: FFmpeg không tạo file âm thanh.",
+        )
+
 
 
 def _get_or_create_import_profile(db: Session) -> DBVoiceProfile:
@@ -189,7 +285,7 @@ async def generate_speech(
         db=db,
         instruct=data.instruct,
         generation_id=generation_id,
-        status="generating",
+        status="queued",
         engine=engine,
         model_size=model_size,
         source=source,
@@ -283,7 +379,7 @@ async def retry_generation(generation_id: str, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    gen.status = "generating"
+    gen.status = "queued"
     gen.error = None
     gen.audio_path = ""
     gen.duration = 0
@@ -366,7 +462,7 @@ async def regenerate_generation(generation_id: str, db: Session = Depends(get_db
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    gen.status = "generating"
+    gen.status = "queued"
     gen.error = None
     gen.engine = engine
     gen.model_size = model_size
@@ -409,7 +505,7 @@ async def cancel_generation(generation_id: str, db: Session = Depends(get_db)):
     if not gen:
         raise HTTPException(status_code=404, detail="Generation not found")
 
-    if (gen.status or "completed") not in ("loading_model", "generating"):
+    if (gen.status or "completed") not in ("queued", "loading_model", "generating"):
         raise HTTPException(status_code=400, detail="Only active generations can be cancelled")
 
     cancellation_state = cancel_generation_job(generation_id)
@@ -535,34 +631,35 @@ async def stream_speech(
         raise HTTPException(status_code=400, detail=str(e))
 
     await ensure_model_cached_or_raise(engine, model_size)
-    await load_engine_model(engine, model_size)
+    async with generation_inference_slot():
+        await load_engine_model(engine, model_size)
 
-    voice_prompt = await profiles.create_voice_prompt_for_profile(
-        data.profile_id,
-        db,
-        engine=engine,
-        language=data.language,
-    )
+        voice_prompt = await profiles.create_voice_prompt_for_profile(
+            data.profile_id,
+            db,
+            engine=engine,
+            language=data.language,
+        )
 
-    from ..utils.chunked_tts import generate_chunked
+        from ..utils.chunked_tts import generate_chunked
 
-    trim_fn = None
-    if engine_needs_trim(engine):
-        from ..utils.audio import trim_tts_output
+        trim_fn = None
+        if engine_needs_trim(engine):
+            from ..utils.audio import trim_tts_output
 
-        trim_fn = trim_tts_output
+            trim_fn = trim_tts_output
 
-    audio, sample_rate = await generate_chunked(
-        tts_model,
-        data.text,
-        voice_prompt,
-        language=data.language,
-        seed=data.seed,
-        instruct=data.instruct,
-        max_chunk_chars=data.max_chunk_chars,
-        crossfade_ms=data.crossfade_ms,
-        trim_fn=trim_fn,
-    )
+        audio, sample_rate = await generate_chunked(
+            tts_model,
+            data.text,
+            voice_prompt,
+            language=data.language,
+            seed=data.seed,
+            instruct=data.instruct,
+            max_chunk_chars=data.max_chunk_chars,
+            crossfade_ms=data.crossfade_ms,
+            trim_fn=trim_fn,
+        )
 
     effects_chain_config = None
     if data.effects_chain is not None:
@@ -607,16 +704,20 @@ async def import_audio(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """Register an external audio file as a generation row.
+    """Register an external audio/video file as a generation row.
 
     Designed for the story timeline so users can drop in music or other
-    non-TTS audio. The row points at a singleton "Imported Audio" profile
-    so the existing generation/story plumbing keeps working unchanged."""
+    non-TTS audio. MP4 uploads are converted to MP3 before storage. The row
+    points at a singleton "Imported Audio" profile so the existing
+    generation/story plumbing keeps working unchanged."""
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in IMPORT_AUDIO_EXTENSIONS:
+    if suffix not in IMPORT_AUDIO_EXTENSIONS and suffix not in IMPORT_VIDEO_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported audio format '{suffix}'. Allowed: {sorted(IMPORT_AUDIO_EXTENSIONS)}",
+            detail=(
+                f"Unsupported media format '{suffix}'. "
+                f"Allowed: {sorted(IMPORT_AUDIO_EXTENSIONS | IMPORT_VIDEO_EXTENSIONS)}"
+            ),
         )
 
     chunks: list[bytes] = []
@@ -637,17 +738,29 @@ async def import_audio(
         raise HTTPException(status_code=400, detail="Empty audio file.")
 
     generation_id = str(uuid.uuid4())
-    target = config.get_generations_dir() / f"{generation_id}{suffix}"
-    target.write_bytes(audio_bytes)
+    source_path = config.get_generations_dir() / f"{generation_id}{suffix}"
+    source_path.write_bytes(audio_bytes)
+    written_files = [source_path]
+
+    if suffix in IMPORT_VIDEO_EXTENSIONS:
+        target = config.get_generations_dir() / f"{generation_id}.mp3"
+        try:
+            _convert_mp4_to_mp3(source_path, target)
+        except HTTPException:
+            _cleanup_paths(written_files + [target])
+            raise
+        written_files.append(target)
+        with contextlib.suppress(OSError):
+            source_path.unlink()
+            written_files.remove(source_path)
+    else:
+        target = source_path
 
     try:
         audio, sr = load_audio(str(target))
         duration = float(len(audio) / sr) if sr else 0.0
     except Exception as decode_err:
-        try:
-            target.unlink()
-        except OSError:
-            pass
+        _cleanup_paths(written_files)
         raise HTTPException(
             status_code=400,
             detail=f"Could not decode audio: {decode_err}",

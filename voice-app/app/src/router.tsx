@@ -13,6 +13,7 @@ import { EffectsTab } from '@/components/EffectsTab/EffectsTab';
 import { MainEditor } from '@/components/MainEditor/MainEditor';
 import { ModelsTab } from '@/components/ModelsTab/ModelsTab';
 import { AboutPage } from '@/components/ServerTab/AboutPage';
+import { AIPlanningPage } from '@/components/ServerTab/AIPlanningPage';
 import { CapturesPage } from '@/components/ServerTab/CapturesPage';
 import { ChangelogPage } from '@/components/ServerTab/ChangelogPage';
 import { GeneralPage } from '@/components/ServerTab/GeneralPage';
@@ -23,7 +24,9 @@ import { MCPPage } from '@/components/ServerTab/MCPPage';
 import { SettingsLayout } from '@/components/ServerTab/ServerTab';
 import { Sidebar } from '@/components/Sidebar';
 import { StoriesTab } from '@/components/StoriesTab/StoriesTab';
+import { StoryStudio } from '@/components/StoryStudio/StoryStudio';
 import { Toaster } from '@/components/ui/toaster';
+import { ComicSeriesAnalysis } from '@/components/ComicSeriesAnalysis/ComicSeriesAnalysis';
 import { VideoInspiration } from '@/components/VideoInspiration/VideoInspiration';
 import { VoicesTab } from '@/components/VoicesTab/VoicesTab';
 import { useGenerationProgress } from '@/lib/hooks/useGenerationProgress';
@@ -39,7 +42,9 @@ function RootLayout() {
   const routerState = useRouterState();
   const isWideWorkspace =
     routerState.location.pathname === '/ai-video' ||
-    routerState.location.pathname === '/video-inspiration';
+    routerState.location.pathname === '/story-studio' ||
+    routerState.location.pathname === '/video-inspiration' ||
+    routerState.location.pathname.startsWith('/comic-series-analysis');
 
   // Monitor active downloads/generations and show toasts for them
   const activeDownloads = useRestoreActiveTasks();
@@ -156,6 +161,30 @@ const aiVideoRoute = createRoute({
   component: AIVideoAssistant,
 });
 
+const storyStudioRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/story-studio',
+  component: StoryStudio,
+  // Deep-link from Comic Series Analysis handoff (task 9.7). Missing or
+  // unknown ids are tolerated — the component falls back gracefully.
+  validateSearch: (search: Record<string, unknown>): { seriesId?: string; episodeId?: string } => ({
+    seriesId: typeof search.seriesId === 'string' ? search.seriesId : undefined,
+    episodeId: typeof search.episodeId === 'string' ? search.episodeId : undefined,
+  }),
+});
+
+const comicSeriesAnalysisRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/comic-series-analysis',
+  component: ComicSeriesAnalysis,
+});
+
+const comicSeriesAnalysisDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/comic-series-analysis/$analysisId',
+  component: ComicSeriesAnalysis,
+});
+
 const videoInspirationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/video-inspiration',
@@ -201,6 +230,12 @@ const settingsMCPRoute = createRoute({
   component: MCPPage,
 });
 
+const settingsAIPlanningRoute = createRoute({
+  getParentRoute: () => settingsRoute,
+  path: '/ai-planning',
+  component: AIPlanningPage,
+});
+
 const settingsGpuRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/gpu',
@@ -243,13 +278,17 @@ const routeTree = rootRoute.addChildren([
   voicesRoute,
   effectsRoute,
   videoInspirationRoute,
+  comicSeriesAnalysisRoute,
+  comicSeriesAnalysisDetailRoute,
   aiVideoRoute,
+  storyStudioRoute,
   modelsRoute,
   settingsRoute.addChildren([
     settingsGeneralRoute,
     settingsGenerationRoute,
     settingsCapturesRoute,
     settingsMCPRoute,
+    settingsAIPlanningRoute,
     settingsGpuRoute,
     settingsLogsRoute,
     settingsChangelogRoute,

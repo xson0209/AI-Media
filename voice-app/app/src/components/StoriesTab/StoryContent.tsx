@@ -343,7 +343,7 @@ export function StoryContent() {
       <input
         ref={importInputRef}
         type="file"
-        accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac,.webm"
+        accept="audio/*,video/mp4,.wav,.mp3,.flac,.ogg,.m4a,.aac,.webm,.mp4"
         multiple
         className="hidden"
         onChange={(e) => {

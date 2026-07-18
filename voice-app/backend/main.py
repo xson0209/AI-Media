@@ -9,6 +9,10 @@ import argparse
 import uvicorn
 
 from . import config, database
+from .core.asyncio_windows import configure_windows_event_loop_policy
+
+configure_windows_event_loop_policy()
+
 from .app import app  # noqa: F401 -- re-export for uvicorn "backend.main:app"
 
 if __name__ == "__main__":

@@ -44,6 +44,7 @@ def run_migrations(engine) -> None:
     _migrate_capture_settings(engine, inspector, tables)
     _migrate_ai_video_assistant(engine)
     _migrate_video_inspiration(engine)
+    _migrate_comic_series_analysis(engine)
     _migrate_mcp_bindings(engine, inspector, tables)
     tables = set(inspect(engine).get_table_names())
     _normalize_storage_paths(engine, tables)
@@ -256,7 +257,8 @@ def _migrate_ai_video_assistant(engine) -> None:
                 provider VARCHAR NOT NULL DEFAULT 'codex-cli',
                 codex_path VARCHAR,
                 model VARCHAR,
-                timeout_seconds INTEGER NOT NULL DEFAULT 60,
+                model_reasoning_effort VARCHAR,
+                timeout_seconds INTEGER NOT NULL DEFAULT 600,
                 output_schema_path VARCHAR,
                 updated_at DATETIME
             )
@@ -265,6 +267,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             CREATE TABLE IF NOT EXISTS video_series (
                 id VARCHAR PRIMARY KEY,
                 title VARCHAR NOT NULL,
+                series_mode VARCHAR NOT NULL DEFAULT 'video_story_only',
                 character_bible TEXT,
                 world_bible TEXT,
                 style_bible TEXT,
@@ -272,14 +275,126 @@ def _migrate_ai_video_assistant(engine) -> None:
                 negative_rules TEXT,
                 previous_episode_summary TEXT,
                 latest_episode_number INTEGER NOT NULL DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at DATETIME,
                 updated_at DATETIME
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_character_profiles (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                name VARCHAR NOT NULL,
+                role VARCHAR,
+                face_description TEXT,
+                hair_description TEXT,
+                body_description TEXT,
+                signature_outfit TEXT,
+                personality TEXT,
+                speech_style TEXT,
+                fixed_traits TEXT,
+                additional_notes TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_memory_cards (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                card_type VARCHAR NOT NULL,
+                title VARCHAR NOT NULL,
+                content_json JSON NOT NULL,
+                tags_json JSON,
+                entity_refs_json JSON,
+                importance FLOAT NOT NULL DEFAULT 0.5,
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                effective_from_episode INTEGER,
+                effective_to_episode INTEGER,
+                source_type VARCHAR,
+                source_id VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                approved_at DATETIME,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_current_states (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                based_on_episode_number INTEGER NOT NULL DEFAULT 0,
+                character_states_json JSON,
+                relationship_states_json JSON,
+                location_states_json JSON,
+                prop_states_json JSON,
+                open_threads_json JSON,
+                unresolved_conflicts_json JSON,
+                revision INTEGER NOT NULL DEFAULT 1,
+                approval_status VARCHAR NOT NULL DEFAULT 'draft',
+                source_type VARCHAR,
+                source_id VARCHAR,
+                previous_state_id VARCHAR,
+                approved_at DATETIME,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id),
+                FOREIGN KEY (previous_state_id) REFERENCES series_current_states(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS story_episodes (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                episode_number INTEGER NOT NULL,
+                title VARCHAR,
+                output_intent VARCHAR NOT NULL DEFAULT 'truyen_anh',
+                market_profile VARCHAR NOT NULL DEFAULT 'viet_nam',
+                language_profile VARCHAR NOT NULL DEFAULT 'vi',
+                source_input TEXT,
+                source_digest TEXT,
+                output_settings_json JSON,
+                master_story_json JSON,
+                selection_reason TEXT,
+                approval_status VARCHAR NOT NULL DEFAULT 'draft',
+                approved_at DATETIME,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS story_scenario_candidates (
+                id VARCHAR PRIMARY KEY,
+                story_episode_id VARCHAR NOT NULL,
+                strategy_type VARCHAR NOT NULL,
+                script_json JSON NOT NULL,
+                score_json JSON,
+                strengths TEXT,
+                risks TEXT,
+                context_snapshot_id VARCHAR,
+                model_label VARCHAR,
+                generation_attempt INTEGER NOT NULL DEFAULT 1,
+                generation_status VARCHAR NOT NULL DEFAULT 'completed',
+                generation_metadata_json JSON,
+                evaluation_status VARCHAR NOT NULL DEFAULT 'pending',
+                evaluation_json JSON,
+                selected BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (story_episode_id) REFERENCES story_episodes(id)
             )
         """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS video_projects (
                 id VARCHAR PRIMARY KEY,
                 series_id VARCHAR,
+                story_episode_id VARCHAR,
                 episode_number INTEGER,
                 episode_title VARCHAR,
                 title VARCHAR NOT NULL,
@@ -319,7 +434,147 @@ def _migrate_ai_video_assistant(engine) -> None:
                 created_at DATETIME,
                 updated_at DATETIME,
                 FOREIGN KEY (series_id) REFERENCES video_series(id),
+                FOREIGN KEY (story_episode_id) REFERENCES story_episodes(id),
                 FOREIGN KEY (voice_profile_id) REFERENCES profiles(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS story_adaptations (
+                id VARCHAR PRIMARY KEY,
+                story_episode_id VARCHAR NOT NULL,
+                kind VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                payload_json JSON,
+                linked_video_project_id VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (story_episode_id) REFERENCES story_episodes(id),
+                FOREIGN KEY (linked_video_project_id) REFERENCES video_projects(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_context_traces (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                project_id VARCHAR,
+                story_episode_id VARCHAR,
+                task_type VARCHAR NOT NULL,
+                target_ref_type VARCHAR,
+                target_ref_id VARCHAR,
+                selected_cards_json JSON,
+                selected_character_profiles_json JSON,
+                group_budget_json JSON,
+                missing_required_json JSON,
+                truncated_groups_json JSON,
+                context_stats_json JSON,
+                reasons_json JSON,
+                context_preview TEXT,
+                created_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id),
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (story_episode_id) REFERENCES story_episodes(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_canon_checks (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                project_id VARCHAR,
+                story_episode_id VARCHAR,
+                prompt_kind VARCHAR NOT NULL,
+                prompt_ref_id VARCHAR,
+                passed BOOLEAN NOT NULL DEFAULT 1,
+                blocking_conflicts_json JSON,
+                warnings_json JSON,
+                evidence_card_ids_json JSON,
+                override_reason TEXT,
+                overridden_by VARCHAR,
+                overridden_at DATETIME,
+                created_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id),
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (story_episode_id) REFERENCES story_episodes(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_reference_assets (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                entity_type VARCHAR NOT NULL,
+                entity_id VARCHAR NOT NULL,
+                reference_role VARCHAR NOT NULL,
+                label VARCHAR,
+                asset_path VARCHAR NOT NULL,
+                thumbnail_path VARCHAR,
+                provider_asset_id VARCHAR,
+                original_filename VARCHAR,
+                mime_type VARCHAR NOT NULL,
+                width INTEGER,
+                height INTEGER,
+                file_size_bytes INTEGER,
+                checksum VARCHAR NOT NULL,
+                source_type VARCHAR,
+                approval_status VARCHAR NOT NULL DEFAULT 'pending_approval',
+                revision INTEGER NOT NULL DEFAULT 1,
+                active BOOLEAN NOT NULL DEFAULT 0,
+                metadata_json JSON,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS series_version_records (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                entity_type VARCHAR NOT NULL,
+                entity_id VARCHAR NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                snapshot_json JSON NOT NULL,
+                changed_by VARCHAR,
+                change_source VARCHAR,
+                change_reason TEXT,
+                created_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS artifact_dependency_snapshots (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                artifact_type VARCHAR NOT NULL,
+                artifact_id VARCHAR NOT NULL,
+                artifact_revision INTEGER NOT NULL DEFAULT 1,
+                dependency_type VARCHAR NOT NULL,
+                dependency_id VARCHAR NOT NULL,
+                dependency_revision INTEGER NOT NULL DEFAULT 1,
+                dependency_scope VARCHAR NOT NULL,
+                metadata_json JSON,
+                created_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS artifact_stale_events (
+                id VARCHAR PRIMARY KEY,
+                series_id VARCHAR NOT NULL,
+                artifact_type VARCHAR NOT NULL,
+                artifact_id VARCHAR NOT NULL,
+                artifact_revision INTEGER NOT NULL DEFAULT 1,
+                dependency_type VARCHAR NOT NULL,
+                dependency_id VARCHAR NOT NULL,
+                old_revision INTEGER,
+                new_revision INTEGER,
+                changed_scope VARCHAR NOT NULL,
+                dependency_scope VARCHAR NOT NULL,
+                reason_vi TEXT NOT NULL,
+                propagation_rule VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'active',
+                metadata_json JSON,
+                created_at DATETIME,
+                resolved_at DATETIME,
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
             )
         """))
         conn.execute(text("""
@@ -340,6 +595,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 audio_path VARCHAR,
                 audio_duration FLOAT,
                 voice_failure_reason TEXT,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at DATETIME,
                 updated_at DATETIME,
                 FOREIGN KEY (project_id) REFERENCES video_projects(id),
@@ -397,6 +653,24 @@ def _migrate_ai_video_assistant(engine) -> None:
             )
         """))
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_publishing_metadata (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR NOT NULL UNIQUE,
+                status VARCHAR NOT NULL DEFAULT 'missing',
+                target_language VARCHAR NOT NULL DEFAULT 'en',
+                platforms_json JSON NOT NULL DEFAULT '{}',
+                input_fingerprint VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                stale BOOLEAN NOT NULL DEFAULT 0,
+                failure_reason TEXT,
+                error_code VARCHAR,
+                request_id VARCHAR,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id)
+            )
+        """))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS video_provider_sessions (
                 id VARCHAR PRIMARY KEY,
                 provider VARCHAR NOT NULL DEFAULT 'veo',
@@ -416,6 +690,32 @@ def _migrate_ai_video_assistant(engine) -> None:
             )
         """))
         conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_provider_project_bindings (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR,
+                series_id VARCHAR,
+                provider VARCHAR NOT NULL DEFAULT 'veo',
+                provider_tool VARCHAR NOT NULL DEFAULT 'veo3_flow',
+                provider_project_url TEXT NOT NULL,
+                provider_project_ref_hash VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'active',
+                last_checked_at DATETIME,
+                last_success_at DATETIME,
+                failure_reason TEXT,
+                observed_model_label VARCHAR,
+                observed_model_cost_label VARCHAR,
+                created_at DATETIME,
+                updated_at DATETIME,
+                CHECK (
+                    (project_id IS NOT NULL AND series_id IS NULL)
+                    OR (project_id IS NULL AND series_id IS NOT NULL)
+                ),
+                CHECK (status IN ('active', 'needs_check', 'invalid', 'rotated')),
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS video_clip_generation_jobs (
                 id VARCHAR PRIMARY KEY,
                 project_id VARCHAR NOT NULL,
@@ -426,11 +726,15 @@ def _migrate_ai_video_assistant(engine) -> None:
                 progress FLOAT NOT NULL DEFAULT 0,
                 force BOOLEAN NOT NULL DEFAULT 0,
                 auto_render BOOLEAN NOT NULL DEFAULT 0,
+                enable_codex_repair BOOLEAN NOT NULL DEFAULT 0,
                 credit_approval_policy VARCHAR NOT NULL DEFAULT 'approve_dont_ask_again',
                 max_credit_per_job INTEGER,
                 credit_spent_estimate INTEGER NOT NULL DEFAULT 0,
                 render_job_id VARCHAR,
                 download_dir VARCHAR,
+                repair_status VARCHAR,
+                repair_attempt_count INTEGER NOT NULL DEFAULT 0,
+                repair_report_json JSON,
                 failure_reason TEXT,
                 error_code VARCHAR,
                 step_results_json JSON,
@@ -457,6 +761,8 @@ def _migrate_ai_video_assistant(engine) -> None:
                 provider_duration_seconds FLOAT,
                 provider_asset_id VARCHAR,
                 provider_project_ref_hash VARCHAR,
+                observed_model_label VARCHAR,
+                observed_model_cost_label VARCHAR,
                 download_correlation_id VARCHAR,
                 download_url_hash VARCHAR,
                 original_filename VARCHAR,
@@ -472,6 +778,29 @@ def _migrate_ai_video_assistant(engine) -> None:
                 FOREIGN KEY (shot_id) REFERENCES video_shots(id),
                 FOREIGN KEY (prompt_id) REFERENCES video_shot_prompts(id),
                 FOREIGN KEY (clip_id) REFERENCES video_shot_clips(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_codex_repair_attempts (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                item_id VARCHAR,
+                project_id VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'queued',
+                error_code VARCHAR NOT NULL,
+                step_name VARCHAR,
+                repair_context_json JSON,
+                files_changed_json JSON,
+                tests_run_json JSON,
+                test_result VARCHAR,
+                failure_reason TEXT,
+                requires_approval BOOLEAN NOT NULL DEFAULT 0,
+                created_at DATETIME,
+                updated_at DATETIME,
+                completed_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_clip_generation_jobs(id),
+                FOREIGN KEY (item_id) REFERENCES video_clip_generation_items(id),
+                FOREIGN KEY (project_id) REFERENCES video_projects(id)
             )
         """))
         conn.execute(text("""
@@ -507,6 +836,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 audio_path VARCHAR,
                 audio_duration FLOAT,
                 voice_failure_reason TEXT,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at DATETIME,
                 updated_at DATETIME,
                 FOREIGN KEY (project_id) REFERENCES video_projects(id),
@@ -540,6 +870,11 @@ def _migrate_ai_video_assistant(engine) -> None:
                 sound_design_notes TEXT,
                 quality_status VARCHAR NOT NULL DEFAULT 'unchecked',
                 quality_check JSON,
+                quality_threshold FLOAT NOT NULL DEFAULT 85,
+                parent_prompt_id VARCHAR,
+                repair_attempt INTEGER NOT NULL DEFAULT 0,
+                repair_status VARCHAR NOT NULL DEFAULT 'none',
+                repair_changes_json JSON,
                 prompt_path VARCHAR,
                 created_at DATETIME,
                 FOREIGN KEY (project_id) REFERENCES video_projects(id),
@@ -651,6 +986,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 subtitle_path VARCHAR,
                 format VARCHAR NOT NULL DEFAULT 'srt',
                 cues_json TEXT,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at DATETIME,
                 updated_at DATETIME,
                 FOREIGN KEY (project_id) REFERENCES video_projects(id)
@@ -665,6 +1001,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 zip_path VARCHAR,
                 stale BOOLEAN NOT NULL DEFAULT 0,
                 failure_reason TEXT,
+                revision INTEGER NOT NULL DEFAULT 1,
                 created_at DATETIME,
                 updated_at DATETIME,
                 FOREIGN KEY (project_id) REFERENCES video_projects(id)
@@ -675,8 +1012,23 @@ def _migrate_ai_video_assistant(engine) -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_source_blocks_project_order ON video_source_blocks(project_id, sort_order)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_auto_runs_project_created ON video_auto_runs(project_id, created_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_auto_runs_project_status ON video_auto_runs(project_id, status)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_video_publishing_metadata_project ON video_publishing_metadata(project_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_publishing_metadata_project_status ON video_publishing_metadata(project_id, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_provider_sessions_provider_default ON video_provider_sessions(provider, is_default)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_provider_sessions_status ON video_provider_sessions(provider, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_provider_bindings_project_status ON video_provider_project_bindings(project_id, provider, provider_tool, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_provider_bindings_series_status ON video_provider_project_bindings(series_id, provider, provider_tool, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_provider_bindings_hash ON video_provider_project_bindings(provider_project_ref_hash)"))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_video_provider_bindings_active_project
+            ON video_provider_project_bindings(project_id, provider, provider_tool)
+            WHERE project_id IS NOT NULL AND status IN ('active', 'needs_check')
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_video_provider_bindings_active_series
+            ON video_provider_project_bindings(series_id, provider, provider_tool)
+            WHERE series_id IS NOT NULL AND status IN ('active', 'needs_check')
+        """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_clip_jobs_project_status ON video_clip_generation_jobs(project_id, provider, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_clip_jobs_session_status ON video_clip_generation_jobs(session_id, status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_clip_jobs_project_created ON video_clip_generation_jobs(project_id, created_at)"))
@@ -693,9 +1045,58 @@ def _migrate_ai_video_assistant(engine) -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_scene_assets_scene ON video_scene_assets(scene_id, is_active)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_package_exports_project ON video_package_exports(project_id, created_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_series_updated ON video_series(updated_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_series_character_profiles_series_order ON series_character_profiles(series_id, sort_order, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_story_episodes_series_number ON story_episodes(series_id, episode_number)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_story_candidates_episode ON story_scenario_candidates(story_episode_id, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_story_adaptations_episode_kind ON story_adaptations(story_episode_id, kind)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_series_reference_assets_entity ON series_reference_assets(series_id, entity_type, entity_id, approval_status, active)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_series_version_records_entity ON series_version_records(series_id, entity_type, entity_id, revision)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_artifact_dependency_source ON artifact_dependency_snapshots(series_id, dependency_type, dependency_id, dependency_scope)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_artifact_dependency_artifact ON artifact_dependency_snapshots(series_id, artifact_type, artifact_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_artifact_stale_events_series_status ON artifact_stale_events(series_id, status, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_codex_repair_job_created ON video_codex_repair_attempts(job_id, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_codex_repair_status ON video_codex_repair_attempts(status, created_at)"))
+        ai_planning_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(ai_planning_settings)")).fetchall()}
+        if "model_reasoning_effort" not in ai_planning_columns:
+            conn.execute(text("ALTER TABLE ai_planning_settings ADD COLUMN model_reasoning_effort VARCHAR"))
+        story_candidate_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(story_scenario_candidates)")).fetchall()}
+        story_candidate_column_defaults = {
+            "context_snapshot_id": "VARCHAR",
+            "model_label": "VARCHAR",
+            "generation_attempt": "INTEGER NOT NULL DEFAULT 1",
+            "generation_status": "VARCHAR NOT NULL DEFAULT 'completed'",
+            "generation_metadata_json": "JSON",
+            "evaluation_status": "VARCHAR NOT NULL DEFAULT 'pending'",
+            "evaluation_json": "JSON",
+        }
+        for column_name, column_sql in story_candidate_column_defaults.items():
+            if column_name not in story_candidate_columns:
+                conn.execute(text(f"ALTER TABLE story_scenario_candidates ADD COLUMN {column_name} {column_sql}"))
+        series_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_series)")).fetchall()}
+        if "series_mode" not in series_columns:
+            conn.execute(text("ALTER TABLE video_series ADD COLUMN series_mode VARCHAR NOT NULL DEFAULT 'video_story_only'"))
+        else:
+            conn.execute(text("UPDATE video_series SET series_mode = 'video_story_only' WHERE series_mode IS NULL OR TRIM(series_mode) = ''"))
+        if "revision" not in series_columns:
+            conn.execute(text("ALTER TABLE video_series ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
+
+        character_profile_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(series_character_profiles)")).fetchall()}
+        if "revision" not in character_profile_columns:
+            conn.execute(text("ALTER TABLE series_character_profiles ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
+
+        story_episode_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(story_episodes)")).fetchall()}
+        if "output_settings_json" not in story_episode_columns:
+            conn.execute(text("ALTER TABLE story_episodes ADD COLUMN output_settings_json JSON"))
+        if "revision" not in story_episode_columns:
+            conn.execute(text("ALTER TABLE story_episodes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
+
+        story_adaptation_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(story_adaptations)")).fetchall()}
+        if "revision" not in story_adaptation_columns:
+            conn.execute(text("ALTER TABLE story_adaptations ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
         project_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_projects)")).fetchall()}
         project_column_defaults = {
             "series_id": "VARCHAR",
+            "story_episode_id": "VARCHAR",
             "episode_number": "INTEGER",
             "episode_title": "VARCHAR",
             "phase": "VARCHAR NOT NULL DEFAULT 'phase1'",
@@ -729,6 +1130,8 @@ def _migrate_ai_video_assistant(engine) -> None:
             conn.execute(text("ALTER TABLE video_scenes ADD COLUMN approved BOOLEAN NOT NULL DEFAULT 0"))
         if "no_narration" not in scene_columns:
             conn.execute(text("ALTER TABLE video_scenes ADD COLUMN no_narration BOOLEAN NOT NULL DEFAULT 0"))
+        if "revision" not in scene_columns:
+            conn.execute(text("ALTER TABLE video_scenes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
         shot_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_shots)")).fetchall()}
         shot_column_defaults = {
             "retention_json": "JSON",
@@ -736,6 +1139,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             "sound_design_json": "JSON",
             "micro_scenes_json": "JSON",
             "retainability_quality_check": "JSON",
+            "revision": "INTEGER NOT NULL DEFAULT 1",
         }
         for column_name, column_sql in shot_column_defaults.items():
             if column_name not in shot_columns:
@@ -747,6 +1151,11 @@ def _migrate_ai_video_assistant(engine) -> None:
             "retention_notes": "TEXT",
             "transition_notes": "TEXT",
             "sound_design_notes": "TEXT",
+            "quality_threshold": "FLOAT NOT NULL DEFAULT 85",
+            "parent_prompt_id": "VARCHAR",
+            "repair_attempt": "INTEGER NOT NULL DEFAULT 0",
+            "repair_status": "VARCHAR NOT NULL DEFAULT 'none'",
+            "repair_changes_json": "JSON",
         }
         for column_name, column_sql in shot_prompt_column_defaults.items():
             if column_name not in shot_prompt_columns:
@@ -768,10 +1177,14 @@ def _migrate_ai_video_assistant(engine) -> None:
         clip_job_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_clip_generation_jobs)")).fetchall()}
         clip_job_column_defaults = {
             "credit_approval_policy": "VARCHAR NOT NULL DEFAULT 'approve_dont_ask_again'",
+            "enable_codex_repair": "BOOLEAN NOT NULL DEFAULT 0",
             "max_credit_per_job": "INTEGER",
             "credit_spent_estimate": "INTEGER NOT NULL DEFAULT 0",
             "render_job_id": "VARCHAR",
             "download_dir": "VARCHAR",
+            "repair_status": "VARCHAR",
+            "repair_attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "repair_report_json": "JSON",
             "step_results_json": "JSON",
         }
         for column_name, column_sql in clip_job_column_defaults.items():
@@ -782,6 +1195,8 @@ def _migrate_ai_video_assistant(engine) -> None:
             "credit_cost": "INTEGER",
             "provider_duration_seconds": "FLOAT",
             "provider_project_ref_hash": "VARCHAR",
+            "observed_model_label": "VARCHAR",
+            "observed_model_cost_label": "VARCHAR",
             "download_correlation_id": "VARCHAR",
             "download_url_hash": "VARCHAR",
             "original_filename": "VARCHAR",
@@ -802,6 +1217,12 @@ def _migrate_ai_video_assistant(engine) -> None:
         for column_name, column_sql in render_job_column_defaults.items():
             if column_name not in render_job_columns:
                 conn.execute(text(f"ALTER TABLE video_render_jobs ADD COLUMN {column_name} {column_sql}"))
+        subtitle_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_subtitles)")).fetchall()}
+        if "revision" not in subtitle_columns:
+            conn.execute(text("ALTER TABLE video_subtitles ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
+        package_export_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_package_exports)")).fetchall()}
+        if "revision" not in package_export_columns:
+            conn.execute(text("ALTER TABLE video_package_exports ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
         conn.commit()
 
 
@@ -827,6 +1248,14 @@ def _migrate_video_inspiration(engine) -> None:
                 transcript_text TEXT,
                 transcript_language VARCHAR,
                 transcript_status VARCHAR NOT NULL DEFAULT 'pending',
+                analysis_schema_version VARCHAR NOT NULL DEFAULT 'video_analysis_package.v1',
+                analysis_mode VARCHAR NOT NULL DEFAULT 'quick',
+                analysis_package_json JSON,
+                analysis_package_path VARCHAR,
+                coverage_metrics_json JSON,
+                limitations_json JSON,
+                retention_source VARCHAR NOT NULL DEFAULT 'predicted_from_content',
+                analysis_completeness VARCHAR NOT NULL DEFAULT 'not_started',
                 visual_summary TEXT,
                 analysis_json JSON,
                 rewritten_script TEXT,
@@ -847,22 +1276,292 @@ def _migrate_video_inspiration(engine) -> None:
             CREATE TABLE IF NOT EXISTS video_inspiration_frames (
                 id VARCHAR PRIMARY KEY,
                 job_id VARCHAR NOT NULL,
+                shot_id VARCHAR,
+                shot_order INTEGER,
+                frame_role VARCHAR NOT NULL DEFAULT 'keyframe',
                 frame_path VARCHAR NOT NULL,
                 timestamp_seconds FLOAT NOT NULL DEFAULT 0,
                 description_vi TEXT,
                 technical_metadata_json JSON,
                 created_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id),
+                FOREIGN KEY (shot_id) REFERENCES video_inspiration_shots(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_shots (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                shot_order INTEGER NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                duration_seconds FLOAT NOT NULL DEFAULT 0,
+                keyframe_ids_json JSON,
+                visual_description_vi TEXT,
+                subjects_json JSON,
+                setting_json JSON,
+                camera_json JSON,
+                subject_motion_json JSON,
+                transition_in VARCHAR,
+                transition_out VARCHAR,
+                on_screen_text_json JSON,
+                confidence_json JSON,
+                limitations_json JSON,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_transcript_segments (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                segment_order INTEGER NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                text TEXT NOT NULL DEFAULT '',
+                raw_text TEXT,
+                language VARCHAR,
+                speaker_label VARCHAR,
+                source VARCHAR NOT NULL DEFAULT 'stt_raw',
+                timestamp_precision VARCHAR NOT NULL DEFAULT 'chunk',
+                confidence FLOAT,
+                shot_ids_json JSON,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_audio_events (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                event_order INTEGER NOT NULL,
+                event_type VARCHAR NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                description_vi TEXT,
+                confidence FLOAT,
+                technical_metadata_json JSON,
+                shot_ids_json JSON,
+                transcript_segment_ids_json JSON,
+                created_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_text_events (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                shot_id VARCHAR,
+                event_order INTEGER NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                text TEXT NOT NULL DEFAULT '',
+                language VARCHAR,
+                role VARCHAR NOT NULL DEFAULT 'unknown',
+                region_json JSON,
+                confidence FLOAT,
+                source VARCHAR NOT NULL DEFAULT 'vision',
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id),
+                FOREIGN KEY (shot_id) REFERENCES video_inspiration_shots(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_retention_beats (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                beat_order INTEGER NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                role VARCHAR NOT NULL DEFAULT 'development',
+                viewer_question_before TEXT,
+                content_promise TEXT,
+                new_information TEXT,
+                emotional_or_stakes_change TEXT,
+                question_answered TEXT,
+                new_open_loop TEXT,
+                micro_payoff TEXT,
+                why_continue TEXT,
+                drop_off_risks_json JSON,
+                evidence_refs_json JSON,
+                confidence FLOAT,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_inspiration_handoffs (
+                id VARCHAR PRIMARY KEY,
+                job_id VARCHAR NOT NULL,
+                analysis_package_path VARCHAR,
+                analysis_package_revision VARCHAR NOT NULL DEFAULT 'video_analysis_package.v1',
+                schema_version VARCHAR NOT NULL DEFAULT 'video_inspiration_handoff.v1',
+                status VARCHAR NOT NULL DEFAULT 'draft',
+                target_language VARCHAR NOT NULL DEFAULT 'vi',
+                approved_script_revision INTEGER NOT NULL DEFAULT 1,
+                payload_json JSON NOT NULL DEFAULT '{}',
+                source_blocks_json JSON,
+                created_project_id VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                approved_at DATETIME,
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id),
+                FOREIGN KEY (created_project_id) REFERENCES video_projects(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_project_memory_cards (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                series_id VARCHAR,
+                memory_scope VARCHAR NOT NULL DEFAULT 'project',
+                card_type VARCHAR NOT NULL,
+                title VARCHAR NOT NULL,
+                content_json JSON NOT NULL DEFAULT '{}',
+                status VARCHAR NOT NULL DEFAULT 'approved',
+                source_type VARCHAR NOT NULL DEFAULT 'handoff',
+                source_ref_id VARCHAR,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                approved_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (series_id) REFERENCES video_series(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_project_target_timeline_beats (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                handoff_id VARCHAR,
+                beat_order INTEGER NOT NULL,
+                start_seconds FLOAT NOT NULL DEFAULT 0,
+                end_seconds FLOAT NOT NULL DEFAULT 0,
+                duration_seconds FLOAT NOT NULL DEFAULT 0,
+                role VARCHAR NOT NULL DEFAULT 'development',
+                content TEXT,
+                viewer_question TEXT,
+                new_information TEXT,
+                micro_payoff TEXT,
+                visual_direction TEXT,
+                audio_direction TEXT,
+                evidence_refs_json JSON,
+                source_lesson_refs_json JSON,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (handoff_id) REFERENCES video_inspiration_handoffs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_project_context_snapshots (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR NOT NULL,
+                task_type VARCHAR NOT NULL,
+                artifact_type VARCHAR,
+                artifact_id VARCHAR,
+                context_json JSON NOT NULL DEFAULT '{}',
+                source_refs_json JSON,
+                created_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS video_quality_reports (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR,
+                job_id VARCHAR,
+                scope VARCHAR NOT NULL DEFAULT 'project',
+                status VARCHAR NOT NULL DEFAULT 'not_checked',
+                overall_status VARCHAR NOT NULL DEFAULT 'not_checked',
+                content_score FLOAT NOT NULL DEFAULT 0,
+                presentation_score FLOAT NOT NULL DEFAULT 0,
+                total_score FLOAT NOT NULL DEFAULT 0,
+                rubric_json JSON NOT NULL DEFAULT '{}',
+                sections_json JSON NOT NULL DEFAULT '{}',
+                blocking_errors_json JSON,
+                warnings_json JSON,
+                recommended_actions_json JSON,
+                evidence_json JSON,
+                dependencies_json JSON,
+                override_history_json JSON,
+                revision INTEGER NOT NULL DEFAULT 1,
+                checked_at DATETIME,
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
+                FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS platform_retention_datasets (
+                id VARCHAR PRIMARY KEY,
+                project_id VARCHAR,
+                job_id VARCHAR,
+                platform VARCHAR NOT NULL DEFAULT 'manual',
+                video_duration_seconds FLOAT NOT NULL DEFAULT 0,
+                data_points_json JSON NOT NULL DEFAULT '[]',
+                normalized_points_json JSON NOT NULL DEFAULT '[]',
+                average_watch_time FLOAT,
+                completion_rate FLOAT,
+                rewatch_rate FLOAT,
+                cta_click_rate FLOAT,
+                conversion_rate FLOAT,
+                source_type VARCHAR NOT NULL DEFAULT 'manual',
+                linked_findings_json JSON,
+                imported_at DATETIME,
+                created_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id),
                 FOREIGN KEY (job_id) REFERENCES video_inspiration_jobs(id)
             )
         """))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_jobs_updated ON video_inspiration_jobs(updated_at)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_jobs_status ON video_inspiration_jobs(status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_frames_job_time ON video_inspiration_frames(job_id, timestamp_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_shots_job_time ON video_inspiration_shots(job_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_transcript_job_time ON video_inspiration_transcript_segments(job_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_audio_job_time ON video_inspiration_audio_events(job_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_text_job_time ON video_inspiration_text_events(job_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_retention_job_time ON video_inspiration_retention_beats(job_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_inspiration_handoffs_job_status ON video_inspiration_handoffs(job_id, status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_project_memory_project_type ON video_project_memory_cards(project_id, card_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_project_timeline_project_time ON video_project_target_timeline_beats(project_id, start_seconds, end_seconds)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_project_context_project_task ON video_project_context_snapshots(project_id, task_type, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_quality_reports_project_checked ON video_quality_reports(project_id, checked_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_quality_reports_job_checked ON video_quality_reports(job_id, checked_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_platform_retention_project_created ON platform_retention_datasets(project_id, created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_platform_retention_job_created ON platform_retention_datasets(job_id, created_at)"))
         job_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_inspiration_jobs)")).fetchall()}
         if "source_duration_seconds" not in job_columns:
             conn.execute(text("ALTER TABLE video_inspiration_jobs ADD COLUMN source_duration_seconds FLOAT"))
         if "user_direction" not in job_columns:
             conn.execute(text("ALTER TABLE video_inspiration_jobs ADD COLUMN user_direction TEXT"))
+        for column_name, column_sql in (
+            ("analysis_schema_version", "VARCHAR NOT NULL DEFAULT 'video_analysis_package.v1'"),
+            ("analysis_mode", "VARCHAR NOT NULL DEFAULT 'quick'"),
+            ("analysis_package_json", "JSON"),
+            ("analysis_package_path", "VARCHAR"),
+            ("coverage_metrics_json", "JSON"),
+            ("limitations_json", "JSON"),
+            ("retention_source", "VARCHAR NOT NULL DEFAULT 'predicted_from_content'"),
+            ("analysis_completeness", "VARCHAR NOT NULL DEFAULT 'not_started'"),
+        ):
+            if column_name not in job_columns:
+                conn.execute(text(f"ALTER TABLE video_inspiration_jobs ADD COLUMN {column_name} {column_sql}"))
+        frame_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_inspiration_frames)")).fetchall()}
+        for column_name, column_sql in (
+            ("shot_id", "VARCHAR"),
+            ("shot_order", "INTEGER"),
+            ("frame_role", "VARCHAR NOT NULL DEFAULT 'keyframe'"),
+        ):
+            if column_name not in frame_columns:
+                conn.execute(text(f"ALTER TABLE video_inspiration_frames ADD COLUMN {column_name} {column_sql}"))
         conn.commit()
 
 def _migrate_mcp_bindings(engine, inspector, tables: set[str]) -> None:
@@ -903,6 +1602,150 @@ def _migrate_mcp_bindings(engine, inspector, tables: set[str]) -> None:
             )
 
 
+def _migrate_comic_series_analysis(engine) -> None:
+    """Additive migration for Comic Series Analysis (change 13).
+
+    The new ``comic_*`` and ``story_episode_source_*`` tables are created by
+    ``Base.metadata.create_all``. This migration is responsible for the two
+    kinds of change ``create_all`` cannot do idempotently on existing DBs:
+
+      1. Adding new columns to pre-existing tables (``story_episodes`` and
+         ``story_scenario_candidates``).
+      2. Creating indexes (task 2.7).
+
+    It is idempotent: every column add checks existence first, and every
+    index uses ``CREATE INDEX IF NOT EXISTS``. Running it twice on a legacy
+    or fresh DB leaves data unchanged.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    # --- 0. Create comic tables explicitly so indexes can build on the ----
+    # first run (create_all runs after migrations). CREATE TABLE IF NOT
+    # EXISTS is idempotent; create_all is a no-op for tables that exist.
+    _create_comic_tables(engine)
+
+    # --- 1. Additive columns on existing tables (tasks 2.13, 2.14) --------
+    if "story_episodes" in tables:
+        episode_cols = _get_columns(inspector, "story_episodes")
+        additions = {
+            "current_source_document_id": "current_source_document_id VARCHAR",
+            "development_mode": "development_mode VARCHAR",
+            "rights_attestation_revision": "rights_attestation_revision INTEGER",
+            "master_story_approval_status": "master_story_approval_status VARCHAR",
+            "master_story_approved_at": "master_story_approved_at DATETIME",
+        }
+        for name, column_sql in additions.items():
+            if name not in episode_cols:
+                _add_column(engine, "story_episodes", column_sql, name)
+
+    if "story_scenario_candidates" in tables:
+        candidate_cols = _get_columns(inspector, "story_scenario_candidates")
+        additions = {
+            "source_document_id": "source_document_id VARCHAR",
+            "source_document_revision": "source_document_revision INTEGER",
+            "development_mode": "development_mode VARCHAR",
+            "dependency_fingerprint": "dependency_fingerprint VARCHAR",
+        }
+        for name, column_sql in additions.items():
+            if name not in candidate_cols:
+                _add_column(engine, "story_scenario_candidates", column_sql, name)
+
+    tables = set(inspect(engine).get_table_names())
+    if "comic_series_handoffs" in tables:
+        handoff_cols = _get_columns(inspect(engine), "comic_series_handoffs")
+        if "target_series_title" not in handoff_cols:
+            _add_column(engine, "comic_series_handoffs", "target_series_title VARCHAR", "target_series_title")
+
+    # --- 2. Indexes (task 2.7) --------------------------------------------
+    # These reference comic_* tables created by create_all, which runs AFTER
+    # migrations. Guard with a re-inspection so a first-ever run (where the
+    # tables don't exist yet) is a no-op; create_all + next startup builds them.
+    tables = set(inspect(engine).get_table_names())
+    index_specs = [
+        ("comic_analysis_jobs", "idx_comic_jobs_status", "run_status, updated_at"),
+        ("comic_analysis_jobs", "idx_comic_jobs_source_doc", "current_source_document_id"),
+        ("comic_source_documents", "idx_comic_source_docs_job", "job_id, revision"),
+        ("comic_source_documents", "idx_comic_source_docs_hash", "content_hash"),
+        ("comic_source_pages", "idx_comic_pages_doc_order", "document_id, page_order"),
+        ("comic_source_assets", "idx_comic_assets_doc_order", "document_id, asset_order"),
+        ("comic_source_assets", "idx_comic_assets_checksum", "checksum"),
+        ("comic_panels", "idx_comic_panels_job_rev_order", "job_id, analysis_revision, reading_order"),
+        ("comic_speech_bubbles", "idx_comic_bubbles_panel_order", "panel_id, reading_order"),
+        ("comic_detected_characters", "idx_comic_characters_job_rev", "job_id, analysis_revision"),
+        ("comic_detected_locations", "idx_comic_locations_job_rev", "job_id, analysis_revision"),
+        ("comic_approval_manifests", "idx_comic_manifests_job_rev", "job_id, analysis_revision, active"),
+        ("comic_series_handoffs", "idx_comic_handoffs_job", "job_id, created_at"),
+        ("comic_series_handoffs", "idx_comic_handoffs_idempotency", "idempotency_key"),
+        ("comic_series_handoff_items", "idx_comic_handoff_items_handoff", "handoff_id"),
+        ("story_episode_source_documents", "idx_ep_source_docs_episode", "story_episode_id, revision"),
+        ("story_episode_source_chunks", "idx_ep_source_chunks_doc_order", "document_id, chunk_order"),
+        ("story_episode_source_assets", "idx_ep_source_assets_doc_order", "document_id, asset_order"),
+        ("comic_source_version_records", "idx_comic_version_records_target", "target_type, target_id"),
+    ]
+    with engine.connect() as conn:
+        did_work = False
+        for table, index_name, columns in index_specs:
+            if table not in tables:
+                continue
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table}({columns})"))
+            did_work = True
+        if did_work:
+            conn.commit()
+            logger.info("Ensured Comic Series Analysis indexes")
+
+
+def _create_comic_tables(engine) -> None:
+    """Create the Comic Series Analysis tables from ORM metadata if missing.
+
+    Uses ``create_all(..., checkfirst=True)`` restricted to the comic tables
+    so a first-ever migration run can immediately build indexes on them.
+    Idempotent: existing tables are skipped.
+    """
+    from .models import (
+        Base,
+        ComicAnalysisJob,
+        ComicApprovalManifest,
+        ComicDetectedCharacter,
+        ComicDetectedLocation,
+        ComicPanel,
+        ComicPlotAnalysis,
+        ComicSeriesHandoff,
+        ComicSeriesHandoffItem,
+        ComicSourceAsset,
+        ComicSourceDocument,
+        ComicSourcePage,
+        ComicSourceVersionRecord,
+        ComicSpeechBubble,
+        StoryEpisodeSourceAsset,
+        StoryEpisodeSourceChunk,
+        StoryEpisodeSourceDocument,
+    )
+
+    comic_tables = [
+        model.__table__
+        for model in (
+            ComicSourceDocument,
+            ComicAnalysisJob,
+            ComicSourcePage,
+            ComicSourceAsset,
+            ComicPanel,
+            ComicSpeechBubble,
+            ComicDetectedCharacter,
+            ComicDetectedLocation,
+            ComicPlotAnalysis,
+            ComicApprovalManifest,
+            ComicSeriesHandoff,
+            ComicSeriesHandoffItem,
+            StoryEpisodeSourceDocument,
+            StoryEpisodeSourceChunk,
+            StoryEpisodeSourceAsset,
+            ComicSourceVersionRecord,
+        )
+    ]
+    Base.metadata.create_all(bind=engine, tables=comic_tables, checkfirst=True)
+
+
 def _supports_drop_column(engine) -> bool:
     """Whether ``ALTER TABLE … DROP COLUMN`` is supported by the dialect +
     runtime. Non-SQLite dialects (Postgres, MySQL) have supported it for
@@ -940,7 +1783,13 @@ def _normalize_storage_paths(engine, tables: set[str]) -> None:
         ("video_clip_generation_items", "downloaded_file_path"),
         ("video_inspiration_jobs", "source_path"),
         ("video_inspiration_jobs", "audio_path"),
+        ("video_inspiration_jobs", "analysis_package_path"),
+        ("video_inspiration_handoffs", "analysis_package_path"),
         ("video_inspiration_frames", "frame_path"),
+        ("comic_analysis_jobs", "analysis_package_path"),
+        ("comic_source_documents", "raw_html_quarantine_path"),
+        ("comic_source_assets", "original_path"),
+        ("story_episode_source_assets", "original_path"),
     ]
 
     total_fixed = 0

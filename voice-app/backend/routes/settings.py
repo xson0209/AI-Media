@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..database import get_db
-from ..services import settings as settings_service
+from ..services import ai_planning, settings as settings_service
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -45,3 +45,8 @@ async def update_ai_planning_settings_endpoint(
     db: Session = Depends(get_db),
 ):
     return settings_service.update_ai_planning_settings(db, patch.model_dump(exclude_unset=True))
+
+@router.post("/ai-planning/test", response_model=models.AIPlanningTestResponse)
+async def test_ai_planning_settings_endpoint(db: Session = Depends(get_db)):
+    settings = settings_service.get_ai_planning_settings(db)
+    return ai_planning.test_provider_prompt(settings, prompt="xin chào")

@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — AI Media workflow refactor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .deep {
+        background: linear-gradient(135deg, #0f172a, #1e293b);
+        color: white;
+      }
+      .seam {
+        border-style: dashed;
+      }
+      .leak {
+        color: #dc2626;
+      }
+      .diagram-card {
+        min-height: 340px;
+      }
+      .mass-box {
+        border: 1px solid rgb(203 213 225);
+        border-radius: 0.75rem;
+        overflow: hidden;
+      }
+      .mass-interface {
+        background: rgb(254 243 199);
+        border-bottom: 1px solid rgb(203 213 225);
+      }
+      .mass-implementation {
+        background: rgb(241 245 249);
+      }
+      .module-pill {
+        border: 1px solid rgb(203 213 225);
+        background: white;
+        border-radius: 999px;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.75rem;
+      }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="mx-auto max-w-6xl space-y-12 px-6 py-10">
+      <header class="space-y-5">
+        <div>
+          <p class="text-xs uppercase tracking-[0.25em] text-slate-500">Architecture review</p>
+          <h1 class="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
+            Refactor hướng luồng phân tích truyện, tạo truyện, phân tích video, tạo video
+          </h1>
+          <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
+            Ghi chú: repo hiện không có <code class="rounded bg-white px-1 py-0.5">CONTEXT.md</code> hoặc
+            <code class="rounded bg-white px-1 py-0.5">docs/adr</code> để neo domain language. Report này dùng vocabulary
+            module/interface/seam/adapter/depth/locality/leverage.
+          </p>
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-4">
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="text-2xl font-semibold">4,142</div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">lines</div>
+            <div class="mt-2 text-sm text-slate-700">story_studio.py</div>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="text-2xl font-semibold">3,001</div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">lines</div>
+            <div class="mt-2 text-sm text-slate-700">video_inspiration.py</div>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="text-2xl font-semibold">3,701</div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">lines</div>
+            <div class="mt-2 text-sm text-slate-700">video_phase2.py</div>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="text-2xl font-semibold">136</div>
+            <div class="text-xs uppercase tracking-wider text-slate-500">route handlers</div>
+            <div class="mt-2 text-sm text-slate-700">routes/ai_video.py</div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+          <span class="module-pill">solid box = module</span>
+          <span class="module-pill seam">dashed box = seam</span>
+          <span class="module-pill"><span class="leak">red text/arrow</span> = leakage</span>
+          <span class="module-pill deep">dark box = deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+        <article id="source-package-seam" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-2xl font-semibold tracking-tight">1. Make Source Package the real seam</h2>
+              <p class="mt-1 text-sm text-slate-600">Collapse analysis-output → creation-input mapping into one deep module.</p>
+            </div>
+            <div class="flex gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">Strong</span>
+              <span class="rounded-full bg-indigo-100 px-3 py-1 text-xs font-medium text-indigo-800">ports & adapters</span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div class="rounded-xl bg-slate-50 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Files</div>
+              <ul class="mt-3 space-y-1 font-mono text-xs leading-5 text-slate-700">
+                <li>voice-app/backend/services/comic_series_analysis/handoff.py</li>
+                <li>voice-app/backend/services/comic_series_analysis/source_context.py</li>
+                <li>voice-app/backend/services/video_inspiration.py</li>
+                <li>voice-app/backend/services/video_project_memory.py</li>
+                <li>voice-app/backend/services/story_studio.py</li>
+                <li>voice-app/backend/services/video_phase2.py</li>
+              </ul>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+              <p>
+                <span class="font-medium text-slate-950">Problem.</span>
+                Comic analysis, Video Inspiration, Story Studio, and AI Video each translate source evidence into their own prose/source blocks, so source chunking, provenance, stale rules, and output settings leak across seams.
+              </p>
+              <p class="mt-2">
+                <span class="font-medium text-slate-950">Solution.</span>
+                Deepen one Source Package module that owns evidence, chunk selection, provenance, dependency fingerprint, and task-scoped context for creation modules.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">Before</div>
+              <pre class="mermaid">
+flowchart TB
+  CA[Comic analysis package] --> CH[comic handoff.py]
+  CH --> SS[story_studio.py]
+  VI[VideoAnalysisPackage] --> VIP[video_inspiration.py]
+  VIP --> VPM[video_project_memory]
+  VPM --> AV[AI Video source blocks]
+  SS -.source rules leak.-> AV
+  CH -.settings duplicated.-> SS
+  VIP -.source block shape.-> AV
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class CH,SS,VIP,VPM leak;
+              </pre>
+            </div>
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">After</div>
+              <pre class="mermaid">
+flowchart TB
+  CA[Comic adapter] --> SP[Source Package module]
+  VI[Video adapter] --> SP
+  MS[Manual source adapter] --> SP
+  SP:::deep --> ST[Story creation module]
+  SP --> VT[Video creation module]
+  SP --> MEM[dependency/stale records]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Wins</div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                <li>locality: source rules concentrate</li>
+                <li>leverage: comic + video adapters</li>
+                <li>interface shrinks for creation</li>
+                <li>stale logic stops leaking</li>
+                <li>tests hit one seam</li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              Deletion test: deleting this module would scatter chunk selection, provenance, and dependency fingerprints back into four workflows. That means the module earns depth.
+            </div>
+          </div>
+        </article>
+
+        <article id="story-production-module" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-2xl font-semibold tracking-tight">2. Deepen Story Studio into Story Production</h2>
+              <p class="mt-1 text-sm text-slate-600">Move creation behavior behind a smaller workflow seam.</p>
+            </div>
+            <div class="flex gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">Strong</span>
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">in-process</span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div class="rounded-xl bg-slate-50 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Files</div>
+              <ul class="mt-3 space-y-1 font-mono text-xs leading-5 text-slate-700">
+                <li>voice-app/backend/services/story_studio.py</li>
+                <li>voice-app/backend/routes/story_studio.py</li>
+                <li>voice-app/app/src/components/StoryStudio/StoryStudio.tsx</li>
+                <li>voice-app/backend/services/series_brain.py</li>
+                <li>voice-app/backend/services/series_references.py</li>
+              </ul>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+              <p>
+                <span class="font-medium text-slate-950">Problem.</span>
+                <code>story_studio.py</code> has 4,142 lines and 142 function/class declarations. It owns episode CRUD, creative brief, candidate generation/evaluation/synthesis, master approval, image prompt QA, render state, video handoff, and series update suggestions.
+              </p>
+              <p class="mt-2">
+                <span class="font-medium text-slate-950">Solution.</span>
+                Deepen a Story Production module: callers ask for episode production outcomes while candidate generation, prompt QA, adaptation state, and video handoff stay internal.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">Before: shallow mass</div>
+              <div class="grid h-[280px] place-items-center">
+                <div class="w-72 mass-box">
+                  <div class="mass-interface p-4 text-sm">
+                    Interface: episode, candidate, score, synthesize, approve, image prompt, repair, render, video handoff, suggestions
+                  </div>
+                  <div class="mass-implementation p-5 text-sm">
+                    Implementation: same concepts repeated as helpers and route actions
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">After: deep module</div>
+              <div class="grid h-[280px] place-items-center">
+                <div class="w-80 mass-box border-slate-900">
+                  <div class="mass-interface p-3 text-sm">
+                    Small workflow seam: produce / approve / adapt
+                  </div>
+                  <div class="deep p-8 text-sm">
+                    Internal implementation: source context, candidate engine, critic, synthesis, panel QA, image adaptation, video handoff, stale propagation
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Wins</div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                <li>locality: production rules concentrate</li>
+                <li>leverage: UI learns less</li>
+                <li>interface becomes test surface</li>
+                <li>candidate tests stop mocking internals</li>
+                <li>video handoff becomes internal</li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              Risk: splitting files without shrinking the interface only moves complexity. The seam must be around story production outcomes, not helper categories.
+            </div>
+          </div>
+        </article>
+
+        <article id="video-analysis-pipeline" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-2xl font-semibold tracking-tight">3. Turn Video Inspiration into a Video Analysis Pipeline</h2>
+              <p class="mt-1 text-sm text-slate-600">Separate ingestion/timeline/analysis/rewrite/handoff as internal phases behind one module.</p>
+            </div>
+            <div class="flex gap-2">
+              <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">Strong</span>
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">in-process</span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div class="rounded-xl bg-slate-50 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Files</div>
+              <ul class="mt-3 space-y-1 font-mono text-xs leading-5 text-slate-700">
+                <li>voice-app/backend/services/video_inspiration.py</li>
+                <li>voice-app/backend/services/video_inspiration_runs.py</li>
+                <li>voice-app/backend/routes/video_inspiration.py</li>
+                <li>voice-app/backend/services/video_project_memory.py</li>
+                <li>voice-app/backend/services/video_quality.py</li>
+              </ul>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+              <p>
+                <span class="font-medium text-slate-950">Problem.</span>
+                <code>video_inspiration.py</code> has 3,001 lines and 112 function/class declarations. The same module handles URL/download policy, FFmpeg, STT, frame/shot extraction, visual AI, content analysis, rewrite, script edits, and AI Video project handoff.
+              </p>
+              <p class="mt-2">
+                <span class="font-medium text-slate-950">Solution.</span>
+                Deepen a Video Analysis Pipeline module so the workflow has locality around phase state, coverage, cancellation, retry, and package creation.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">Before</div>
+              <pre class="mermaid">
+flowchart LR
+  R[route] --> VI[video_inspiration.py]
+  VI --> DL[download]
+  VI --> FF[FFmpeg]
+  VI --> STT[STT]
+  VI --> FR[frames/shots]
+  VI --> AI[AI analysis]
+  VI --> RW[rewrite]
+  VI --> HO[AI Video handoff]
+  VI -.many phase details.-> R
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class VI,R leak;
+              </pre>
+            </div>
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">After</div>
+              <pre class="mermaid">
+flowchart LR
+  R[route] --> VP[Video Analysis Pipeline]
+  VP:::deep --> IN[ingestion adapter]
+  VP --> TL[timeline extractor]
+  VP --> AN[analysis engine]
+  VP --> RW[rewrite engine]
+  VP --> SP[Source Package adapter]
+  SP --> AV[AI Video creation]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Wins</div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                <li>locality: phase state lives together</li>
+                <li>coverage tests hit one module</li>
+                <li>retry/cancel stop leaking</li>
+                <li>handoff shares Source Package</li>
+                <li>FFmpeg becomes adapter detail</li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              Deletion test: deleting the pipeline would push FFmpeg/STT/AI/cancel/retry orchestration into route and UI code. That complexity should stay concentrated.
+            </div>
+          </div>
+        </article>
+
+        <article id="ai-video-workspace" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-2xl font-semibold tracking-tight">4. Split AI Video by workflow, not by helper file</h2>
+              <p class="mt-1 text-sm text-slate-600">Shrink the external seam that UI and routes must understand.</p>
+            </div>
+            <div class="flex gap-2">
+              <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">Worth exploring</span>
+              <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">in-process</span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div class="rounded-xl bg-slate-50 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500">Files</div>
+              <ul class="mt-3 space-y-1 font-mono text-xs leading-5 text-slate-700">
+                <li>voice-app/backend/routes/ai_video.py</li>
+                <li>voice-app/backend/services/video_phase2.py</li>
+                <li>voice-app/backend/services/video_projects.py</li>
+                <li>voice-app/backend/services/video_auto_runs.py</li>
+                <li>voice-app/backend/services/video_clip_generation.py</li>
+                <li>voice-app/backend/services/video_rendering.py</li>
+                <li>voice-app/app/src/components/AIVideoAssistant/AIVideoAssistant.tsx</li>
+              </ul>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+              <p>
+                <span class="font-medium text-slate-950">Problem.</span>
+                <code>routes/ai_video.py</code> exposes 136 route handlers, while <code>AIVideoAssistant.tsx</code> has 45 query/mutation hooks. The UI must know series memory, project planning, source blocks, shots, prompts, clips, provider sessions, render jobs, packages, and auto-runs.
+              </p>
+              <p class="mt-2">
+                <span class="font-medium text-slate-950">Solution.</span>
+                Deepen workflow modules around project creation, prompt generation, provider execution, and delivery, then expose workflow snapshots instead of every internal state transition.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">Before</div>
+              <pre class="mermaid">
+flowchart TB
+  UI[AIVideoAssistant UI] --> R[ai_video route: 136 handlers]
+  R --> MEM[series memory]
+  R --> PLAN[planning]
+  R --> SHOT[shots/prompts]
+  R --> PROV[provider sessions]
+  R --> CLIP[clip generation]
+  R --> REN[render]
+  R --> PKG[package]
+  UI -.polls many states.-> CLIP
+  UI -.polls many states.-> REN
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class UI,R leak;
+              </pre>
+            </div>
+            <div class="diagram-card rounded-xl border border-slate-200 bg-white p-4">
+              <div class="mb-2 text-sm font-medium text-slate-700">After</div>
+              <pre class="mermaid">
+flowchart TB
+  UI[AI Video workspace UI] --> WF[AI Video Workflow module]
+  WF:::deep --> P[project planning module]
+  WF --> G[prompt/shot module]
+  WF --> E[provider execution module]
+  WF --> D[delivery module]
+  E --> AD[Veo/browser adapter]
+  D --> REN[render adapter]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a,stroke-width:3px;
+              </pre>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <div>
+              <div class="text-xs uppercase tracking-wider text-slate-500">Wins</div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                <li>interface shrinks for UI</li>
+                <li>locality: polling rules concentrate</li>
+                <li>provider adapter stays internal</li>
+                <li>render tests hit delivery seam</li>
+                <li>route file stops being map</li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              Worth exploring because some route split can be mechanical. The deeper refactor is the workflow seam; moving handlers alone gives low leverage.
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-2xl border border-slate-900 bg-slate-950 p-6 text-white shadow-sm">
+        <p class="text-xs uppercase tracking-[0.25em] text-slate-300">Top recommendation</p>
+        <h2 class="mt-2 text-2xl font-semibold">Start with Source Package as the seam.</h2>
+        <p class="mt-3 max-w-4xl text-sm leading-6 text-slate-200">
+          It touches all four flows and satisfies the adapter test: comic analysis and video analysis are two real adapters feeding creation. Once this seam is deep, Story Studio and AI Video can be refactored behind smaller workflow modules without carrying source/provenance/stale complexity everywhere.
+        </p>
+        <a href="#source-package-seam" class="mt-4 inline-block rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-950">
+          Jump to candidate 1
+        </a>
+      </section>
+    </main>
+  </body>
+</html>

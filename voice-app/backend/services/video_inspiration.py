@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from array import array
 import importlib.util
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -13,9 +15,11 @@ import subprocess
 import sys
 import uuid
 import wave
-from datetime import datetime
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable, Iterator, TypeVar
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from sqlalchemy import func
@@ -23,13 +27,22 @@ from sqlalchemy.orm import Session
 
 from .. import config, models
 from ..database import (
+    VideoInspirationAudioEvent as DBVideoInspirationAudioEvent,
     VideoInspirationFrame as DBVideoInspirationFrame,
     VideoInspirationJob as DBVideoInspirationJob,
+    VideoInspirationRetentionBeat as DBVideoInspirationRetentionBeat,
+    VideoInspirationShot as DBVideoInspirationShot,
+    VideoInspirationTextEvent as DBVideoInspirationTextEvent,
+    VideoInspirationTranscriptSegment as DBVideoInspirationTranscriptSegment,
+    VideoProject as DBVideoProject,
 )
 from . import (
     ai_planning,
     settings as settings_service,
     video_auto_runs,
+    video_language,
+    video_project_memory,
+    video_planning_pool,
     video_projects,
     video_rendering,
     video_storage,
@@ -41,10 +54,19 @@ logger = logging.getLogger(__name__)
 MAX_VIDEO_BYTES = 700 * 1024 * 1024
 MAX_VIDEO_DURATION_SECONDS = 30 * 60
 MAX_FRAME_COUNT = 12
+MAX_QUICK_KEYFRAMES = 14
+MAX_HIGH_QUALITY_KEYFRAMES = 36
+LONG_SHOT_SECONDS = 16.0
+SHOT_SCENE_THRESHOLD_QUICK = 0.40
+SHOT_SCENE_THRESHOLD_HIGH_QUALITY = 0.28
+ANALYSIS_SCHEMA_VERSION = "video_analysis_package.v1"
 TRANSCRIPT_CHUNK_SECONDS = 25.0
 TRANSCRIPT_SINGLE_PASS_MAX_SECONDS = 28.0
 FFMPEG_TIMEOUT_SECONDS = 600
 AI_TIMEOUT_SECONDS = 600
+ACTIVE_JOB_STALE_SECONDS = 15 * 60
+ACTIVE_JOB_STALE_DELTA = timedelta(seconds=ACTIVE_JOB_STALE_SECONDS)
+ACTIVE_JOB_STATUSES = {"analyzing", "rewriting", "handoff"}
 _STDERR_LIMIT = 1200
 _AUDIO_ONLY_SUFFIXES = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"}
 _NO_SPEECH_TRANSCRIPT_LABELS = {
@@ -70,6 +92,16 @@ _SOCIAL_PLATFORMS = {
     "instagram.com": "instagram",
 }
 _SENSITIVE_QUERY_KEYS = {"token", "access_token", "auth", "key", "signature", "sig", "s", "fbclid"}
+_GENERIC_SOURCE_TITLE_STEMS = {
+    "download",
+    "source",
+    "upload",
+    "video",
+    "file",
+    "output",
+    "clip",
+    "untitled",
+}
 
 STEP_LABELS_VI = {
     "source_ready": "Đã nhận video",
@@ -79,6 +111,8 @@ STEP_LABELS_VI = {
     "extract_frames": "Đang lấy hình ảnh đại diện",
     "visual_analysis": "Đang phân tích hình ảnh",
     "content_analysis": "Đang phân tích nội dung",
+    "queued_analysis": "Đang chờ lượt phân tích video",
+    "queued_rewrite": "Đang chờ lượt viết kịch bản",
     "rewrite": "Đang viết kịch bản tối ưu",
     "rewrite_brief": "Đang tạo brief kịch bản",
     "rewrite_candidates": "Đang tạo các bản nháp",
@@ -87,7 +121,13 @@ STEP_LABELS_VI = {
     "handoff": "Đang chuyển sang AI Video",
     "completed": "Hoàn tất",
     "failed": "Đã lỗi",
+    "cancelled": "Đã hủy",
+    "interrupted": "Đã bị gián đoạn",
 }
+
+_AI_JOB_ID: ContextVar[str | None] = ContextVar("video_inspiration_ai_job_id", default=None)
+_AI_STEP_NAME: ContextVar[str] = ContextVar("video_inspiration_ai_step_name", default="video_inspiration_ai")
+_T = TypeVar("_T")
 
 class VideoInspirationError(ValueError):
     """Raised when the video inspiration workflow cannot continue."""
@@ -96,6 +136,32 @@ class VideoInspirationError(ValueError):
         super().__init__(message)
         self.error_code = error_code
         self.status_code = status_code
+
+
+class VideoInspirationCancelledError(VideoInspirationError):
+    """Raised at cooperative checkpoints after a background cancel request."""
+
+    def __init__(self):
+        super().__init__(
+            "Đã hủy tác vụ Video Inspiration theo yêu cầu.",
+            error_code="VIDEO_INSPIRATION_CANCELLED",
+        )
+
+
+def _ensure_not_cancelled(cancel_requested: Callable[[], bool] | None) -> None:
+    if cancel_requested is not None and cancel_requested():
+        raise VideoInspirationCancelledError()
+
+
+@contextmanager
+def _structured_ai_context(job_id: str, step_name: str) -> Iterator[None]:
+    job_token = _AI_JOB_ID.set(job_id)
+    step_token = _AI_STEP_NAME.set(step_name)
+    try:
+        yield
+    finally:
+        _AI_STEP_NAME.reset(step_token)
+        _AI_JOB_ID.reset(job_token)
 
 def _now() -> datetime:
     return datetime.utcnow()
@@ -107,13 +173,56 @@ def _data_root() -> Path:
 
 def _job_dir(job_id: str) -> Path:
     path = _data_root() / job_id
-    for child in ("source", "audio", "frames"):
+    for child in ("source", "audio", "frames", "analysis"):
         (path / child).mkdir(parents=True, exist_ok=True)
     return path
 
 def _truncate(value: str | None, limit: int) -> str:
     text = (value or "").strip()
     return text[:limit].rstrip()
+
+def _title_candidate(value: Any, *, filename: bool = False) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if filename:
+        text = Path(text).stem
+    text = re.sub(r"\.(?:aac|avi|flac|m4a|m4v|mkv|mov|mp3|mp4|ogg|opus|wav|webm)$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[_\-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" .:-_")
+    normalized = re.sub(r"\s*\(\d+\)$", "", text.lower()).strip()
+    normalized = re.sub(r"\s+(?:aac|avi|flac|m4a|m4v|mkv|mov|mp3|mp4|ogg|opus|wav|webm)$", "", normalized).strip()
+    normalized = re.sub(r"\s+\d+$", "", normalized).strip()
+    if not text:
+        return ""
+    if text.lower() in _GENERIC_SOURCE_TITLE_STEMS or normalized in _GENERIC_SOURCE_TITLE_STEMS:
+        return ""
+    return _truncate(text, 120)
+
+def _project_title_from_job(row: DBVideoInspirationJob) -> str:
+    analysis = row.analysis_json or {}
+    rewrite = analysis.get("rewrite") if isinstance(analysis.get("rewrite"), dict) else {}
+    for value in (
+        row.script_title,
+        rewrite.get("title"),
+        row.big_idea,
+        rewrite.get("big_idea"),
+        row.hook,
+        analysis.get("main_idea_vi"),
+        analysis.get("hook_vi"),
+        row.user_direction,
+        row.transcript_text,
+    ):
+        title = _title_candidate(value)
+        if title:
+            return title
+    title = _title_candidate(row.original_filename, filename=True)
+    if title and row.source_type != "url":
+        return title
+    platform = (row.source_platform or "").strip().lower()
+    if platform and platform != "unknown":
+        return f"Video cảm hứng từ {platform.title()}"
+    return "Video từ cảm hứng"
 
 def _safe_filename(value: str | None, *, fallback: str = "video") -> str:
     return video_storage.sanitize_download_filename(value or fallback, fallback=fallback)
@@ -139,9 +248,10 @@ def _source_platform(value: str | None) -> str:
     return "unknown"
 
 def _validate_target_language(value: str | None) -> str:
-    if value in {"vi", "en"}:
-        return value
-    raise VideoInspirationError("Ngôn ngữ kịch bản mới chỉ hỗ trợ tiếng Việt hoặc tiếng Anh.", error_code="VIDEO_INSPIRATION_LANGUAGE_INVALID")
+    language = video_language.normalize_video_language(value, default="")
+    if language:
+        return language
+    raise VideoInspirationError("Ngôn ngữ kịch bản mới không hợp lệ.", error_code="VIDEO_INSPIRATION_LANGUAGE_INVALID")
 
 def _clean_user_direction(value: str | None) -> str | None:
     text = _truncate(value, 20000)
@@ -571,9 +681,82 @@ def _frames_for_job(job_id: str, db: Session) -> list[DBVideoInspirationFrame]:
         .all()
     )
 
+def _shots_for_job(job_id: str, db: Session) -> list[DBVideoInspirationShot]:
+    return (
+        db.query(DBVideoInspirationShot)
+        .filter(DBVideoInspirationShot.job_id == job_id)
+        .order_by(DBVideoInspirationShot.shot_order.asc(), DBVideoInspirationShot.start_seconds.asc())
+        .all()
+    )
+
+def _transcript_segments_for_job(job_id: str, db: Session) -> list[DBVideoInspirationTranscriptSegment]:
+    return (
+        db.query(DBVideoInspirationTranscriptSegment)
+        .filter(DBVideoInspirationTranscriptSegment.job_id == job_id)
+        .order_by(DBVideoInspirationTranscriptSegment.segment_order.asc(), DBVideoInspirationTranscriptSegment.start_seconds.asc())
+        .all()
+    )
+
+def _audio_events_for_job(job_id: str, db: Session) -> list[DBVideoInspirationAudioEvent]:
+    return (
+        db.query(DBVideoInspirationAudioEvent)
+        .filter(DBVideoInspirationAudioEvent.job_id == job_id)
+        .order_by(DBVideoInspirationAudioEvent.event_order.asc(), DBVideoInspirationAudioEvent.start_seconds.asc())
+        .all()
+    )
+
+def _text_events_for_job(job_id: str, db: Session) -> list[DBVideoInspirationTextEvent]:
+    return (
+        db.query(DBVideoInspirationTextEvent)
+        .filter(DBVideoInspirationTextEvent.job_id == job_id)
+        .order_by(DBVideoInspirationTextEvent.event_order.asc(), DBVideoInspirationTextEvent.start_seconds.asc())
+        .all()
+    )
+
+def _retention_beats_for_job(job_id: str, db: Session) -> list[DBVideoInspirationRetentionBeat]:
+    return (
+        db.query(DBVideoInspirationRetentionBeat)
+        .filter(DBVideoInspirationRetentionBeat.job_id == job_id)
+        .order_by(DBVideoInspirationRetentionBeat.beat_order.asc(), DBVideoInspirationRetentionBeat.start_seconds.asc())
+        .all()
+    )
+
+def _active_job_stale(row: DBVideoInspirationJob) -> bool:
+    if row.status not in ACTIVE_JOB_STATUSES:
+        return False
+    last_update = row.updated_at or row.created_at
+    if last_update is None:
+        return False
+    age = _now() - last_update
+    return age > ACTIVE_JOB_STALE_DELTA
+
+def _stale_reason(row: DBVideoInspirationJob) -> str:
+    step = STEP_LABELS_VI.get(row.current_step, row.current_step or "bước đang chạy")
+    minutes = ACTIVE_JOB_STALE_SECONDS // 60
+    return (
+        f"Job bị gián đoạn ở bước {step} và đã quá {minutes} phút không cập nhật. "
+        "Bấm chạy lại phân tích để tiếp tục từ video nguồn."
+    )
+
 def _job_response(row: DBVideoInspirationJob, db: Session) -> models.VideoInspirationJobResponse:
     response = models.VideoInspirationJobResponse.model_validate(row)
+    response.is_stale = _active_job_stale(row)
+    response.stale_reason = _stale_reason(row) if response.is_stale else None
     response.frames = [models.VideoInspirationFrameResponse.model_validate(frame) for frame in _frames_for_job(row.id, db)]
+    response.shots = [models.VideoInspirationShotResponse.model_validate(shot) for shot in _shots_for_job(row.id, db)]
+    response.transcript_segments = [
+        models.VideoInspirationTranscriptSegmentResponse.model_validate(segment)
+        for segment in _transcript_segments_for_job(row.id, db)
+    ]
+    response.audio_events = [models.VideoInspirationAudioEventResponse.model_validate(event) for event in _audio_events_for_job(row.id, db)]
+    response.on_screen_text_events = [
+        models.VideoInspirationTextEventResponse.model_validate(event)
+        for event in _text_events_for_job(row.id, db)
+    ]
+    response.content_retention_beats = [
+        models.VideoInspirationRetentionBeatResponse.model_validate(beat)
+        for beat in _retention_beats_for_job(row.id, db)
+    ]
     response.ai_video_url = f"/ai-video?projectId={row.created_video_project_id}" if row.created_video_project_id else None
     return response
 
@@ -811,10 +994,10 @@ def _extract_audio_transcript_chunk(source_path: Path, chunk_path: Path, *, star
             error_code="VIDEO_INSPIRATION_AUDIO_CHUNK_FAILED",
         )
 
-def _transcript_audio_paths(path: Path) -> list[Path]:
+def _transcript_audio_windows(path: Path) -> list[tuple[Path, float, float | None, str]]:
     duration = _audio_duration_seconds(path)
     if duration is None or duration <= TRANSCRIPT_SINGLE_PASS_MAX_SECONDS:
-        return [path]
+        return [(path, 0.0, duration, "file")]
 
     chunk_dir = path.parent / "transcript_chunks"
     chunk_dir.mkdir(parents=True, exist_ok=True)
@@ -838,20 +1021,112 @@ def _transcript_audio_paths(path: Path) -> list[Path]:
         chunks.append(chunk_path)
         start += TRANSCRIPT_CHUNK_SECONDS
 
-    return chunks or [path]
+    if not chunks:
+        return [(path, 0.0, duration, "file")]
+    return [
+        (
+            chunk,
+            float(index) * TRANSCRIPT_CHUNK_SECONDS,
+            min(TRANSCRIPT_CHUNK_SECONDS, max(0.0, duration - float(index) * TRANSCRIPT_CHUNK_SECONDS)),
+            "chunk",
+        )
+        for index, chunk in enumerate(chunks)
+    ]
 
-async def _transcribe_audio(path: Path, *, model_size: str | None) -> tuple[str, str | None]:
+def _transcript_audio_paths(path: Path) -> list[Path]:
+    return [item[0] for item in _transcript_audio_windows(path)]
+
+def _transcription_segments_from_output(
+    raw: Any,
+    *,
+    start_offset: float,
+    fallback_duration: float | None,
+    default_precision: str,
+) -> list[dict[str, Any]]:
+    if isinstance(raw, dict):
+        raw_segments = raw.get("segments")
+        language = raw.get("language")
+        if isinstance(raw_segments, list):
+            segments: list[dict[str, Any]] = []
+            for item in raw_segments:
+                if not isinstance(item, dict):
+                    continue
+                text = _clean_transcribed_text(str(item.get("text") or ""))
+                if not text:
+                    continue
+                start = _float_or_none(item.get("start"))
+                end = _float_or_none(item.get("end"))
+                confidence = None
+                no_speech_prob = _float_or_none(item.get("no_speech_prob"))
+                if no_speech_prob is not None:
+                    confidence = max(0.0, min(1.0, 1.0 - no_speech_prob))
+                segments.append(
+                    {
+                        "start_seconds": round(start_offset + max(0.0, start or 0.0), 3),
+                        "end_seconds": round(start_offset + max(start or 0.0, end or (fallback_duration or 0.0)), 3),
+                        "text": text,
+                        "raw_text": text,
+                        "language": item.get("language") or language,
+                        "speaker_label": item.get("speaker") or item.get("speaker_label"),
+                        "timestamp_precision": "segment",
+                        "confidence": confidence,
+                        "source": "stt_raw",
+                    }
+                )
+            if segments:
+                return segments
+        raw_text = raw.get("text")
+    else:
+        raw_text = raw
+    text = _clean_transcribed_text(str(raw_text or ""))
+    if not text:
+        return []
+    end_seconds = start_offset + (fallback_duration if fallback_duration is not None else 0.0)
+    if end_seconds <= start_offset:
+        end_seconds = start_offset
+    return [
+        {
+            "start_seconds": round(start_offset, 3),
+            "end_seconds": round(end_seconds, 3),
+            "text": text,
+            "raw_text": text,
+            "language": None,
+            "speaker_label": None,
+            "timestamp_precision": default_precision,
+            "confidence": None,
+            "source": "stt_raw",
+        }
+    ]
+
+async def _transcribe_audio_segments(
+    path: Path,
+    *,
+    model_size: str | None,
+) -> tuple[str, str | None, list[dict[str, Any]]]:
     whisper = get_whisper_model()
     resolved_model = model_size or getattr(whisper, "model_size", None) or "turbo"
     load_async = getattr(whisper, "load_model_async", None)
     if callable(load_async):
         await load_async(resolved_model)
-    parts = []
-    for transcript_path in _transcript_audio_paths(path):
-        text = _clean_transcribed_text(await whisper.transcribe(str(transcript_path), None, resolved_model))
-        if text:
-            parts.append(text)
-    return "\n".join(parts), resolved_model
+    segments: list[dict[str, Any]] = []
+    for transcript_path, start_offset, duration, precision in _transcript_audio_windows(path):
+        raw = await whisper.transcribe(str(transcript_path), None, resolved_model)
+        segments.extend(
+            _transcription_segments_from_output(
+                raw,
+                start_offset=start_offset,
+                fallback_duration=duration,
+                default_precision=precision,
+            )
+        )
+    for index, segment in enumerate(segments, start=1):
+        segment["segment_order"] = index
+    return "\n".join(segment["text"] for segment in segments), resolved_model, segments
+
+async def _transcribe_audio(path: Path, *, model_size: str | None) -> tuple[str, str | None]:
+    text, resolved_model, _segments = await _transcribe_audio_segments(path, model_size=model_size)
+    setattr(_transcribe_audio, "last_segments", _segments)
+    return text, resolved_model
 
 def _frame_timestamps(duration_seconds: float | None) -> list[float]:
     if not duration_seconds or duration_seconds <= 0:
@@ -864,6 +1139,334 @@ def _frame_timestamps(duration_seconds: float | None) -> list[float]:
     step = (end - start) / max(1, frame_count - 1)
     return [round(min(duration_seconds - 0.1, start + index * step), 2) for index in range(frame_count)]
 
+def _analysis_mode(value: str | None) -> str:
+    return "high_quality" if value == "high_quality" else "quick"
+
+def _shot_frame_budget(mode: str) -> int:
+    return MAX_HIGH_QUALITY_KEYFRAMES if mode == "high_quality" else MAX_QUICK_KEYFRAMES
+
+def _scene_threshold(mode: str) -> float:
+    return SHOT_SCENE_THRESHOLD_HIGH_QUALITY if mode == "high_quality" else SHOT_SCENE_THRESHOLD_QUICK
+
+def _parse_scene_times(stderr: str | None) -> list[float]:
+    times: list[float] = []
+    for match in re.finditer(r"pts_time:([0-9]+(?:\.[0-9]+)?)", stderr or ""):
+        value = _float_or_none(match.group(1))
+        if value is None or value <= 0:
+            continue
+        if not times or abs(value - times[-1]) > 0.35:
+            times.append(round(value, 3))
+    return times
+
+def _detect_shot_ranges(source_path: Path, duration_seconds: float | None, *, mode: str) -> list[tuple[float, float]]:
+    duration = float(duration_seconds or 0.0)
+    if duration <= 0.05:
+        return [(0.0, max(0.5, duration or 0.5))]
+    tools = _require_ffmpeg(ffprobe=False)
+    threshold = _scene_threshold(mode)
+    result = _run_command(
+        [
+            tools.ffmpeg or "ffmpeg",
+            "-hide_banner",
+            "-i",
+            str(source_path),
+            "-vf",
+            f"select='gt(scene,{threshold})',showinfo",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        timeout_seconds=FFMPEG_TIMEOUT_SECONDS,
+    )
+    boundaries = [value for value in _parse_scene_times(result.stderr) if 0.25 < value < duration - 0.25]
+    if result.returncode != 0:
+        logger.info("Shot detection fell back to duration windows: %s", _trim_stderr(result.stderr))
+        boundaries = []
+    if not boundaries and duration > 45:
+        window = 18.0 if mode == "high_quality" else 25.0
+        boundaries = [round(value, 3) for value in _frange(window, duration, window)]
+    points = [0.0, *boundaries, duration]
+    ranges: list[tuple[float, float]] = []
+    for start, end in zip(points, points[1:]):
+        if end - start < 0.2:
+            continue
+        ranges.append((round(start, 3), round(end, 3)))
+    return ranges or [(0.0, duration)]
+
+def _frange(start: float, stop: float, step: float) -> list[float]:
+    values: list[float] = []
+    value = start
+    while value < stop:
+        values.append(value)
+        value += step
+    return values
+
+def _keyframe_timestamps_for_shot(start: float, end: float, *, remaining_budget: int, mode: str) -> list[float]:
+    duration = max(0.0, end - start)
+    if duration <= 0.05 or remaining_budget <= 0:
+        return []
+    epsilon = min(0.12, duration / 5)
+    midpoint = start + duration / 2
+    timestamps = [midpoint]
+    if duration >= LONG_SHOT_SECONDS and remaining_budget >= 3:
+        timestamps = [start + duration * 0.25, midpoint, start + duration * 0.75]
+    elif mode == "high_quality" and duration >= 8.0 and remaining_budget >= 2:
+        timestamps = [start + duration * 0.33, start + duration * 0.67]
+    return [
+        round(min(max(start + epsilon, value), max(start + epsilon, end - epsilon)), 3)
+        for value in timestamps[:remaining_budget]
+    ]
+
+def _link_ids_by_overlap(
+    ranges: list[tuple[str, float, float]],
+    start_seconds: float,
+    end_seconds: float,
+) -> list[str]:
+    links: list[str] = []
+    for item_id, item_start, item_end in ranges:
+        if max(float(item_start), start_seconds) <= min(float(item_end), end_seconds):
+            links.append(item_id)
+    return links
+
+def _save_transcript_segments(
+    row: DBVideoInspirationJob,
+    segment_payloads: list[dict[str, Any]],
+    db: Session,
+) -> list[DBVideoInspirationTranscriptSegment]:
+    db.query(DBVideoInspirationTranscriptSegment).filter(DBVideoInspirationTranscriptSegment.job_id == row.id).delete(synchronize_session=False)
+    shot_ranges = [
+        (shot.id, float(shot.start_seconds or 0.0), float(shot.end_seconds or 0.0))
+        for shot in _shots_for_job(row.id, db)
+    ]
+    rows: list[DBVideoInspirationTranscriptSegment] = []
+    for index, payload in enumerate(segment_payloads, start=1):
+        text = _truncate(payload.get("text"), 20000)
+        if not text:
+            continue
+        start_seconds = float(payload.get("start_seconds") or 0.0)
+        end_seconds = float(payload.get("end_seconds") or start_seconds)
+        segment = DBVideoInspirationTranscriptSegment(
+            id=str(uuid.uuid4()),
+            job_id=row.id,
+            segment_order=int(payload.get("segment_order") or index),
+            start_seconds=start_seconds,
+            end_seconds=max(start_seconds, end_seconds),
+            text=text,
+            raw_text=_truncate(payload.get("raw_text"), 20000) or text,
+            language=_truncate(payload.get("language"), 24) or row.transcript_language,
+            speaker_label=_truncate(payload.get("speaker_label"), 120) or None,
+            source=payload.get("source") or "stt_raw",
+            timestamp_precision=payload.get("timestamp_precision") or "chunk",
+            confidence=_float_or_none(payload.get("confidence")),
+            shot_ids_json=_link_ids_by_overlap(shot_ranges, start_seconds, max(start_seconds, end_seconds)),
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db.add(segment)
+        rows.append(segment)
+    db.commit()
+    for item in rows:
+        db.refresh(item)
+    return rows
+
+def _save_user_transcript_edit(row: DBVideoInspirationJob, text: str, db: Session) -> None:
+    db.query(DBVideoInspirationTranscriptSegment).filter(
+        DBVideoInspirationTranscriptSegment.job_id == row.id,
+        DBVideoInspirationTranscriptSegment.source == "user_edited",
+    ).delete(synchronize_session=False)
+    if not text.strip():
+        db.commit()
+        return
+    shot_ranges = [
+        (shot.id, float(shot.start_seconds or 0.0), float(shot.end_seconds or 0.0))
+        for shot in _shots_for_job(row.id, db)
+    ]
+    duration = float(row.source_duration_seconds or 0.0)
+    segment = DBVideoInspirationTranscriptSegment(
+        id=str(uuid.uuid4()),
+        job_id=row.id,
+        segment_order=10_000,
+        start_seconds=0.0,
+        end_seconds=duration,
+        text=text,
+        raw_text=None,
+        language=row.transcript_language,
+        speaker_label=None,
+        source="user_edited",
+        timestamp_precision="file",
+        confidence=None,
+        shot_ids_json=_link_ids_by_overlap(shot_ranges, 0.0, duration),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    db.add(segment)
+    db.commit()
+
+def _wav_rms_windows(path: Path, *, window_seconds: float = 1.0) -> list[tuple[float, float, float]]:
+    try:
+        with wave.open(str(path), "rb") as audio_file:
+            frame_rate = audio_file.getframerate()
+            sample_width = audio_file.getsampwidth()
+            channels = audio_file.getnchannels()
+            if frame_rate <= 0 or sample_width != 2:
+                return []
+            frames_per_window = max(1, int(frame_rate * window_seconds))
+            windows: list[tuple[float, float, float]] = []
+            index = 0
+            while True:
+                raw = audio_file.readframes(frames_per_window)
+                if not raw:
+                    break
+                samples = array("h")
+                samples.frombytes(raw)
+                if sys.byteorder == "big":
+                    samples.byteswap()
+                if channels > 1:
+                    samples = array("h", samples[::channels])
+                if not samples:
+                    continue
+                mean_square = sum(float(value) * float(value) for value in samples) / len(samples)
+                rms = math.sqrt(mean_square) / 32768.0
+                start = index * window_seconds
+                end = start + (len(samples) / frame_rate)
+                windows.append((round(start, 3), round(end, 3), round(rms, 6)))
+                index += 1
+            return windows
+    except (EOFError, OSError, wave.Error):
+        return []
+
+def _contiguous_low_energy_ranges(windows: list[tuple[float, float, float]], *, threshold: float) -> list[tuple[float, float, float]]:
+    ranges: list[tuple[float, float, float]] = []
+    current_start: float | None = None
+    current_end = 0.0
+    values: list[float] = []
+    for start, end, rms in windows:
+        if rms <= threshold:
+            if current_start is None:
+                current_start = start
+                values = []
+            current_end = end
+            values.append(rms)
+        elif current_start is not None:
+            if current_end - current_start >= 0.8:
+                ranges.append((current_start, current_end, sum(values) / max(1, len(values))))
+            current_start = None
+            values = []
+    if current_start is not None and current_end - current_start >= 0.8:
+        ranges.append((current_start, current_end, sum(values) / max(1, len(values))))
+    return ranges
+
+def _save_audio_events(
+    row: DBVideoInspirationJob,
+    audio_path: Path,
+    transcript_segments: list[DBVideoInspirationTranscriptSegment],
+    db: Session,
+) -> list[DBVideoInspirationAudioEvent]:
+    db.query(DBVideoInspirationAudioEvent).filter(DBVideoInspirationAudioEvent.job_id == row.id).delete(synchronize_session=False)
+    shot_ranges = [
+        (shot.id, float(shot.start_seconds or 0.0), float(shot.end_seconds or 0.0))
+        for shot in _shots_for_job(row.id, db)
+    ]
+    transcript_ranges = [
+        (segment.id, float(segment.start_seconds or 0.0), float(segment.end_seconds or 0.0))
+        for segment in transcript_segments
+    ]
+    windows = _wav_rms_windows(audio_path)
+    events: list[DBVideoInspirationAudioEvent] = []
+
+    def add_event(
+        event_type: str,
+        start_seconds: float,
+        end_seconds: float,
+        description_vi: str,
+        *,
+        confidence: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        event = DBVideoInspirationAudioEvent(
+            id=str(uuid.uuid4()),
+            job_id=row.id,
+            event_order=len(events) + 1,
+            event_type=event_type,
+            start_seconds=round(max(0.0, start_seconds), 3),
+            end_seconds=round(max(start_seconds, end_seconds), 3),
+            description_vi=description_vi,
+            confidence=max(0.0, min(1.0, confidence)),
+            technical_metadata_json=metadata or {},
+            shot_ids_json=_link_ids_by_overlap(shot_ranges, start_seconds, end_seconds),
+            transcript_segment_ids_json=_link_ids_by_overlap(transcript_ranges, start_seconds, end_seconds),
+            created_at=_now(),
+        )
+        db.add(event)
+        events.append(event)
+
+    for segment in transcript_segments:
+        add_event(
+            "speech",
+            float(segment.start_seconds or 0.0),
+            float(segment.end_seconds or 0.0),
+            "Có lời nói trong transcript tại đoạn này.",
+            confidence=segment.confidence if segment.confidence is not None else 0.72,
+            metadata={"timestamp_precision": segment.timestamp_precision, "source": segment.source},
+        )
+
+    if windows:
+        rms_values = [item[2] for item in windows]
+        average_rms = sum(rms_values) / max(1, len(rms_values))
+        low_threshold = max(0.006, min(0.025, average_rms * 0.35))
+        for start, end, rms in _contiguous_low_energy_ranges(windows, threshold=low_threshold):
+            add_event(
+                "silence",
+                start,
+                end,
+                "Khoảng âm lượng rất thấp hoặc im lặng.",
+                confidence=0.78,
+                metadata={"rms": rms, "threshold": low_threshold},
+            )
+        for previous, current in zip(windows, windows[1:]):
+            delta = current[2] - previous[2]
+            if abs(delta) >= max(0.04, average_rms * 1.4):
+                add_event(
+                    "energy_change",
+                    current[0],
+                    current[1],
+                    "Mức năng lượng âm thanh thay đổi rõ.",
+                    confidence=0.68,
+                    metadata={"previous_rms": previous[2], "current_rms": current[2], "delta": delta},
+                )
+        if not transcript_segments and average_rms > low_threshold:
+            add_event(
+                "ambience",
+                0.0,
+                float(row.source_duration_seconds or windows[-1][1]),
+                "Có âm thanh nền/nhạc/SFX nhưng không xác định tên hoặc nguồn âm thanh.",
+                confidence=0.46,
+                metadata={"average_rms": average_rms, "classification": "low_confidence_non_speech_audio"},
+            )
+        if transcript_segments and average_rms > 0.12:
+            add_event(
+                "possible_audio_clutter",
+                0.0,
+                float(row.source_duration_seconds or windows[-1][1]),
+                "Âm lượng nền tổng thể cao; cần kiểm tra nguy cơ nhạc hoặc SFX che lời.",
+                confidence=0.52,
+                metadata={"average_rms": average_rms},
+            )
+    elif not transcript_segments:
+        add_event(
+            "ambience",
+            0.0,
+            float(row.source_duration_seconds or 0.0),
+            "Không đọc được đặc trưng kỹ thuật âm thanh; chỉ biết video có audio đã tách.",
+            confidence=0.2,
+            metadata={"limitation": "wav_rms_unavailable"},
+        )
+    db.commit()
+    for item in events:
+        db.refresh(item)
+    return events
+
 def _clear_frames(row: DBVideoInspirationJob, db: Session) -> None:
     for frame in _frames_for_job(row.id, db):
         resolved = config.resolve_storage_path(frame.frame_path)
@@ -872,49 +1475,108 @@ def _clear_frames(row: DBVideoInspirationJob, db: Session) -> None:
     db.query(DBVideoInspirationFrame).filter(DBVideoInspirationFrame.job_id == row.id).delete(synchronize_session=False)
     db.commit()
 
-def _extract_frames(row: DBVideoInspirationJob, db: Session) -> list[DBVideoInspirationFrame]:
+def _clear_timeline(row: DBVideoInspirationJob, db: Session, *, include_frames: bool = True) -> None:
+    if include_frames:
+        _clear_frames(row, db)
+    db.query(DBVideoInspirationTextEvent).filter(DBVideoInspirationTextEvent.job_id == row.id).delete(synchronize_session=False)
+    db.query(DBVideoInspirationRetentionBeat).filter(DBVideoInspirationRetentionBeat.job_id == row.id).delete(synchronize_session=False)
+    db.query(DBVideoInspirationAudioEvent).filter(DBVideoInspirationAudioEvent.job_id == row.id).delete(synchronize_session=False)
+    db.query(DBVideoInspirationTranscriptSegment).filter(DBVideoInspirationTranscriptSegment.job_id == row.id).delete(synchronize_session=False)
+    db.query(DBVideoInspirationShot).filter(DBVideoInspirationShot.job_id == row.id).delete(synchronize_session=False)
+    db.commit()
+
+def _extract_frames(row: DBVideoInspirationJob, db: Session, *, mode: str | None = None) -> list[DBVideoInspirationFrame]:
     source_path = _resolve_source(row)
     tools = _require_ffmpeg(ffprobe=False)
     metadata = _probe_video(source_path)
-    timestamps = _frame_timestamps(metadata.get("duration_seconds"))
-    _clear_frames(row, db)
+    mode = _analysis_mode(mode or getattr(row, "analysis_mode", None))
+    duration_seconds = metadata.get("duration_seconds") or row.source_duration_seconds
+    shot_ranges = _detect_shot_ranges(source_path, duration_seconds, mode=mode)
+    _clear_timeline(row, db, include_frames=True)
     frame_dir = _job_dir(row.id) / "frames"
     rows: list[DBVideoInspirationFrame] = []
-    for index, timestamp in enumerate(timestamps, start=1):
-        frame_path = frame_dir / f"frame-{index:02d}-{int(timestamp * 1000):06d}ms.jpg"
-        result = _run_command(
-            [
-                tools.ffmpeg or "ffmpeg",
-                "-y",
-                "-ss",
-                str(timestamp),
-                "-i",
-                str(source_path),
-                "-frames:v",
-                "1",
-                "-q:v",
-                "3",
-                str(frame_path),
-            ],
-            timeout_seconds=90,
-        )
-        if result.returncode != 0 or not frame_path.exists():
-            logger.warning("Failed to extract frame at %.2fs: %s", timestamp, _trim_stderr(result.stderr))
-            continue
-        frame = DBVideoInspirationFrame(
+    shots: list[DBVideoInspirationShot] = []
+    now = _now()
+    for order, (start, end) in enumerate(shot_ranges, start=1):
+        shot = DBVideoInspirationShot(
             id=str(uuid.uuid4()),
             job_id=row.id,
-            frame_path=config.to_storage_path(frame_path),
-            timestamp_seconds=timestamp,
-            technical_metadata_json={
-                "source_duration_seconds": metadata.get("duration_seconds"),
-                "source_width": metadata.get("width"),
-                "source_height": metadata.get("height"),
-            },
-            created_at=_now(),
+            shot_order=order,
+            start_seconds=start,
+            end_seconds=end,
+            duration_seconds=max(0.0, end - start),
+            keyframe_ids_json=[],
+            confidence_json={"shot_boundary": 0.82 if len(shot_ranges) > 1 else 0.58},
+            limitations_json=[],
+            created_at=now,
+            updated_at=now,
         )
-        db.add(frame)
-        rows.append(frame)
+        db.add(shot)
+        shots.append(shot)
+    db.flush()
+
+    max_budget = min(60, max(_shot_frame_budget(mode), len(shots)))
+    remaining_budget = max_budget
+    frame_index = 1
+    for shot in shots:
+        timestamps = _keyframe_timestamps_for_shot(
+            float(shot.start_seconds or 0.0),
+            float(shot.end_seconds or 0.0),
+            remaining_budget=max(1, remaining_budget),
+            mode=mode,
+        )
+        frame_ids: list[str] = []
+        for timestamp in timestamps:
+            if remaining_budget <= 0:
+                break
+            frame_path = frame_dir / f"shot-{shot.shot_order:03d}-frame-{frame_index:03d}-{int(timestamp * 1000):08d}ms.jpg"
+            result = _run_command(
+                [
+                    tools.ffmpeg or "ffmpeg",
+                    "-y",
+                    "-ss",
+                    str(timestamp),
+                    "-i",
+                    str(source_path),
+                    "-frames:v",
+                    "1",
+                    "-q:v",
+                    "3",
+                    str(frame_path),
+                ],
+                timeout_seconds=90,
+            )
+            if result.returncode != 0 or not frame_path.exists():
+                logger.warning("Failed to extract keyframe at %.2fs: %s", timestamp, _trim_stderr(result.stderr))
+                continue
+            frame = DBVideoInspirationFrame(
+                id=str(uuid.uuid4()),
+                job_id=row.id,
+                shot_id=shot.id,
+                shot_order=shot.shot_order,
+                frame_role="keyframe",
+                frame_path=config.to_storage_path(frame_path),
+                timestamp_seconds=timestamp,
+                technical_metadata_json={
+                    "source_duration_seconds": duration_seconds,
+                    "source_width": metadata.get("width"),
+                    "source_height": metadata.get("height"),
+                    "shot_id": shot.id,
+                    "shot_order": shot.shot_order,
+                    "shot_start_seconds": shot.start_seconds,
+                    "shot_end_seconds": shot.end_seconds,
+                },
+                created_at=_now(),
+            )
+            db.add(frame)
+            rows.append(frame)
+            frame_ids.append(frame.id)
+            frame_index += 1
+            remaining_budget -= 1
+        shot.keyframe_ids_json = frame_ids
+        shot.updated_at = _now()
+    if duration_seconds:
+        row.source_duration_seconds = duration_seconds
     db.commit()
     for item in rows:
         db.refresh(item)
@@ -937,7 +1599,32 @@ def _json_from_ai(raw: str) -> dict[str, Any]:
 
 def _run_structured_ai(db: Session, prompt: str, schema: dict[str, Any], *, timeout_seconds: int = AI_TIMEOUT_SECONDS) -> dict[str, Any]:
     settings = settings_service.get_ai_planning_settings(db)
-    raw = ai_planning.run_codex_exec(settings, prompt, output_schema=schema, timeout_seconds=timeout_seconds)
+    job_id = _AI_JOB_ID.get()
+    step_name = _AI_STEP_NAME.get()
+
+    def run() -> str:
+        return ai_planning.run_codex_exec(
+            settings,
+            prompt,
+            output_schema=schema,
+            timeout_seconds=timeout_seconds,
+        )
+
+    if job_id:
+        with video_planning_pool.planning_slot(
+            db,
+            project_id=None,
+            work_key=f"video-inspiration:{job_id}",
+            workflow_type="video_inspiration",
+            job_id=job_id,
+            step_name=step_name,
+            provider=settings.provider,
+            model=settings.model,
+            details={"prompt_chars": len(prompt), "schema_keys": sorted((schema.get("properties") or {}).keys())[:20]},
+        ):
+            raw = run()
+    else:
+        raw = run()
     try:
         return _json_from_ai(raw)
     except json.JSONDecodeError as exc:
@@ -946,11 +1633,79 @@ def _run_structured_ai(db: Session, prompt: str, schema: dict[str, Any], *, time
             error_code="VIDEO_INSPIRATION_AI_INVALID_JSON",
         ) from exc
 
+
+async def _run_structured_ai_in_thread(
+    db: Session,
+    prompt: str,
+    schema: dict[str, Any],
+    *,
+    timeout_seconds: int = AI_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Keep blocking Codex subprocess execution off the server event loop."""
+    return await asyncio.to_thread(
+        _run_structured_ai,
+        db,
+        prompt,
+        schema,
+        timeout_seconds=timeout_seconds,
+    )
+
 VISUAL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "summary_vi": {"type": "string"},
+        "shots": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "shot_order": {"type": "number"},
+                    "start_seconds": {"type": "number"},
+                    "end_seconds": {"type": "number"},
+                    "visual_description_vi": {"type": "string"},
+                    "subjects": {"type": "array", "items": {"type": "string"}},
+                    "setting": {"type": "array", "items": {"type": "string"}},
+                    "camera": {"type": "string"},
+                    "subject_motion": {"type": "array", "items": {"type": "string"}},
+                    "transition_in": {"type": "string"},
+                    "transition_out": {"type": "string"},
+                    "on_screen_text": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "text": {"type": "string"},
+                                "role": {"type": "string"},
+                                "language": {"type": "string"},
+                                "region": {"type": "string"},
+                                "confidence": {"type": "number"},
+                            },
+                            "required": ["text", "role", "language", "region", "confidence"],
+                        },
+                    },
+                    "confidence": {"type": "number"},
+                    "limitations": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": [
+                    "shot_order",
+                    "start_seconds",
+                    "end_seconds",
+                    "visual_description_vi",
+                    "subjects",
+                    "setting",
+                    "camera",
+                    "subject_motion",
+                    "transition_in",
+                    "transition_out",
+                    "on_screen_text",
+                    "confidence",
+                    "limitations",
+                ],
+            },
+        },
         "frames": {
             "type": "array",
             "items": {
@@ -965,7 +1720,7 @@ VISUAL_SCHEMA: dict[str, Any] = {
         },
         "limitations_vi": {"type": "string"},
     },
-    "required": ["summary_vi", "frames", "limitations_vi"],
+    "required": ["summary_vi", "shots", "frames", "limitations_vi"],
 }
 
 ANALYSIS_SCHEMA: dict[str, Any] = {
@@ -980,6 +1735,65 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "strengths_vi": {"type": "array", "items": {"type": "string"}},
         "weaknesses_vi": {"type": "array", "items": {"type": "string"}},
         "rewrite_opportunities_vi": {"type": "array", "items": {"type": "string"}},
+        "content_retention_beats": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "order": {"type": "number"},
+                    "start_seconds": {"type": "number"},
+                    "end_seconds": {"type": "number"},
+                    "role": {"type": "string"},
+                    "viewer_question_before": {"type": "string"},
+                    "content_promise": {"type": "string"},
+                    "new_information": {"type": "string"},
+                    "emotional_or_stakes_change": {"type": "string"},
+                    "question_answered": {"type": "string"},
+                    "new_open_loop": {"type": "string"},
+                    "micro_payoff": {"type": "string"},
+                    "why_continue": {"type": "string"},
+                    "drop_off_risks": {"type": "array", "items": {"type": "string"}},
+                    "evidence_refs": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "type": {"type": "string"},
+                                "id": {"type": "string"},
+                            },
+                            "required": ["type", "id"],
+                        },
+                    },
+                    "confidence": {"type": "number"},
+                },
+                "required": [
+                    "order",
+                    "start_seconds",
+                    "end_seconds",
+                    "role",
+                    "viewer_question_before",
+                    "content_promise",
+                    "new_information",
+                    "emotional_or_stakes_change",
+                    "question_answered",
+                    "new_open_loop",
+                    "micro_payoff",
+                    "why_continue",
+                    "drop_off_risks",
+                    "evidence_refs",
+                    "confidence",
+                ],
+            },
+        },
+        "hook_analysis": {"type": "string"},
+        "story_structure": {"type": "string"},
+        "visual_grammar": {"type": "string"},
+        "audio_grammar": {"type": "string"},
+        "originality_boundaries": {"type": "array", "items": {"type": "string"}},
+        "coverage_notes": {"type": "array", "items": {"type": "string"}},
+        "limitations": {"type": "array", "items": {"type": "string"}},
         "notes_vi": {"type": "string"},
     },
     "required": [
@@ -991,6 +1805,14 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "strengths_vi",
         "weaknesses_vi",
         "rewrite_opportunities_vi",
+        "content_retention_beats",
+        "hook_analysis",
+        "story_structure",
+        "visual_grammar",
+        "audio_grammar",
+        "originality_boundaries",
+        "coverage_notes",
+        "limitations",
         "notes_vi",
     ],
 }
@@ -1151,23 +1973,89 @@ REWRITE_SCHEMA: dict[str, Any] = REWRITE_PAYLOAD_SCHEMA
 
 def _visual_analysis_prompt(frames: list[DBVideoInspirationFrame]) -> str:
     frame_lines = "\n".join(
-        f"- {frame.timestamp_seconds:.2f}s: {config.resolve_storage_path(frame.frame_path)}"
+        f"- shot {frame.shot_order or '?'} @ {frame.timestamp_seconds:.2f}s: {config.resolve_storage_path(frame.frame_path)}"
         for frame in frames
     )
     return f"""
-Bạn là bộ phân tích hình ảnh video. Chỉ phân tích dựa trên các file ảnh frame dưới đây, không dùng transcript và không đoán khi không nhìn được ảnh.
+Bạn là bộ phân tích hình ảnh video theo shot. Chỉ phân tích dựa trên các file ảnh keyframe dưới đây, không dùng transcript và không đoán khi không nhìn được ảnh.
 
-Frame cần xem:
+Keyframe cần xem:
 {frame_lines}
 
 Yêu cầu:
 - Trả tiếng Việt.
-- Mô tả bối cảnh/chủ thể, nhân vật nếu thấy rõ, mood, màu sắc, ánh sáng, camera/framing và khoảnh khắc đáng chú ý.
+- Nhóm theo shot_order. Mỗi shot phải có mô tả chủ thể, bối cảnh, ánh sáng/màu, bố cục, camera, chuyển động chủ thể, transition vào/ra nếu quan sát được.
+- Trích chữ trên màn hình nếu thấy: text, vai trò nội dung (hook/title/evidence/cta/source_subtitle/unknown), ngôn ngữ, vùng tương đối và confidence.
+- Nếu không đủ frame để khẳng định chuyển động camera/chủ thể, ghi confidence thấp hoặc limitations, không khẳng định chắc.
 - Nếu môi trường không cho bạn xem ảnh, phải nói rõ trong limitations_vi và không bịa nội dung hình ảnh.
 - Chỉ trả JSON đúng schema.
 """.strip()
 
-def _analysis_prompt(row: DBVideoInspirationJob) -> str:
+def _timeline_context_for_prompt(row: DBVideoInspirationJob, db: Session) -> str:
+    shots = [
+        {
+            "id": shot.id,
+            "shot_order": shot.shot_order,
+            "start_seconds": shot.start_seconds,
+            "end_seconds": shot.end_seconds,
+            "duration_seconds": shot.duration_seconds,
+            "visual_description_vi": shot.visual_description_vi,
+            "camera": shot.camera_json,
+            "subject_motion": shot.subject_motion_json,
+            "on_screen_text": shot.on_screen_text_json,
+        }
+        for shot in _shots_for_job(row.id, db)
+    ]
+    transcript_segments = [
+        {
+            "id": segment.id,
+            "segment_order": segment.segment_order,
+            "start_seconds": segment.start_seconds,
+            "end_seconds": segment.end_seconds,
+            "text": segment.text,
+            "source": segment.source,
+            "timestamp_precision": segment.timestamp_precision,
+            "shot_ids": segment.shot_ids_json,
+        }
+        for segment in _transcript_segments_for_job(row.id, db)
+        if segment.source != "user_edited"
+    ]
+    audio_events = [
+        {
+            "id": event.id,
+            "event_type": event.event_type,
+            "start_seconds": event.start_seconds,
+            "end_seconds": event.end_seconds,
+            "description_vi": event.description_vi,
+            "confidence": event.confidence,
+        }
+        for event in _audio_events_for_job(row.id, db)
+    ]
+    text_events = [
+        {
+            "id": event.id,
+            "shot_id": event.shot_id,
+            "start_seconds": event.start_seconds,
+            "end_seconds": event.end_seconds,
+            "text": event.text,
+            "role": event.role,
+            "confidence": event.confidence,
+        }
+        for event in _text_events_for_job(row.id, db)
+    ]
+    return json.dumps(
+        {
+            "shots": shots,
+            "transcript_segments": transcript_segments,
+            "audio_events": audio_events,
+            "on_screen_text_events": text_events,
+            "retention_source": "predicted_from_content",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+def _analysis_prompt(row: DBVideoInspirationJob, db: Session) -> str:
     return f"""
 Bạn là biên tập viên video kiêm strategist nội dung. Hãy phân tích video gốc bằng tiếng Việt trước khi viết lại.
 
@@ -1177,18 +2065,24 @@ Transcript đã nhận:
 Tóm tắt hình ảnh:
 {_truncate(row.visual_summary, 20000)}
 
+Timeline đa phương thức đã trích xuất:
+{_truncate(_timeline_context_for_prompt(row, db), 70000)}
+
 Định hướng phát triển thêm từ người dùng:
 {_truncate(row.user_direction, 20000) or "Không có"}
 
 Yêu cầu:
 - Phân tích ý chính, hook, cấu trúc, nhân vật/bối cảnh, nhịp dựng, điểm mạnh/yếu và cơ hội viết mới.
+- Chia nội dung thành các beat retention theo timestamp. Tỷ trọng phân tích: 75% nội dung, 25% cách thể hiện.
+- Mỗi beat phải nêu câu hỏi người xem đang giữ, thông tin mới, micro-payoff, vòng mở mới, rủi ro drop-off và evidence_refs tới shot/transcript/audio/text.
+- Dùng nhãn retention_source = predicted_from_content trong ý nghĩa phân tích; không khẳng định đây là dữ liệu retention thực tế.
 - Nếu có định hướng từ người dùng, hãy chỉ ra cơ hội phát triển phù hợp với định hướng đó nhưng không bóp méo nội dung video gốc.
 - Nếu thiếu hình ảnh hoặc transcript thì ghi rõ phần thiếu, không nói như đã xem đầy đủ.
 - Chỉ trả JSON đúng schema.
 """.strip()
 
 def _rewrite_prompt(row: DBVideoInspirationJob) -> str:
-    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    language_label = video_language.video_language_prompt_label(row.target_language)
     return f"""
 Bạn là biên kịch video ngắn. Hãy lấy cảm hứng từ video gốc nhưng viết mới mạnh tay, không paraphrase sát và không copy nguyên văn.
 
@@ -1218,7 +2112,7 @@ Yêu cầu:
 """.strip()
 
 def _rewrite_context(row: DBVideoInspirationJob) -> str:
-    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    language_label = video_language.video_language_prompt_label(row.target_language)
     analysis = {
         key: value
         for key, value in (row.analysis_json or {}).items()
@@ -1250,7 +2144,7 @@ Yêu cầu:
 """.strip()
 
 def _rewrite_candidates_prompt(row: DBVideoInspirationJob, creative_brief: dict[str, Any]) -> str:
-    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    language_label = video_language.video_language_prompt_label(row.target_language)
     return f"""
 Bạn là biên kịch video ngắn. Hãy tạo đúng 2 bản nháp kịch bản khác hướng từ creative brief và dữ liệu gốc.
 
@@ -1310,7 +2204,7 @@ def _rewrite_synthesis_prompt(
     candidates: dict[str, Any],
     review: dict[str, Any],
 ) -> str:
-    language_label = "tiếng Việt" if row.target_language == "vi" else "English"
+    language_label = video_language.video_language_prompt_label(row.target_language)
     return f"""
 Bạn là biên kịch kiêm producer AI Video. Hãy tổng hợp bản kịch bản tối ưu cuối cùng từ creative brief, candidates và review.
 
@@ -1461,6 +2355,13 @@ def _format_optimized_script(payload: dict[str, Any]) -> str:
         if str(value or "").strip()
     ).strip()
 
+def _jsonish(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if value is None:
+        return None
+    return {"description": str(value)}
+
 def _apply_visual_payload(row: DBVideoInspirationJob, frames: list[DBVideoInspirationFrame], payload: dict[str, Any], db: Session) -> None:
     by_timestamp = {
         round(float(item.get("timestamp_seconds", 0)), 2): item.get("description_vi", "")
@@ -1469,26 +2370,403 @@ def _apply_visual_payload(row: DBVideoInspirationJob, frames: list[DBVideoInspir
     }
     for frame in frames:
         frame.description_vi = _truncate(by_timestamp.get(round(float(frame.timestamp_seconds), 2), ""), 12000)
+    shots_by_order = {int(shot.shot_order): shot for shot in _shots_for_job(row.id, db)}
+    db.query(DBVideoInspirationTextEvent).filter(DBVideoInspirationTextEvent.job_id == row.id).delete(synchronize_session=False)
+    text_order = 1
+    for item in payload.get("shots", []) if isinstance(payload.get("shots"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        order = _int_or_none(item.get("shot_order"))
+        if order is None or order not in shots_by_order:
+            continue
+        shot = shots_by_order[order]
+        shot.visual_description_vi = _truncate(item.get("visual_description_vi"), 12000)
+        shot.subjects_json = _jsonish(item.get("subjects"))
+        shot.setting_json = _jsonish(item.get("setting"))
+        shot.camera_json = _jsonish(item.get("camera"))
+        shot.subject_motion_json = _jsonish(item.get("subject_motion"))
+        shot.transition_in = _truncate(item.get("transition_in"), 120)
+        shot.transition_out = _truncate(item.get("transition_out"), 120)
+        on_screen_text = item.get("on_screen_text") if isinstance(item.get("on_screen_text"), list) else []
+        shot.on_screen_text_json = on_screen_text
+        confidence = item.get("confidence")
+        shot.confidence_json = confidence if isinstance(confidence, dict) else {"visual": _float_or_none(confidence)}
+        limitations = item.get("limitations")
+        shot.limitations_json = limitations if isinstance(limitations, list) else ([limitations] if limitations else [])
+        shot.updated_at = _now()
+        for text_item in on_screen_text:
+            if not isinstance(text_item, dict):
+                continue
+            text_value = _truncate(text_item.get("text"), 4000)
+            if not text_value:
+                continue
+            event = DBVideoInspirationTextEvent(
+                id=str(uuid.uuid4()),
+                job_id=row.id,
+                shot_id=shot.id,
+                event_order=text_order,
+                start_seconds=float(shot.start_seconds or 0.0),
+                end_seconds=float(shot.end_seconds or 0.0),
+                text=text_value,
+                language=_truncate(text_item.get("language"), 24) or None,
+                role=_truncate(text_item.get("role"), 80) or "unknown",
+                region_json=_jsonish(text_item.get("region")),
+                confidence=_float_or_none(text_item.get("confidence")),
+                source="vision",
+                created_at=_now(),
+                updated_at=_now(),
+            )
+            db.add(event)
+            text_order += 1
     summary = payload.get("summary_vi") or ""
     limitations = payload.get("limitations_vi") or ""
     row.visual_summary = "\n\n".join(part for part in (summary.strip(), limitations.strip()) if part)
     db.commit()
 
+def _save_retention_beats(
+    row: DBVideoInspirationJob,
+    analysis_payload: dict[str, Any],
+    db: Session,
+) -> list[DBVideoInspirationRetentionBeat]:
+    db.query(DBVideoInspirationRetentionBeat).filter(DBVideoInspirationRetentionBeat.job_id == row.id).delete(synchronize_session=False)
+    payload_beats = analysis_payload.get("content_retention_beats")
+    beats = payload_beats if isinstance(payload_beats, list) else []
+    if not beats:
+        transcript_segments = _transcript_segments_for_job(row.id, db)
+        shots = _shots_for_job(row.id, db)
+        if transcript_segments:
+            beats = [
+                {
+                    "order": segment.segment_order,
+                    "start_seconds": segment.start_seconds,
+                    "end_seconds": segment.end_seconds,
+                    "role": "information",
+                    "viewer_question_before": "Người xem chờ thông tin tiếp theo trong lời kể.",
+                    "content_promise": "Tiếp tục mạch nội dung từ transcript.",
+                    "new_information": segment.text,
+                    "emotional_or_stakes_change": "",
+                    "question_answered": "",
+                    "new_open_loop": "",
+                    "micro_payoff": "",
+                    "why_continue": "Đoạn lời nói này đang cung cấp dữ liệu mới hoặc nối tiếp mạch lập luận.",
+                    "drop_off_risks": [],
+                    "evidence_refs": [{"type": "transcript_segment", "id": segment.id}],
+                    "confidence": 0.42,
+                }
+                for segment in transcript_segments[:12]
+            ]
+        elif shots:
+            beats = [
+                {
+                    "order": shot.shot_order,
+                    "start_seconds": shot.start_seconds,
+                    "end_seconds": shot.end_seconds,
+                    "role": "visual_context",
+                    "viewer_question_before": "Người xem dựa vào hình ảnh vì chưa có transcript.",
+                    "content_promise": "",
+                    "new_information": shot.visual_description_vi or "Shot hình ảnh chưa có mô tả chắc chắn.",
+                    "emotional_or_stakes_change": "",
+                    "question_answered": "",
+                    "new_open_loop": "",
+                    "micro_payoff": "",
+                    "why_continue": "Beat này chỉ là dự đoán từ hình ảnh, confidence thấp hơn transcript.",
+                    "drop_off_risks": ["Thiếu lời nói hoặc mô tả nội dung cụ thể."],
+                    "evidence_refs": [{"type": "shot", "id": shot.id}],
+                    "confidence": 0.28,
+                }
+                for shot in shots[:12]
+            ]
+    rows: list[DBVideoInspirationRetentionBeat] = []
+    for index, item in enumerate(beats, start=1):
+        if not isinstance(item, dict):
+            continue
+        start_seconds = float(item.get("start_seconds") or 0.0)
+        end_seconds = float(item.get("end_seconds") or start_seconds)
+        beat = DBVideoInspirationRetentionBeat(
+            id=str(uuid.uuid4()),
+            job_id=row.id,
+            beat_order=int(item.get("order") or index),
+            start_seconds=start_seconds,
+            end_seconds=max(start_seconds, end_seconds),
+            role=_truncate(item.get("role"), 80) or "development",
+            viewer_question_before=_truncate(item.get("viewer_question_before"), 4000) or None,
+            content_promise=_truncate(item.get("content_promise"), 4000) or None,
+            new_information=_truncate(item.get("new_information"), 8000) or None,
+            emotional_or_stakes_change=_truncate(item.get("emotional_or_stakes_change"), 4000) or None,
+            question_answered=_truncate(item.get("question_answered"), 4000) or None,
+            new_open_loop=_truncate(item.get("new_open_loop"), 4000) or None,
+            micro_payoff=_truncate(item.get("micro_payoff"), 4000) or None,
+            why_continue=_truncate(item.get("why_continue"), 4000) or None,
+            drop_off_risks_json=item.get("drop_off_risks") if isinstance(item.get("drop_off_risks"), list) else [],
+            evidence_refs_json=item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else [],
+            confidence=_float_or_none(item.get("confidence")),
+            created_at=_now(),
+            updated_at=_now(),
+        )
+        db.add(beat)
+        rows.append(beat)
+    db.commit()
+    for item in rows:
+        db.refresh(item)
+    return rows
+
+def _interval_coverage(items: list[tuple[float, float]], duration_seconds: float) -> float:
+    if duration_seconds <= 0 or not items:
+        return 0.0
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted((max(0.0, a), max(0.0, b)) for a, b in items if b > a):
+        if not merged or start > merged[-1][1]:
+            merged.append((start, min(duration_seconds, end)))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], min(duration_seconds, end)))
+    covered = sum(max(0.0, end - start) for start, end in merged)
+    return round(min(1.0, covered / duration_seconds), 4)
+
+def _coverage_metrics(row: DBVideoInspirationJob, db: Session) -> tuple[dict[str, Any], list[str], str]:
+    duration = float(row.source_duration_seconds or 0.0)
+    shots = _shots_for_job(row.id, db)
+    transcript_segments = [segment for segment in _transcript_segments_for_job(row.id, db) if segment.source != "user_edited"]
+    audio_events = _audio_events_for_job(row.id, db)
+    beats = _retention_beats_for_job(row.id, db)
+    visual_described = [shot for shot in shots if (shot.visual_description_vi or "").strip()]
+    metrics = {
+        "duration_seconds": duration,
+        "shot_count": len(shots),
+        "keyframe_count": len(_frames_for_job(row.id, db)),
+        "transcript_segment_count": len(transcript_segments),
+        "audio_event_count": len(audio_events),
+        "on_screen_text_event_count": len(_text_events_for_job(row.id, db)),
+        "content_retention_beat_count": len(beats),
+        "shot_coverage_ratio": _interval_coverage([(shot.start_seconds, shot.end_seconds) for shot in shots], duration),
+        "visual_description_coverage_ratio": _interval_coverage(
+            [(shot.start_seconds, shot.end_seconds) for shot in visual_described],
+            duration,
+        ),
+        "transcript_coverage_ratio": _interval_coverage(
+            [(segment.start_seconds, segment.end_seconds) for segment in transcript_segments],
+            duration,
+        ),
+        "audio_event_coverage_ratio": _interval_coverage(
+            [(event.start_seconds, event.end_seconds) for event in audio_events],
+            duration,
+        ),
+        "retention_beat_coverage_ratio": _interval_coverage(
+            [(beat.start_seconds, beat.end_seconds) for beat in beats],
+            duration,
+        ),
+    }
+    limitations: list[str] = []
+    if not shots:
+        limitations.append("Chưa phát hiện được shot timeline.")
+    if metrics["visual_description_coverage_ratio"] < 0.75:
+        limitations.append("Mô tả hình ảnh chưa phủ đủ thời lượng video.")
+    if not transcript_segments:
+        limitations.append("Transcript trống hoặc video không có lời nói nhận diện được.")
+    if not audio_events:
+        limitations.append("Chưa có timeline âm thanh độc lập.")
+    if not beats:
+        limitations.append("Chưa có beat retention dự đoán.")
+    if metrics["shot_coverage_ratio"] >= 0.9 and metrics["visual_description_coverage_ratio"] >= 0.75 and audio_events and beats and transcript_segments:
+        completeness = "full"
+    elif shots or transcript_segments or audio_events or beats:
+        completeness = "partial"
+    else:
+        completeness = "insufficient"
+    metrics["completion_label_vi"] = {
+        "full": "Đầy đủ",
+        "partial": "Một phần",
+        "insufficient": "Thiếu dữ liệu",
+    }[completeness]
+    return metrics, limitations, completeness
+
+def _build_analysis_package(row: DBVideoInspirationJob, db: Session) -> dict[str, Any]:
+    coverage, limitations, completeness = _coverage_metrics(row, db)
+    analysis = row.analysis_json or {}
+    package = {
+        "schema_version": ANALYSIS_SCHEMA_VERSION,
+        "job_id": row.id,
+        "source_metadata": {
+            "source_type": row.source_type,
+            "source_platform": row.source_platform,
+            "original_filename": row.original_filename,
+            "duration_seconds": row.source_duration_seconds,
+            "target_language": row.target_language,
+            "analysis_mode": row.analysis_mode,
+        },
+        "shots": [
+            {
+                "id": shot.id,
+                "order": shot.shot_order,
+                "start_seconds": shot.start_seconds,
+                "end_seconds": shot.end_seconds,
+                "duration_seconds": shot.duration_seconds,
+                "keyframe_ids": shot.keyframe_ids_json or [],
+                "visual_description_vi": shot.visual_description_vi,
+                "subjects": shot.subjects_json,
+                "setting": shot.setting_json,
+                "camera": shot.camera_json,
+                "subject_motion": shot.subject_motion_json,
+                "transition_in": shot.transition_in,
+                "transition_out": shot.transition_out,
+                "on_screen_text": shot.on_screen_text_json or [],
+                "confidence": shot.confidence_json or {},
+                "limitations": shot.limitations_json or [],
+            }
+            for shot in _shots_for_job(row.id, db)
+        ],
+        "transcript_segments": [
+            {
+                "id": segment.id,
+                "order": segment.segment_order,
+                "start_seconds": segment.start_seconds,
+                "end_seconds": segment.end_seconds,
+                "text": segment.text,
+                "raw_text": segment.raw_text,
+                "language": segment.language,
+                "speaker_label": segment.speaker_label,
+                "source": segment.source,
+                "timestamp_precision": segment.timestamp_precision,
+                "confidence": segment.confidence,
+                "shot_ids": segment.shot_ids_json or [],
+            }
+            for segment in _transcript_segments_for_job(row.id, db)
+        ],
+        "audio_events": [
+            {
+                "id": event.id,
+                "order": event.event_order,
+                "event_type": event.event_type,
+                "start_seconds": event.start_seconds,
+                "end_seconds": event.end_seconds,
+                "description_vi": event.description_vi,
+                "confidence": event.confidence,
+                "technical_metadata": event.technical_metadata_json or {},
+                "shot_ids": event.shot_ids_json or [],
+                "transcript_segment_ids": event.transcript_segment_ids_json or [],
+            }
+            for event in _audio_events_for_job(row.id, db)
+        ],
+        "on_screen_text_events": [
+            {
+                "id": event.id,
+                "shot_id": event.shot_id,
+                "start_seconds": event.start_seconds,
+                "end_seconds": event.end_seconds,
+                "text": event.text,
+                "language": event.language,
+                "role": event.role,
+                "region": event.region_json,
+                "confidence": event.confidence,
+                "source": event.source,
+            }
+            for event in _text_events_for_job(row.id, db)
+        ],
+        "content_retention_beats": [
+            {
+                "id": beat.id,
+                "order": beat.beat_order,
+                "start_seconds": beat.start_seconds,
+                "end_seconds": beat.end_seconds,
+                "role": beat.role,
+                "viewer_question_before": beat.viewer_question_before,
+                "content_promise": beat.content_promise,
+                "new_information": beat.new_information,
+                "emotional_or_stakes_change": beat.emotional_or_stakes_change,
+                "question_answered": beat.question_answered,
+                "new_open_loop": beat.new_open_loop,
+                "micro_payoff": beat.micro_payoff,
+                "why_continue": beat.why_continue,
+                "drop_off_risks": beat.drop_off_risks_json or [],
+                "evidence_refs": beat.evidence_refs_json or [],
+                "confidence": beat.confidence,
+            }
+            for beat in _retention_beats_for_job(row.id, db)
+        ],
+        "hook_analysis": analysis.get("hook_analysis") or analysis.get("hook_vi"),
+        "story_structure": analysis.get("story_structure") or analysis.get("structure_vi"),
+        "visual_grammar": analysis.get("visual_grammar") or analysis.get("visual_rhythm_vi"),
+        "audio_grammar": analysis.get("audio_grammar"),
+        "strengths": analysis.get("strengths_vi") or [],
+        "weaknesses": analysis.get("weaknesses_vi") or [],
+        "rewrite_opportunities": analysis.get("rewrite_opportunities_vi") or [],
+        "originality_boundaries": analysis.get("originality_boundaries") or [],
+        "limitations": [*limitations, *(_as_list(analysis.get("limitations")))],
+        "coverage_metrics": coverage,
+        "retention_source": "predicted_from_content",
+        "analysis_completeness": completeness,
+        "created_at": _now().isoformat(),
+    }
+    package_path = _job_dir(row.id) / "analysis" / "video-analysis-package-v1.json"
+    package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2), encoding="utf-8")
+    row.analysis_schema_version = ANALYSIS_SCHEMA_VERSION
+    row.analysis_package_json = package
+    row.analysis_package_path = config.to_storage_path(package_path)
+    row.coverage_metrics_json = coverage
+    row.limitations_json = package["limitations"]
+    row.retention_source = "predicted_from_content"
+    row.analysis_completeness = completeness
+    row.updated_at = _now()
+    db.commit()
+    return package
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
 async def analyze_job(
     job_id: str,
     data: models.VideoInspirationAnalyzeRequest,
     db: Session,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+    stt_runner: Callable[[Callable[[], Awaitable[Any]]], Awaitable[Any]] | None = None,
 ) -> models.VideoInspirationJobResponse | None:
     row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
     if row is None:
         return None
     try:
-        _set_job_state(row, db, status="analyzing", step="extract_audio", progress=0.16)
-        audio_path = _extract_audio(row)
+        _ensure_not_cancelled(cancel_requested)
+        row.analysis_schema_version = ANALYSIS_SCHEMA_VERSION
+        row.analysis_mode = _analysis_mode(data.analysis_mode)
+        row.analysis_package_json = None
+        row.analysis_package_path = None
+        row.coverage_metrics_json = None
+        row.limitations_json = None
+        row.retention_source = "predicted_from_content"
+        row.analysis_completeness = "not_started"
         db.commit()
+        _set_job_state(row, db, status="analyzing", step="extract_audio", progress=0.16)
+        audio_path = await asyncio.to_thread(_extract_audio, row)
+        db.commit()
+        _ensure_not_cancelled(cancel_requested)
 
         _set_job_state(row, db, step="transcribe", progress=0.30)
-        transcript, model_size = await _transcribe_audio(audio_path, model_size=data.stt_model)
+        setattr(_transcribe_audio, "last_segments", None)
+
+        async def transcribe() -> tuple[str, str | None]:
+            return await _transcribe_audio(audio_path, model_size=data.stt_model)
+
+        if stt_runner is not None:
+            transcript, model_size = await stt_runner(transcribe)
+        else:
+            transcript, model_size = await transcribe()
+        _ensure_not_cancelled(cancel_requested)
+        transcript_segments_payload = getattr(_transcribe_audio, "last_segments", None)
+        if not transcript_segments_payload and transcript.strip():
+            transcript_segments_payload = [
+                {
+                    "segment_order": 1,
+                    "start_seconds": 0.0,
+                    "end_seconds": float(row.source_duration_seconds or _audio_duration_seconds(audio_path) or 0.0),
+                    "text": transcript,
+                    "raw_text": transcript,
+                    "timestamp_precision": "file",
+                    "source": "stt_raw",
+                }
+            ]
         row.transcript_text = transcript
         row.transcript_language = None
         row.transcript_status = "empty" if not transcript.strip() else "completed"
@@ -1498,32 +2776,49 @@ async def analyze_job(
         db.commit()
 
         _set_job_state(row, db, step="extract_frames", progress=0.48)
-        frames = _extract_frames(row, db)
+        frames = await asyncio.to_thread(_extract_frames, row, db)
+        _ensure_not_cancelled(cancel_requested)
+        transcript_segments = _save_transcript_segments(row, transcript_segments_payload, db)
+        _save_audio_events(row, audio_path, transcript_segments, db)
 
         _set_job_state(row, db, step="visual_analysis", progress=0.62)
-        ready, message, error_code = _provider_ready(db)
+        ready, message, error_code = await asyncio.to_thread(_provider_ready, db)
         if not ready:
             if not data.allow_audio_only:
                 raise VideoInspirationError(
                     f"Chưa phân tích được hình ảnh: {message}",
                     error_code=error_code or "VIDEO_INSPIRATION_VISION_PROVIDER_REQUIRED",
-                )
+            )
             row.visual_summary = "Chưa phân tích hình ảnh vì công cụ AI/vision chưa sẵn sàng. Phần sau chỉ dựa trên transcript và frame đã trích."
         elif frames:
-            visual_payload = _run_structured_ai(db, _visual_analysis_prompt(frames), VISUAL_SCHEMA)
+            with _structured_ai_context(row.id, "video_inspiration_visual_analysis"):
+                visual_payload = await _run_structured_ai_in_thread(
+                    db,
+                    _visual_analysis_prompt(frames),
+                    VISUAL_SCHEMA,
+                )
+            _ensure_not_cancelled(cancel_requested)
             _apply_visual_payload(row, frames, visual_payload, db)
         else:
             row.visual_summary = "Không trích được frame đại diện từ video."
             db.commit()
 
         _set_job_state(row, db, step="content_analysis", progress=0.78)
-        ready, message, error_code = _provider_ready(db)
+        ready, message, error_code = await asyncio.to_thread(_provider_ready, db)
         if not ready:
             raise VideoInspirationError(
                 f"Chưa phân tích được nội dung: {message}",
                 error_code=error_code or "VIDEO_INSPIRATION_AI_PROVIDER_REQUIRED",
             )
-        row.analysis_json = _run_structured_ai(db, _analysis_prompt(row), ANALYSIS_SCHEMA)
+        with _structured_ai_context(row.id, "video_inspiration_content_analysis"):
+            row.analysis_json = await _run_structured_ai_in_thread(
+                db,
+                _analysis_prompt(row, db),
+                ANALYSIS_SCHEMA,
+            )
+        _ensure_not_cancelled(cancel_requested)
+        _save_retention_beats(row, row.analysis_json or {}, db)
+        _build_analysis_package(row, db)
         row.status = "analyzed"
         row.current_step = "completed"
         row.progress = 0.88
@@ -1531,6 +2826,16 @@ async def analyze_job(
         row.error_code = None
         row.updated_at = _now()
         db.commit()
+    except VideoInspirationCancelledError as exc:
+        _set_job_state(
+            row,
+            db,
+            status="cancelled",
+            step="cancelled",
+            progress=float(row.progress or 0.0),
+            failure_reason=str(exc),
+            error_code=exc.error_code,
+        )
     except Exception as exc:
         _fail_job(row, db, exc)
         if isinstance(exc, VideoInspirationError):
@@ -1545,12 +2850,101 @@ def update_transcript(job_id: str, data: models.VideoInspirationTranscriptUpdate
     row.transcript_text = data.transcript_text.strip()
     row.transcript_status = "empty" if not row.transcript_text else "completed"
     row.analysis_json = None
+    row.analysis_package_json = None
+    row.coverage_metrics_json = None
+    row.limitations_json = None
+    row.analysis_completeness = "not_started"
     row.rewritten_script = None
     row.status = "transcript_edited"
     row.current_step = "source_ready"
     row.progress = max(float(row.progress or 0.0), 0.45)
     row.failure_reason = None
     row.error_code = None
+    row.updated_at = _now()
+    _save_user_transcript_edit(row, row.transcript_text or "", db)
+    db.commit()
+    return _job_response(row, db)
+
+def update_transcript_segment(
+    job_id: str,
+    segment_id: str,
+    data: models.VideoInspirationTranscriptSegmentUpdate,
+    db: Session,
+) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    source_segment = (
+        db.query(DBVideoInspirationTranscriptSegment)
+        .filter(
+            DBVideoInspirationTranscriptSegment.job_id == job_id,
+            DBVideoInspirationTranscriptSegment.id == segment_id,
+        )
+        .first()
+    )
+    if source_segment is None:
+        raise VideoInspirationError("Không tìm thấy transcript segment.", error_code="VIDEO_INSPIRATION_SEGMENT_NOT_FOUND", status_code=404)
+    edited = DBVideoInspirationTranscriptSegment(
+        id=str(uuid.uuid4()),
+        job_id=job_id,
+        segment_order=source_segment.segment_order,
+        start_seconds=source_segment.start_seconds,
+        end_seconds=source_segment.end_seconds,
+        text=data.text.strip(),
+        raw_text=source_segment.raw_text or source_segment.text,
+        language=source_segment.language,
+        speaker_label=(data.speaker_label or source_segment.speaker_label or "").strip() or None,
+        source="user_edited",
+        timestamp_precision=source_segment.timestamp_precision,
+        confidence=None,
+        shot_ids_json=source_segment.shot_ids_json,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    db.add(edited)
+    row.transcript_text = "\n".join(
+        segment.text
+        for segment in _transcript_segments_for_job(job_id, db)
+        if segment.id != source_segment.id and segment.source != "user_edited"
+    ).strip()
+    row.transcript_text = "\n".join(part for part in (row.transcript_text, edited.text) if part).strip()
+    row.analysis_json = None
+    row.analysis_package_json = None
+    row.coverage_metrics_json = None
+    row.limitations_json = None
+    row.analysis_completeness = "not_started"
+    row.status = "transcript_edited"
+    row.updated_at = _now()
+    db.commit()
+    return _job_response(row, db)
+
+def update_text_event(
+    job_id: str,
+    event_id: str,
+    data: models.VideoInspirationTextEventUpdate,
+    db: Session,
+) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    event = (
+        db.query(DBVideoInspirationTextEvent)
+        .filter(DBVideoInspirationTextEvent.job_id == job_id, DBVideoInspirationTextEvent.id == event_id)
+        .first()
+    )
+    if event is None:
+        raise VideoInspirationError("Không tìm thấy chữ trên màn hình.", error_code="VIDEO_INSPIRATION_TEXT_EVENT_NOT_FOUND", status_code=404)
+    event.text = data.text.strip()
+    if data.language is not None:
+        event.language = data.language.strip() or None
+    if data.role is not None:
+        event.role = data.role.strip() or "unknown"
+    event.source = "user_edited"
+    event.updated_at = _now()
+    row.analysis_package_json = None
+    row.coverage_metrics_json = None
+    row.limitations_json = None
+    row.analysis_completeness = "not_started"
     row.updated_at = _now()
     db.commit()
     return _job_response(row, db)
@@ -1576,11 +2970,18 @@ def update_direction(job_id: str, data: models.VideoInspirationDirectionUpdate, 
     db.commit()
     return _job_response(row, db)
 
-def rewrite_job(job_id: str, data: models.VideoInspirationRewriteRequest, db: Session) -> models.VideoInspirationJobResponse | None:
+def rewrite_job(
+    job_id: str,
+    data: models.VideoInspirationRewriteRequest,
+    db: Session,
+    *,
+    cancel_requested: Callable[[], bool] | None = None,
+) -> models.VideoInspirationJobResponse | None:
     row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
     if row is None:
         return None
     try:
+        _ensure_not_cancelled(cancel_requested)
         if data.target_language:
             row.target_language = _validate_target_language(data.target_language)
         if data.user_direction is not None:
@@ -1594,29 +2995,37 @@ def rewrite_job(job_id: str, data: models.VideoInspirationRewriteRequest, db: Se
                 error_code=error_code or "VIDEO_INSPIRATION_AI_PROVIDER_REQUIRED",
             )
         _set_job_state(row, db, status="rewriting", step="rewrite_brief", progress=0.91)
-        creative_brief = _run_structured_ai(db, _creative_brief_prompt(row), CREATIVE_BRIEF_SCHEMA)
+        with _structured_ai_context(row.id, "video_inspiration_rewrite_brief"):
+            creative_brief = _run_structured_ai(db, _creative_brief_prompt(row), CREATIVE_BRIEF_SCHEMA)
+        _ensure_not_cancelled(cancel_requested)
 
         _set_job_state(row, db, status="rewriting", step="rewrite_candidates", progress=0.94)
-        candidates = _run_structured_ai(
-            db,
-            _rewrite_candidates_prompt(row, creative_brief),
-            REWRITE_CANDIDATES_SCHEMA,
-        )
+        with _structured_ai_context(row.id, "video_inspiration_rewrite_candidates"):
+            candidates = _run_structured_ai(
+                db,
+                _rewrite_candidates_prompt(row, creative_brief),
+                REWRITE_CANDIDATES_SCHEMA,
+            )
+        _ensure_not_cancelled(cancel_requested)
         _validate_candidate_payload(candidates)
 
         _set_job_state(row, db, status="rewriting", step="rewrite_review", progress=0.97)
-        review = _run_structured_ai(
-            db,
-            _rewrite_review_prompt(row, creative_brief, candidates),
-            REWRITE_REVIEW_SCHEMA,
-        )
+        with _structured_ai_context(row.id, "video_inspiration_rewrite_review"):
+            review = _run_structured_ai(
+                db,
+                _rewrite_review_prompt(row, creative_brief, candidates),
+                REWRITE_REVIEW_SCHEMA,
+            )
+        _ensure_not_cancelled(cancel_requested)
 
         _set_job_state(row, db, status="rewriting", step="rewrite_synthesis", progress=0.99)
-        payload = _run_structured_ai(
-            db,
-            _rewrite_synthesis_prompt(row, creative_brief, candidates, review),
-            REWRITE_SCHEMA,
-        )
+        with _structured_ai_context(row.id, "video_inspiration_rewrite_synthesis"):
+            payload = _run_structured_ai(
+                db,
+                _rewrite_synthesis_prompt(row, creative_brief, candidates, review),
+                REWRITE_SCHEMA,
+            )
+        _ensure_not_cancelled(cancel_requested)
         _validate_optimized_rewrite_payload(payload)
 
         row.rewritten_script = _format_optimized_script(payload)
@@ -1637,6 +3046,16 @@ def rewrite_job(job_id: str, data: models.VideoInspirationRewriteRequest, db: Se
         row.error_code = None
         row.updated_at = _now()
         db.commit()
+    except VideoInspirationCancelledError as exc:
+        _set_job_state(
+            row,
+            db,
+            status="cancelled",
+            step="cancelled",
+            progress=float(row.progress or 0.0),
+            failure_reason=str(exc),
+            error_code=exc.error_code,
+        )
     except Exception as exc:
         _fail_job(row, db, exc)
         if isinstance(exc, VideoInspirationError):
@@ -1648,6 +3067,7 @@ def update_script(job_id: str, data: models.VideoInspirationScriptUpdate, db: Se
     row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
     if row is None:
         return None
+    previous_script = (row.rewritten_script or "").strip()
     row.rewritten_script = data.rewritten_script.strip()
     if data.script_title is not None:
         row.script_title = data.script_title.strip() or row.script_title
@@ -1661,7 +3081,15 @@ def update_script(job_id: str, data: models.VideoInspirationScriptUpdate, db: Se
     row.failure_reason = None
     row.error_code = None
     row.updated_at = _now()
-    db.commit()
+    if previous_script and previous_script != row.rewritten_script:
+        video_project_memory.mark_handoffs_stale_for_job(
+            row.id,
+            db,
+            changed_scope="narration",
+            reason_vi="Ká»‹ch báº£n Ä‘Ã­ch Ä‘Ã£ Ä‘á»•i; cáº§n táº¡o láº¡i voice, subtitle vÃ  package liÃªn quan.",
+        )
+    else:
+        db.commit()
     return _job_response(row, db)
 
 def _source_block(block_type: str, content: Any) -> models.VideoSourceBlockDraft | None:
@@ -1705,12 +3133,17 @@ async def create_ai_video_project(
         return None
     if not (row.rewritten_script or "").strip():
         raise VideoInspirationError("Cần có kịch bản tối ưu trước khi chuyển sang AI Video.", error_code="VIDEO_INSPIRATION_SCRIPT_REQUIRED")
+    if not row.analysis_package_json:
+        raise VideoInspirationError("Cần có gói phân tích timeline trước khi chuyển sang AI Video.", error_code="VIDEO_INSPIRATION_ANALYSIS_PACKAGE_REQUIRED")
     try:
         _set_job_state(row, db, status="handoff", step="handoff", progress=1.0)
+        handoff = video_project_memory.create_or_update_handoff(row, db, status="approved")
+        handoff_source_blocks = video_project_memory.source_blocks_from_payload(handoff.payload_json)
         project = video_projects.create_project(
             models.VideoProjectCreate(
-                title=row.script_title or "Video từ cảm hứng",
+                title=_project_title_from_job(row),
                 topic=_truncate(row.big_idea or row.rewritten_script, 4000) or "Phát triển video từ kịch bản cảm hứng",
+                series_id=data.series_id or None,
                 language="vi",
                 target_language=row.target_language,
                 phase="phase2",
@@ -1719,13 +3152,19 @@ async def create_ai_video_project(
                     2000,
                 ) or None,
                 voice_profile_id=data.voice_profile_id or None,
-                source_blocks=_project_source_blocks(row),
+                source_blocks=handoff_source_blocks or _project_source_blocks(row),
                 video_purpose="custom",
                 dialogue_mode="voiceover",
                 narration_density="balanced",
             ),
             db,
         )
+        project_row = db.query(DBVideoProject).filter(DBVideoProject.id == project.id).first()
+        if project_row is not None:
+            video_project_memory.create_project_memory_from_handoff(project_row, handoff, db)
+            video_project_memory.plan_target_timeline(project_row, handoff, db)
+            video_project_memory.record_project_dependency(project_row.id, "video_inspiration_handoff", handoff.id, int(handoff.revision or 1), db)
+            video_project_memory.mark_handoff_consumed(handoff, project_row.id, db)
         auto_run = None
         if data.start_full_materials:
             auto_run = await video_auto_runs.start_auto_run(

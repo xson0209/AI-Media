@@ -10,7 +10,7 @@ web_dir := "web"
 venv := backend_dir / "venv"
 backend_host := env_var_or_default("VOICEBOX_BACKEND_HOST", "127.0.0.1")
 backend_port := env_var_or_default("VOICEBOX_BACKEND_PORT", env_var_or_default("VOICEBOX_PORT", "17493"))
-frontend_port := env_var_or_default("VOICEBOX_FRONTEND_PORT", "5173")
+frontend_port := env_var_or_default("VOICEBOX_FRONTEND_PORT", "4000")
 
 # Platform-aware paths
 venv_bin := if os() == "windows" { venv / "Scripts" } else { venv / "bin" }
@@ -118,7 +118,7 @@ dev: _ensure-venv _ensure-sidecar
         echo "Backend already running on http://{{ backend_host }}:{{ backend_port }}"
     else
         echo "Starting backend on http://{{ backend_host }}:{{ backend_port }} ..."
-        {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }} &
+        VOICEBOX_FRONTEND_PORT={{ frontend_port }} {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }} &
         backend_pid=$!
         sleep 2
     fi
@@ -130,7 +130,7 @@ dev: _ensure-venv _ensure-sidecar
 
 [windows]
 dev: _ensure-venv _ensure-sidecar
-    $backendJob = $null; \
+    $backendJob = $null; $env:VOICEBOX_FRONTEND_PORT="{{ frontend_port }}"; \
     try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:{{ backend_port }}/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop; Write-Host "Backend already running on http://{{ backend_host }}:{{ backend_port }}" } catch { \
         Write-Host "Starting backend on http://{{ backend_host }}:{{ backend_port }} ..."; \
         $backendJob = Start-Process -PassThru -NoNewWindow -FilePath "{{ python }}" -ArgumentList "-m","uvicorn","backend.main:app","--reload","--host","{{ backend_host }}","--port","{{ backend_port }}"; \
@@ -142,11 +142,11 @@ dev: _ensure-venv _ensure-sidecar
 # Start backend only
 [unix]
 dev-backend: _ensure-venv
-    {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }}
+    VOICEBOX_FRONTEND_PORT={{ frontend_port }} {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }}
 
 [windows]
 dev-backend: _ensure-venv
-    & "{{ python }}" -m uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }}
+    $env:VOICEBOX_FRONTEND_PORT="{{ frontend_port }}"; & "{{ python }}" -m uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }}
 
 # Start Tauri desktop app only (backend must be running separately)
 [unix]
@@ -168,7 +168,7 @@ dev-web: _ensure-venv
         echo "Backend already running on http://{{ backend_host }}:{{ backend_port }}"
     else
         echo "Starting backend on http://{{ backend_host }}:{{ backend_port }} ..."
-        {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }} &
+        VOICEBOX_FRONTEND_PORT={{ frontend_port }} {{ venv_bin }}/uvicorn backend.main:app --reload --host {{ backend_host }} --port {{ backend_port }} &
         backend_pid=$!
         sleep 2
     fi
@@ -179,7 +179,7 @@ dev-web: _ensure-venv
 
 [windows]
 dev-web: _ensure-venv
-    $backendJob = $null; \
+    $backendJob = $null; $env:VOICEBOX_FRONTEND_PORT="{{ frontend_port }}"; \
     try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:{{ backend_port }}/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop; Write-Host "Backend already running on http://{{ backend_host }}:{{ backend_port }}" } catch { \
         Write-Host "Starting backend on http://{{ backend_host }}:{{ backend_port }} ..."; \
         $backendJob = Start-Process -PassThru -NoNewWindow -FilePath "{{ python }}" -ArgumentList "-m","uvicorn","backend.main:app","--reload","--host","{{ backend_host }}","--port","{{ backend_port }}"; \

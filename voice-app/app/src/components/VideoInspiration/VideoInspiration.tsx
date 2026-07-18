@@ -3,8 +3,10 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  CircleStop,
   FileText,
   FileVideo,
+  Film,
   Image as ImageIcon,
   Languages,
   Link as LinkIcon,
@@ -13,6 +15,7 @@ import {
   Save,
   Sparkles,
   Upload,
+  Volume2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -23,10 +26,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { AI_VIDEO_DRAFT_STORAGE_KEY, type AIVideoFormDraft } from '@/lib/aiVideoDraft';
 import { apiClient } from '@/lib/api/client';
-import type { VideoInspirationJobResponse, VideoInspirationTargetLanguage } from '@/lib/api/types';
+import { ALL_LANGUAGES, LANGUAGE_OPTIONS } from '@/lib/constants/languages';
+import { useProfiles } from '@/lib/hooks/useProfiles';
+import type {
+  VideoInspirationAnalysisMode,
+  VideoInspirationHandoffResponse,
+  VideoInspirationJobResponse,
+  VideoInspirationTargetLanguage,
+} from '@/lib/api/types';
 import { cn } from '@/lib/utils/cn';
 
 const STEP_LABELS: Record<string, string> = {
+  queued: 'Đang chờ đến lượt xử lý',
   source_ready: 'Đã nhận video',
   downloading: 'Đang lấy video từ link',
   extract_audio: 'Đang tách lời nói',
@@ -39,13 +50,17 @@ const STEP_LABELS: Record<string, string> = {
   rewrite_candidates: 'Đang tạo các bản nháp',
   rewrite_review: 'Đang chấm điểm bản nháp',
   rewrite_synthesis: 'Đang tổng hợp bản cuối',
-  handoff: 'Đang chuyển sang AI Video',
+  handoff: 'Đang chuyển sang Video AI',
+  retrying: 'Đang xếp lịch chạy lại',
+  cancelling: 'Đang hủy tác vụ',
+  cancelled: 'Đã hủy',
   completed: 'Hoàn tất',
   failed: 'Đã lỗi',
 };
 
 const STATUS_LABELS: Record<string, string> = {
   uploaded: 'Đã tải lên',
+  queued: 'Đang xếp hàng',
   analyzing: 'Đang phân tích',
   analyzed: 'Đã phân tích',
   transcript_edited: 'Đã sửa transcript',
@@ -53,9 +68,21 @@ const STATUS_LABELS: Record<string, string> = {
   rewriting: 'Đang viết lại',
   rewritten: 'Đã có kịch bản tối ưu',
   handoff: 'Đang chuyển tiếp',
-  ai_video_ready: 'Đã chuyển sang AI Video',
+  retrying: 'Đang chạy lại',
+  cancelling: 'Đang hủy',
+  cancelled: 'Đã hủy',
+  ai_video_ready: 'Đã chuyển sang Video AI',
   failed: 'Có lỗi',
 };
+
+const ACTIVE_JOB_STATUSES = new Set([
+  'queued',
+  'analyzing',
+  'rewriting',
+  'handoff',
+  'retrying',
+  'cancelling',
+]);
 
 const ANALYSIS_LABELS: Record<string, string> = {
   main_idea_vi: 'Ý chính',
@@ -77,7 +104,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 function languageLabel(language: VideoInspirationTargetLanguage): string {
-  return language === 'vi' ? 'Tiếng Việt' : 'Tiếng Anh';
+  return ALL_LANGUAGES[language] ?? String(language);
 }
 
 function jobTitle(job: VideoInspirationJobResponse): string {
@@ -90,12 +117,16 @@ function jobTitle(job: VideoInspirationJobResponse): string {
 
 function statusLabel(job?: VideoInspirationJobResponse | null): string {
   if (!job) return 'Chưa có video';
-  return STATUS_LABELS[job.status] || job.status;
+  if (isJobStale(job)) return 'Bị gián đoạn';
+  return STATUS_LABELS[job.status] || 'Đang xử lý';
 }
 
 function stepLabel(job?: VideoInspirationJobResponse | null): string {
   if (!job) return 'Hãy upload MP4 hoặc dán link công khai';
-  return STEP_LABELS[job.current_step] || job.current_step || statusLabel(job);
+  if (isJobStale(job)) {
+    return job.stale_reason || 'Job bị gián đoạn quá lâu. Bấm chạy lại phân tích để tiếp tục.';
+  }
+  return STEP_LABELS[job.current_step] || STATUS_LABELS[job.status] || 'Hệ thống đang xử lý job này';
 }
 
 function progressValue(job?: VideoInspirationJobResponse | null): number {
@@ -105,7 +136,20 @@ function progressValue(job?: VideoInspirationJobResponse | null): number {
 }
 
 function isJobActive(job?: VideoInspirationJobResponse | null): boolean {
-  return !!job && ['analyzing', 'rewriting', 'handoff'].includes(job.status);
+  return !!job && !isJobStale(job) && ACTIVE_JOB_STATUSES.has(job.status);
+}
+
+function isJobStale(job?: VideoInspirationJobResponse | null): boolean {
+  return !!job?.is_stale;
+}
+
+function handoffStatusLabel(status: string | null | undefined): string {
+  if (status === 'ready') return 'Sẵn sàng';
+  if (status === 'created') return 'Đã tạo';
+  if (status === 'project_created') return 'Đã tạo project';
+  if (status === 'failed') return 'Có lỗi';
+  if (status === 'cancelled') return 'Đã hủy';
+  return 'Đã lưu';
 }
 
 function formatDate(value: string): string {
@@ -121,10 +165,63 @@ function formatDate(value: string): string {
   }
 }
 
+function formatSeconds(value: number | null | undefined): string {
+  const seconds = Number(value || 0);
+  if (!Number.isFinite(seconds)) return '0.0s';
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds - minutes * 60;
+  return minutes > 0 ? `${minutes}:${rest.toFixed(1).padStart(4, '0')}` : `${rest.toFixed(1)}s`;
+}
+
+function percentMetric(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0%';
+  return `${Math.round(Math.max(0, Math.min(1, numeric)) * 100)}%`;
+}
+
+function completionLabel(value?: string | null): string {
+  if (value === 'full') return 'Đầy đủ';
+  if (value === 'partial') return 'Một phần';
+  if (value === 'insufficient') return 'Thiếu dữ liệu';
+  return 'Chưa chạy';
+}
+
+function analysisModeLabel(value: VideoInspirationAnalysisMode): string {
+  return value === 'high_quality' ? 'Chất lượng cao' : 'Nhanh';
+}
+
 function formatAnalysisValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(String).join('\n');
   if (value && typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value ?? '');
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function structuredPreview(value: unknown, limit = 1400): string {
+  const format = (item: unknown): string => {
+    if (Array.isArray(item)) {
+      return item
+        .slice(0, 8)
+        .map((entry, index) => `${index + 1}. ${format(entry)}`)
+        .join('\n');
+    }
+    if (item && typeof item === 'object') {
+      return Object.entries(item as Record<string, unknown>)
+        .filter(([, nested]) => nested !== null && nested !== undefined && String(nested).trim() !== '')
+        .slice(0, 10)
+        .map(([key, nested]) => `${key}: ${format(nested)}`)
+        .join('\n');
+    }
+    return String(item ?? '').trim();
+  };
+  const text = format(value).trim();
+  if (!text) return 'ChÆ°a cÃ³ dá»¯ liá»‡u.';
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}...` : text;
 }
 
 function analysisEntries(job?: VideoInspirationJobResponse | null) {
@@ -348,17 +445,17 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
           ['Lưu ý chất lượng', analysisText(job, 'notes_vi')],
           [
             'Nguyên tắc',
-            'Không paraphrase transcript. Không tự chạy AI Video trước khi người dùng chọn thị trường, ngôn ngữ, thời lượng và cách chạy.',
+            'Không diễn giải lại transcript. Không tự chạy Video AI trước khi người dùng chọn thị trường, ngôn ngữ, thời lượng và cách chạy.',
           ],
           [
             'Cấu hình',
-            'Không tự quyết định thị trường, ngôn ngữ final, thời lượng, tỷ lệ, voice hoặc chế độ chạy; người dùng sẽ chọn trong AI Video.',
+            'Không tự quyết định thị trường, ngôn ngữ cuối, thời lượng, tỷ lệ, giọng đọc hoặc chế độ chạy; người dùng sẽ chọn trong Video AI.',
           ],
         ]),
       },
     ],
     notice:
-      'Đã đưa dữ liệu từ Video Inspiration vào form AI Video. Hãy chọn thị trường, ngôn ngữ, thời lượng và cách chạy trước khi tạo dự án.',
+      'Đã đưa dữ liệu từ Video Inspiration vào biểu mẫu Video AI. Mặc định là tạo câu lệnh + giọng đọc + phụ đề, chưa chạy Veo/MP4. Hãy chọn hồ sơ giọng và ngôn ngữ trước khi tạo dự án.',
   };
 }
 
@@ -370,9 +467,13 @@ function mutationError(...errors: unknown[]): string | null {
 function useVideoInspirationMutations(setSelectedJobId: (jobId: string) => void) {
   const queryClient = useQueryClient();
 
-  const rememberJob = (job: VideoInspirationJobResponse) => {
+  const cacheJob = (job: VideoInspirationJobResponse) => {
     queryClient.setQueryData(['video-inspiration', 'job', job.id], job);
     queryClient.invalidateQueries({ queryKey: ['video-inspiration', 'jobs'] });
+  };
+
+  const rememberJob = (job: VideoInspirationJobResponse) => {
+    cacheJob(job);
     setSelectedJobId(job.id);
   };
 
@@ -410,21 +511,50 @@ function useVideoInspirationMutations(setSelectedJobId: (jobId: string) => void)
       onSuccess: rememberJob,
     }),
     analyze: useMutation({
-      mutationFn: ({ jobId, allowAudioOnly }: { jobId: string; allowAudioOnly: boolean }) =>
-        apiClient.analyzeVideoInspirationJob(jobId, { allow_audio_only: allowAudioOnly }),
-      onSuccess: rememberJob,
+      mutationFn: ({
+        jobId,
+        allowAudioOnly,
+        analysisMode,
+      }: {
+        jobId: string;
+        allowAudioOnly: boolean;
+        analysisMode: VideoInspirationAnalysisMode;
+      }) =>
+        apiClient.analyzeVideoInspirationJob(jobId, {
+          allow_audio_only: allowAudioOnly,
+          analysis_mode: analysisMode,
+        }),
+      onSuccess: cacheJob,
     }),
     saveTranscript: useMutation({
       mutationFn: ({ jobId, text }: { jobId: string; text: string }) =>
         apiClient.updateVideoInspirationTranscript(jobId, { transcript_text: text }),
-      onSuccess: rememberJob,
+      onSuccess: cacheJob,
     }),
     saveDirection: useMutation({
       mutationFn: ({ jobId, userDirection }: { jobId: string; userDirection: string }) =>
         apiClient.updateVideoInspirationDirection(jobId, {
           user_direction: userDirection.trim() || null,
         }),
-      onSuccess: rememberJob,
+      onSuccess: cacheJob,
+    }),
+    saveTextEvent: useMutation({
+      mutationFn: ({
+        jobId,
+        eventId,
+        text,
+        role,
+      }: {
+        jobId: string;
+        eventId: string;
+        text: string;
+        role: string;
+      }) =>
+        apiClient.updateVideoInspirationTextEvent(jobId, eventId, {
+          text,
+          role: role || null,
+        }),
+      onSuccess: cacheJob,
     }),
     rewrite: useMutation({
       mutationFn: ({
@@ -440,7 +570,15 @@ function useVideoInspirationMutations(setSelectedJobId: (jobId: string) => void)
           target_language: targetLanguage,
           user_direction: userDirection,
         }),
-      onSuccess: rememberJob,
+      onSuccess: cacheJob,
+    }),
+    cancel: useMutation({
+      mutationFn: (jobId: string) => apiClient.cancelVideoInspirationJob(jobId),
+      onSuccess: cacheJob,
+    }),
+    retry: useMutation({
+      mutationFn: (jobId: string) => apiClient.retryVideoInspirationJob(jobId),
+      onSuccess: cacheJob,
     }),
     saveScript: useMutation({
       mutationFn: ({
@@ -461,22 +599,51 @@ function useVideoInspirationMutations(setSelectedJobId: (jobId: string) => void)
           script_title: scriptTitle || null,
           big_idea: bigIdea || null,
           hook: hook || null,
+      }),
+      onSuccess: cacheJob,
+    }),
+    createHandoff: useMutation({
+      mutationFn: (jobId: string) => apiClient.createVideoInspirationHandoff(jobId),
+      onSuccess: (handoff) => {
+        queryClient.invalidateQueries({ queryKey: ['video-inspiration', 'handoffs', handoff.job_id] });
+      },
+    }),
+    createProjectFromHandoff: useMutation({
+      mutationFn: ({
+        jobId,
+        voiceProfileId,
+      }: {
+        jobId: string;
+        voiceProfileId: string | null;
+      }): Promise<VideoInspirationHandoffResponse> =>
+        apiClient.createAIVideoProjectFromInspiration(jobId, {
+          start_full_materials: true,
+          mode: 'full_auto',
+          voice_profile_id: voiceProfileId,
         }),
-      onSuccess: rememberJob,
+      onSuccess: (result) => {
+        cacheJob(result.job);
+        queryClient.invalidateQueries({ queryKey: ['video-inspiration', 'handoffs', result.job.id] });
+        window.location.assign(result.ai_video_url);
+      },
     }),
   };
 }
 
 export function VideoInspiration() {
+  const { data: profiles } = useProfiles();
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [targetLanguage, setTargetLanguage] = useState<VideoInspirationTargetLanguage>('vi');
   const [sourceUrl, setSourceUrl] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [allowAudioOnly, setAllowAudioOnly] = useState(false);
+  const [analysisMode, setAnalysisMode] = useState<VideoInspirationAnalysisMode>('quick');
   const [useBrowserCookies, setUseBrowserCookies] = useState(false);
+  const [handoffVoiceProfileId, setHandoffVoiceProfileId] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const [userDirectionDraft, setUserDirectionDraft] = useState('');
   const [transcriptDraft, setTranscriptDraft] = useState('');
+  const [textEventDrafts, setTextEventDrafts] = useState<Record<string, string>>({});
   const [scriptDraft, setScriptDraft] = useState('');
   const [scriptTitleDraft, setScriptTitleDraft] = useState('');
   const [bigIdeaDraft, setBigIdeaDraft] = useState('');
@@ -499,37 +666,115 @@ export function VideoInspiration() {
     initialData: currentJobFallback || undefined,
     refetchInterval: (query) => (isJobActive(query.state.data) ? 2000 : false),
   });
+  const handoffsQuery = useQuery({
+    queryKey: ['video-inspiration', 'handoffs', selectedJobId],
+    queryFn: () => apiClient.listVideoInspirationHandoffs(selectedJobId!),
+    enabled: !!selectedJobId,
+  });
 
   const jobs = jobsQuery.data?.items ?? [];
   const currentJob = jobQuery.data ?? currentJobFallback;
-  const busy =
-    mutations.upload.isPending ||
-    mutations.fromUrl.isPending ||
-    mutations.analyze.isPending ||
-    mutations.saveTranscript.isPending ||
-    mutations.saveDirection.isPending ||
-    mutations.rewrite.isPending ||
-    mutations.saveScript.isPending ||
-    isJobActive(currentJob);
+  const isCurrentJobStale = isJobStale(currentJob);
+  const latestHandoff = handoffsQuery.data?.items[0] ?? null;
+  const latestHandoffPayload = asRecord(latestHandoff?.payload_json);
+  const currentJobId = currentJob?.id ?? null;
+  const sourceCreatePending = mutations.upload.isPending || mutations.fromUrl.isPending;
+  const analyzePendingForCurrent =
+    mutations.analyze.isPending && mutations.analyze.variables?.jobId === currentJobId;
+  const rewritePendingForCurrent =
+    mutations.rewrite.isPending && mutations.rewrite.variables?.jobId === currentJobId;
+  const saveTranscriptPendingForCurrent =
+    mutations.saveTranscript.isPending && mutations.saveTranscript.variables?.jobId === currentJobId;
+  const saveDirectionPendingForCurrent =
+    mutations.saveDirection.isPending && mutations.saveDirection.variables?.jobId === currentJobId;
+  const saveTextEventPendingForCurrent =
+    mutations.saveTextEvent.isPending && mutations.saveTextEvent.variables?.jobId === currentJobId;
+  const saveScriptPendingForCurrent =
+    mutations.saveScript.isPending && mutations.saveScript.variables?.jobId === currentJobId;
+  const createHandoffPendingForCurrent =
+    mutations.createHandoff.isPending && mutations.createHandoff.variables === currentJobId;
+  const createProjectPendingForCurrent =
+    mutations.createProjectFromHandoff.isPending &&
+    mutations.createProjectFromHandoff.variables?.jobId === currentJobId;
+  const cancelPendingForCurrent =
+    mutations.cancel.isPending && mutations.cancel.variables === currentJobId;
+  const retryPendingForCurrent = mutations.retry.isPending && mutations.retry.variables === currentJobId;
+  const currentJobMutationPending =
+    analyzePendingForCurrent ||
+    rewritePendingForCurrent ||
+    saveTranscriptPendingForCurrent ||
+    saveDirectionPendingForCurrent ||
+    saveTextEventPendingForCurrent ||
+    saveScriptPendingForCurrent ||
+    createHandoffPendingForCurrent ||
+    createProjectPendingForCurrent ||
+    cancelPendingForCurrent ||
+    retryPendingForCurrent;
+  const currentJobActive = isJobActive(currentJob);
+  const currentJobLocked = currentJobActive || currentJobMutationPending;
+  const currentJobActionError = mutationError(
+    mutations.analyze.variables?.jobId === currentJobId ? mutations.analyze.error : null,
+    mutations.saveTranscript.variables?.jobId === currentJobId
+      ? mutations.saveTranscript.error
+      : null,
+    mutations.saveDirection.variables?.jobId === currentJobId
+      ? mutations.saveDirection.error
+      : null,
+    mutations.saveTextEvent.variables?.jobId === currentJobId
+      ? mutations.saveTextEvent.error
+      : null,
+    mutations.rewrite.variables?.jobId === currentJobId ? mutations.rewrite.error : null,
+    mutations.cancel.variables === currentJobId ? mutations.cancel.error : null,
+    mutations.retry.variables === currentJobId ? mutations.retry.error : null,
+    mutations.saveScript.variables?.jobId === currentJobId ? mutations.saveScript.error : null,
+    mutations.createHandoff.variables === currentJobId ? mutations.createHandoff.error : null,
+    mutations.createProjectFromHandoff.variables?.jobId === currentJobId
+      ? mutations.createProjectFromHandoff.error
+      : null,
+  );
   const currentProgress = progressValue(currentJob);
   const entries = useMemo(() => analysisEntries(currentJob), [currentJob]);
   const optimizedPanels = useMemo(
     () => (currentJob ? optimizedRewritePanels(currentJob) : []),
     [currentJob],
   );
+  const serverUserDirection = currentJob?.user_direction || '';
+  const serverTargetLanguage = currentJob?.target_language ?? 'vi';
+  const serverAnalysisMode = currentJob?.analysis_mode === 'high_quality' ? 'high_quality' : 'quick';
+  const serverTranscript = currentJob?.transcript_text || '';
+  const serverScript = currentJob?.rewritten_script || '';
+  const serverScriptTitle = currentJob?.script_title || '';
+  const serverBigIdea = currentJob?.big_idea || '';
+  const serverHook = currentJob?.hook || '';
+  const serverTextEventsSignature = JSON.stringify(
+    (currentJob?.on_screen_text_events ?? []).map((event) => [event.id, event.text]),
+  );
+  const recommendedHandoffVoiceProfile = useMemo(() => {
+    const available = profiles ?? [];
+    return (
+      available.find((profile) => profile.language === targetLanguage) ??
+      available.find((profile) => profile.language === serverTargetLanguage) ??
+      available[0] ??
+      null
+    );
+  }, [profiles, serverTargetLanguage, targetLanguage]);
+  const effectiveHandoffVoiceProfileId =
+    handoffVoiceProfileId || recommendedHandoffVoiceProfile?.id || '';
+  const effectiveHandoffVoiceProfile =
+    profiles?.find((profile) => profile.id === effectiveHandoffVoiceProfileId) ?? null;
   const primaryError =
     localError ||
     currentJob?.failure_reason ||
+    (isCurrentJobStale
+      ? currentJob?.stale_reason || 'Job bị gián đoạn quá lâu. Bấm chạy lại phân tích để tiếp tục.'
+      : null) ||
     mutationError(
       mutations.upload.error,
       mutations.fromUrl.error,
-      mutations.analyze.error,
-      mutations.saveTranscript.error,
-      mutations.saveDirection.error,
-      mutations.rewrite.error,
-      mutations.saveScript.error,
+      currentJobActionError,
       jobQuery.error,
       jobsQuery.error,
+      handoffsQuery.error,
     );
 
   useEffect(() => {
@@ -539,24 +784,52 @@ export function VideoInspiration() {
   }, [selectedJobId, jobs]);
 
   useEffect(() => {
-    if (!currentJob) return;
-    setTranscriptDraft(currentJob.transcript_text || '');
-    setUserDirectionDraft(currentJob.user_direction || '');
-    setScriptDraft(currentJob.rewritten_script || '');
-    setScriptTitleDraft(currentJob.script_title || '');
-    setBigIdeaDraft(currentJob.big_idea || '');
-    setHookDraft(currentJob.hook || '');
-    setTargetLanguage(currentJob.target_language);
-  }, [currentJob]);
+    if (!currentJobId) return;
+    setUserDirectionDraft(serverUserDirection);
+    setTargetLanguage(serverTargetLanguage);
+    setAnalysisMode(serverAnalysisMode);
+  }, [currentJobId, serverAnalysisMode, serverTargetLanguage, serverUserDirection]);
 
-  const uploadDisabled = busy || !selectedFile;
-  const urlDisabled = busy || !sourceUrl.trim();
-  const canAnalyze = !!currentJob && !busy;
-  const canRewrite = !!currentJob?.analysis_json && !busy;
-  const canHandoff = !!currentJob?.rewritten_script?.trim() && !busy;
+  useEffect(() => {
+    if (!currentJobId) return;
+    setTranscriptDraft(serverTranscript);
+    setScriptDraft(serverScript);
+    setScriptTitleDraft(serverScriptTitle);
+    setBigIdeaDraft(serverBigIdea);
+    setHookDraft(serverHook);
+    setTextEventDrafts(Object.fromEntries(JSON.parse(serverTextEventsSignature)));
+  }, [
+    currentJobId,
+    serverBigIdea,
+    serverHook,
+    serverScript,
+    serverScriptTitle,
+    serverTextEventsSignature,
+    serverTranscript,
+  ]);
+
+  const uploadDisabled = sourceCreatePending || !selectedFile;
+  const urlDisabled = sourceCreatePending || !sourceUrl.trim();
+  const currentJobRetryable =
+    !!currentJob && (isCurrentJobStale || ['failed', 'cancelled'].includes(currentJob.status));
+  const canAnalyze = !!currentJob && !currentJobLocked && !currentJobRetryable;
+  const canRewrite = !!currentJob?.analysis_json && !currentJobLocked;
+  const canHandoff = !!currentJob?.rewritten_script?.trim() && !currentJobLocked;
+  const canCreateStructuredHandoff =
+    !!currentJob?.rewritten_script?.trim() &&
+    !!currentJob?.analysis_package_json &&
+    !currentJobLocked;
+  const canCreateProjectFromHandoff =
+    !!latestHandoff &&
+    !latestHandoff.created_project_id &&
+    !currentJobLocked &&
+    !!effectiveHandoffVoiceProfileId;
   const trimmedUserDirection = userDirectionDraft.trim();
   const directionChanged = (currentJob?.user_direction || '') !== trimmedUserDirection;
-  const canSaveDirection = !!currentJob && !busy && directionChanged;
+  const canSaveDirection = !!currentJob && !currentJobLocked && directionChanged;
+  const canCancel = !!currentJob && currentJobActive && !cancelPendingForCurrent;
+  const canRetry = currentJobRetryable && !currentJobMutationPending;
+  const analyzeButtonText = currentJob?.analysis_json ? 'Phân tích lại video' : 'Phân tích video';
 
   const handleUpload = () => {
     setLocalError(null);
@@ -659,7 +932,9 @@ export function VideoInspiration() {
                 </div>
                 <div>
                   <h2 className="text-base font-semibold">Nguồn video</h2>
-                  <p className="text-xs text-muted-foreground">MP4 hoặc link công khai</p>
+                  <p className="text-xs text-muted-foreground">
+                    MP4 hoặc link công khai · job cũ vẫn tiếp tục chạy nền
+                  </p>
                 </div>
               </div>
 
@@ -672,7 +947,7 @@ export function VideoInspiration() {
                     id="video-inspiration-file"
                     type="file"
                     accept="video/mp4,.mp4"
-                    disabled={busy}
+                    disabled={sourceCreatePending}
                     onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
                     className="h-11 cursor-pointer"
                   />
@@ -701,7 +976,7 @@ export function VideoInspiration() {
                       id="video-inspiration-url"
                       value={sourceUrl}
                       onChange={(event) => setSourceUrl(event.target.value)}
-                      disabled={busy}
+                      disabled={sourceCreatePending}
                       placeholder="Dán link công khai"
                       className="h-11"
                     />
@@ -725,7 +1000,7 @@ export function VideoInspiration() {
                     <input
                       type="checkbox"
                       checked={useBrowserCookies}
-                      disabled={busy}
+                      disabled={sourceCreatePending}
                       onChange={(event) => setUseBrowserCookies(event.target.checked)}
                       className="mt-1 h-4 w-4"
                     />
@@ -741,17 +1016,38 @@ export function VideoInspiration() {
                     <Languages className="h-4 w-4" />
                     Ngôn ngữ kịch bản mới
                   </div>
+                  <select
+                    value={targetLanguage}
+                    disabled={sourceCreatePending}
+                    onChange={(event) =>
+                      setTargetLanguage(event.target.value as VideoInspirationTargetLanguage)
+                    }
+                    className="min-h-11 rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+                  >
+                    {LANGUAGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid gap-2 border-t border-border/70 pt-4">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Film className="h-4 w-4" />
+                    Chế độ phân tích
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
-                    {(['vi', 'en'] as const).map((language) => (
+                    {(['quick', 'high_quality'] as const).map((mode) => (
                       <Button
-                        key={language}
+                        key={mode}
                         type="button"
-                        variant={targetLanguage === language ? 'default' : 'outline'}
+                        variant={analysisMode === mode ? 'default' : 'outline'}
                         className="h-11"
-                        disabled={busy}
-                        onClick={() => setTargetLanguage(language)}
+                        disabled={sourceCreatePending}
+                        onClick={() => setAnalysisMode(mode)}
                       >
-                        {languageLabel(language)}
+                        {analysisModeLabel(mode)}
                       </Button>
                     ))}
                   </div>
@@ -768,7 +1064,6 @@ export function VideoInspiration() {
                     id="video-user-direction"
                     value={userDirectionDraft}
                     onChange={(event) => setUserDirectionDraft(event.target.value)}
-                    disabled={busy}
                     placeholder="Ví dụ: làm thành video người que 3D, vẫn giữ chủ đề nhân quả, nhịp kể nhanh hơn."
                     className="min-h-[116px] resize-y text-sm leading-relaxed"
                   />
@@ -789,7 +1084,7 @@ export function VideoInspiration() {
                     }
                     className="min-h-11 w-full"
                   >
-                    {mutations.saveDirection.isPending ? (
+                    {saveDirectionPendingForCurrent ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Save className="h-4 w-4" />
@@ -802,7 +1097,6 @@ export function VideoInspiration() {
                   <input
                     type="checkbox"
                     checked={allowAudioOnly}
-                    disabled={busy}
                     onChange={(event) => setAllowAudioOnly(event.target.checked)}
                     className="mt-1 h-4 w-4"
                   />
@@ -866,6 +1160,36 @@ export function VideoInspiration() {
                   <p className="mt-1 text-sm text-muted-foreground">{stepLabel(currentJob)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {currentJobActive ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!canCancel}
+                      onClick={() => currentJob && mutations.cancel.mutate(currentJob.id)}
+                    >
+                      {cancelPendingForCurrent ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CircleStop className="h-4 w-4" />
+                      )}
+                      Hủy tác vụ
+                    </Button>
+                  ) : null}
+                  {currentJob && currentJobRetryable ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!canRetry}
+                      onClick={() => mutations.retry.mutate(currentJob.id)}
+                    >
+                      {retryPendingForCurrent ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      Thử chạy lại
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
@@ -875,15 +1199,16 @@ export function VideoInspiration() {
                       mutations.analyze.mutate({
                         jobId: currentJob.id,
                         allowAudioOnly,
+                        analysisMode,
                       })
                     }
                   >
-                    {mutations.analyze.isPending ? (
+                    {analyzePendingForCurrent ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <RefreshCw className="h-4 w-4" />
                     )}
-                    Phân tích video
+                    {analyzeButtonText}
                   </Button>
                   <Button
                     type="button"
@@ -898,7 +1223,7 @@ export function VideoInspiration() {
                       })
                     }
                   >
-                    {mutations.rewrite.isPending ? (
+                    {rewritePendingForCurrent ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Sparkles className="h-4 w-4" />
@@ -923,6 +1248,10 @@ export function VideoInspiration() {
                   <ImageIcon className="mr-2 h-4 w-4" />
                   Hình ảnh
                 </TabsTrigger>
+                <TabsTrigger value="timeline" className="min-h-10">
+                  <Film className="mr-2 h-4 w-4" />
+                  Timeline
+                </TabsTrigger>
                 <TabsTrigger value="analysis" className="min-h-10">
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                   Phân tích
@@ -930,6 +1259,10 @@ export function VideoInspiration() {
                 <TabsTrigger value="script" className="min-h-10">
                   <Sparkles className="mr-2 h-4 w-4" />
                   Kịch bản tối ưu
+                </TabsTrigger>
+                <TabsTrigger value="handoff" className="min-h-10">
+                  <ArrowRight className="mr-2 h-4 w-4" />
+                  Handoff
                 </TabsTrigger>
               </TabsList>
 
@@ -945,7 +1278,7 @@ export function VideoInspiration() {
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={!currentJob || busy}
+                      disabled={!currentJob || currentJobLocked}
                       onClick={() =>
                         currentJob &&
                         mutations.saveTranscript.mutate({
@@ -954,7 +1287,7 @@ export function VideoInspiration() {
                         })
                       }
                     >
-                      {mutations.saveTranscript.isPending ? (
+                      {saveTranscriptPendingForCurrent ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Save className="h-4 w-4" />
@@ -965,7 +1298,7 @@ export function VideoInspiration() {
                   <Textarea
                     value={transcriptDraft}
                     onChange={(event) => setTranscriptDraft(event.target.value)}
-                    disabled={!currentJob || busy}
+                    disabled={!currentJob || currentJobLocked}
                     placeholder="Transcript sẽ xuất hiện sau khi bấm Phân tích video."
                     className="mt-4 min-h-[420px] resize-y text-sm leading-relaxed"
                   />
@@ -1011,6 +1344,220 @@ export function VideoInspiration() {
                 </section>
               </TabsContent>
 
+              <TabsContent value="timeline" className="mt-4">
+                <section className="rounded-lg border border-border/80 bg-card/65 p-5">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold">Timeline đa phương thức</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Retention ở đây là dự đoán nguy cơ từ nội dung, không phải dữ liệu rời xem thực tế.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="w-fit">
+                      {completionLabel(currentJob?.analysis_completeness)}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    {[
+                      ['Shot', currentJob?.coverage_metrics_json?.shot_coverage_ratio],
+                      ['Hình ảnh', currentJob?.coverage_metrics_json?.visual_description_coverage_ratio],
+                      ['Transcript', currentJob?.coverage_metrics_json?.transcript_coverage_ratio],
+                      ['Âm thanh', currentJob?.coverage_metrics_json?.audio_event_coverage_ratio],
+                      ['Beat', currentJob?.coverage_metrics_json?.retention_beat_coverage_ratio],
+                    ].map(([label, value]) => (
+                      <div key={label as string} className="rounded-lg border border-border/70 bg-background/60 p-3">
+                        <p className="text-xs text-muted-foreground">{label as string}</p>
+                        <p className="mt-1 text-lg font-semibold">{percentMetric(value)}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {Array.isArray(currentJob?.limitations_json) && currentJob.limitations_json.length ? (
+                    <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
+                      <p className="font-semibold">Hạn chế phân tích</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5">
+                        {currentJob.limitations_json.map((item) => (
+                          <li key={String(item)}>{String(item)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold">
+                        <Film className="h-4 w-4" />
+                        Shot và keyframe
+                      </div>
+                      {(currentJob?.shots ?? []).length ? (
+                        (currentJob?.shots ?? []).slice(0, 24).map((shot) => {
+                          const shotFrames = (currentJob?.frames ?? []).filter((frame) => frame.shot_id === shot.id);
+                          return (
+                            <div key={shot.id} className="rounded-lg border border-border/75 bg-background/60 p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-semibold">
+                                  Shot {shot.shot_order} · {formatSeconds(shot.start_seconds)}-{formatSeconds(shot.end_seconds)}
+                                </p>
+                                <span className="text-xs text-muted-foreground">
+                                  {shotFrames.length} keyframe
+                                </span>
+                              </div>
+                              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                                {shot.visual_description_vi || 'Chưa có mô tả chắc chắn cho shot này.'}
+                              </p>
+                              {shotFrames.length ? (
+                                <div className="mt-3 grid grid-cols-3 gap-2">
+                                  {shotFrames.slice(0, 3).map((frame) => (
+                                    <img
+                                      key={frame.id}
+                                      src={apiClient.getVideoInspirationFrameUrl(frame.id)}
+                                      alt={`Keyframe ${formatSeconds(frame.timestamp_seconds)}`}
+                                      loading="lazy"
+                                      className="aspect-video rounded-md border border-border/70 bg-muted object-cover"
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
+                          Chưa có shot timeline. Hãy bấm Phân tích video.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-border/75 bg-background/60 p-4">
+                        <p className="flex items-center gap-2 text-sm font-semibold">
+                          <FileText className="h-4 w-4" />
+                          Transcript segment
+                        </p>
+                        <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+                          {(currentJob?.transcript_segments ?? []).length ? (
+                            (currentJob?.transcript_segments ?? []).slice(0, 16).map((segment) => (
+                              <div key={segment.id} className="rounded-md border border-border/60 p-3 text-sm">
+                                <p className="text-xs text-muted-foreground">
+                                  {formatSeconds(segment.start_seconds)}-{formatSeconds(segment.end_seconds)} · {segment.timestamp_precision} · {segment.source}
+                                </p>
+                                <p className="mt-1 whitespace-pre-wrap leading-relaxed">{segment.text}</p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-muted-foreground">Chưa có transcript segment.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border/75 bg-background/60 p-4">
+                        <p className="flex items-center gap-2 text-sm font-semibold">
+                          <Volume2 className="h-4 w-4" />
+                          Âm thanh
+                        </p>
+                        <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                          {(currentJob?.audio_events ?? []).length ? (
+                            (currentJob?.audio_events ?? []).slice(0, 18).map((event) => (
+                              <div key={event.id} className="rounded-md border border-border/60 p-3 text-sm">
+                                <p className="text-xs text-muted-foreground">
+                                  {formatSeconds(event.start_seconds)}-{formatSeconds(event.end_seconds)} · {event.event_type}
+                                  {typeof event.confidence === 'number' ? ` · tin cậy ${Math.round(event.confidence * 100)}%` : ''}
+                                </p>
+                                <p className="mt-1">{event.description_vi || 'Sự kiện âm thanh.'}</p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-muted-foreground">Chưa có timeline âm thanh.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-border/75 bg-background/60 p-4">
+                        <p className="text-sm font-semibold">Chữ trên màn hình</p>
+                        <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
+                          {(currentJob?.on_screen_text_events ?? []).length ? (
+                            (currentJob?.on_screen_text_events ?? []).slice(0, 12).map((event) => {
+                              const draft = textEventDrafts[event.id] ?? event.text;
+                              return (
+                                <div key={event.id} className="rounded-md border border-border/60 p-3 text-sm">
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatSeconds(event.start_seconds)}-{formatSeconds(event.end_seconds)} · {event.role}
+                                  </p>
+                                  <Textarea
+                                    value={draft}
+                                    disabled={currentJobLocked}
+                                    onChange={(changeEvent) =>
+                                      setTextEventDrafts((current) => ({
+                                        ...current,
+                                        [event.id]: changeEvent.target.value,
+                                      }))
+                                    }
+                                    className="mt-2 min-h-20 resize-y text-sm"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-2"
+                                    disabled={
+                                      !currentJob ||
+                                      currentJobLocked ||
+                                      !draft.trim() ||
+                                      draft === event.text
+                                    }
+                                    onClick={() =>
+                                      currentJob &&
+                                      mutations.saveTextEvent.mutate({
+                                        jobId: currentJob.id,
+                                        eventId: event.id,
+                                        text: draft,
+                                        role: event.role,
+                                      })
+                                    }
+                                  >
+                                    <Save className="h-4 w-4" />
+                                    Lưu chữ
+                                  </Button>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <p className="text-sm text-muted-foreground">Chưa nhận diện chữ trên màn hình.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-lg border border-border/75 bg-background/60 p-4">
+                    <p className="text-sm font-semibold">Beat giữ chân dự đoán</p>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      {(currentJob?.content_retention_beats ?? []).length ? (
+                        (currentJob?.content_retention_beats ?? []).slice(0, 12).map((beat) => (
+                          <div key={beat.id} className="rounded-md border border-border/60 p-3 text-sm">
+                            <p className="text-xs text-muted-foreground">
+                              {formatSeconds(beat.start_seconds)}-{formatSeconds(beat.end_seconds)} · {beat.role}
+                              {typeof beat.confidence === 'number' ? ` · tin cậy ${Math.round(beat.confidence * 100)}%` : ''}
+                            </p>
+                            <p className="mt-2 font-medium">{beat.why_continue || beat.new_information || 'Beat nội dung'}</p>
+                            {beat.drop_off_risks_json && Array.isArray(beat.drop_off_risks_json) && beat.drop_off_risks_json.length ? (
+                              <p className="mt-2 text-muted-foreground">
+                                Nguy cơ: {beat.drop_off_risks_json.map(String).join('; ')}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
+                          Chưa có beat retention dự đoán.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </TabsContent>
+
               <TabsContent value="analysis" className="mt-4">
                 <section className="rounded-lg border border-border/80 bg-card/65 p-5">
                   <h3 className="text-base font-semibold">Phân tích video gốc</h3>
@@ -1048,7 +1595,7 @@ export function VideoInspiration() {
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={!currentJob || busy || !scriptDraft.trim()}
+                      disabled={!currentJob || currentJobLocked || !scriptDraft.trim()}
                       onClick={() =>
                         currentJob &&
                         mutations.saveScript.mutate({
@@ -1060,7 +1607,7 @@ export function VideoInspiration() {
                         })
                       }
                     >
-                      {mutations.saveScript.isPending ? (
+                      {saveScriptPendingForCurrent ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Save className="h-4 w-4" />
@@ -1076,7 +1623,7 @@ export function VideoInspiration() {
                         id="video-script-title"
                         value={scriptTitleDraft}
                         onChange={(event) => setScriptTitleDraft(event.target.value)}
-                        disabled={!currentJob || busy}
+                        disabled={!currentJob || currentJobLocked}
                         placeholder="Tên kịch bản tối ưu"
                         className="h-11"
                       />
@@ -1090,7 +1637,7 @@ export function VideoInspiration() {
                         id="video-script-big-idea"
                         value={bigIdeaDraft}
                         onChange={(event) => setBigIdeaDraft(event.target.value)}
-                        disabled={!currentJob || busy}
+                        disabled={!currentJob || currentJobLocked}
                         placeholder="Ý chính của bản mới"
                         className="h-11"
                       />
@@ -1101,7 +1648,7 @@ export function VideoInspiration() {
                         id="video-script-hook"
                         value={hookDraft}
                         onChange={(event) => setHookDraft(event.target.value)}
-                        disabled={!currentJob || busy}
+                        disabled={!currentJob || currentJobLocked}
                         placeholder="Mở đầu 3-5 giây để giữ chân người xem"
                         className="h-11"
                       />
@@ -1127,10 +1674,166 @@ export function VideoInspiration() {
                   <Textarea
                     value={scriptDraft}
                     onChange={(event) => setScriptDraft(event.target.value)}
-                    disabled={!currentJob || busy}
+                    disabled={!currentJob || currentJobLocked}
                     placeholder="Kịch bản tối ưu sẽ xuất hiện sau khi bấm Viết kịch bản tối ưu."
                     className="mt-4 min-h-[460px] resize-y text-sm leading-relaxed"
                   />
+                </section>
+              </TabsContent>
+
+              <TabsContent value="handoff" className="mt-4">
+                <section className="rounded-lg border border-border/80 bg-card/65 p-5">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <h3 className="text-base font-semibold">Handoff bền vững sang AI Video</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        Handoff lưu ở backend, tách nguồn quan sát, bài học được phép học và nội dung đích đã duyệt. Tạo project ở đây sẽ tự chạy tới câu lệnh, giọng đọc và phụ đề; Veo/MP4 vẫn không tự chạy.
+                      </p>
+                    </div>
+                    {latestHandoff && !latestHandoff.created_project_id ? (
+                      <label className="grid gap-1 text-sm lg:min-w-[280px]">
+                        <span className="font-medium">Giọng đọc cho video</span>
+                        <select
+                          value={effectiveHandoffVoiceProfileId}
+                          disabled={currentJobLocked || createProjectPendingForCurrent || !profiles?.length}
+                          onChange={(event) => setHandoffVoiceProfileId(event.target.value)}
+                          className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+                        >
+                          {profiles?.length ? (
+                            profiles.map((profile) => (
+                              <option key={profile.id} value={profile.id}>
+                                {profile.name} · {profile.language}
+                              </option>
+                            ))
+                          ) : (
+                            <option value="">Chưa có giọng đọc</option>
+                          )}
+                        </select>
+                        <span className="text-xs leading-relaxed text-muted-foreground">
+                          {effectiveHandoffVoiceProfile
+                            ? `Sẽ dùng giọng “${effectiveHandoffVoiceProfile.name}” để tự tạo voice và phụ đề.`
+                            : 'Cần có hồ sơ giọng đọc trước khi chạy tới voice và phụ đề.'}
+                        </span>
+                      </label>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!canCreateStructuredHandoff}
+                        onClick={() => currentJob && mutations.createHandoff.mutate(currentJob.id)}
+                      >
+                        {createHandoffPendingForCurrent ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        Tạo handoff backend
+                      </Button>
+                      {latestHandoff?.created_project_id ? (
+                        <Button
+                          type="button"
+                          onClick={() =>
+                            window.location.assign(`/ai-video?projectId=${latestHandoff.created_project_id}`)
+                          }
+                        >
+                          <ArrowRight className="h-4 w-4" />
+                          Mở project AI Video
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          disabled={!canCreateProjectFromHandoff}
+                          onClick={() =>
+                            currentJob &&
+                            mutations.createProjectFromHandoff.mutate({
+                              jobId: currentJob.id,
+                              voiceProfileId: effectiveHandoffVoiceProfileId || null,
+                            })
+                          }
+                        >
+                          {createProjectPendingForCurrent ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <ArrowRight className="h-4 w-4" />
+                          )}
+                          Tạo project + giọng/phụ đề
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {!currentJob?.analysis_package_json ? (
+                    <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-100">
+                      Cần chạy phân tích timeline trước khi tạo handoff backend.
+                    </div>
+                  ) : null}
+
+                  {latestHandoff ? (
+                    <div className="mt-4 space-y-4">
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <Badge variant="outline">
+                          Trạng thái: {handoffStatusLabel(latestHandoff.status)}
+                        </Badge>
+                        <Badge variant="outline">Revision {latestHandoff.revision}</Badge>
+                        <Badge variant="outline">Script rev {latestHandoff.approved_script_revision}</Badge>
+                        <Badge variant="outline">{formatDate(latestHandoff.updated_at)}</Badge>
+                      </div>
+
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        {[
+                          ['Nguồn quan sát', latestHandoffPayload.source_observations],
+                          ['Bài học được phép học', latestHandoffPayload.learnable_lessons],
+                          ['Nội dung đích đã duyệt', latestHandoffPayload.target_content],
+                          [
+                            'Giữ nguyên bản và giới hạn',
+                            {
+                              originality_boundaries: latestHandoffPayload.originality_boundaries,
+                              evidence_refs: latestHandoffPayload.evidence_refs,
+                              limitations: latestHandoffPayload.limitations,
+                            },
+                          ],
+                        ].map(([label, value]) => (
+                          <div
+                            key={String(label)}
+                            className="rounded-lg border border-border/75 bg-background/60 p-4"
+                          >
+                            <p className="text-sm font-semibold">{String(label)}</p>
+                            <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                              {structuredPreview(value)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="rounded-lg border border-border/75 bg-background/60 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold">Source blocks tương thích</p>
+                          <Badge variant="outline">{latestHandoff.source_blocks_json?.length ?? 0} block</Badge>
+                        </div>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                          {(latestHandoff.source_blocks_json ?? []).slice(0, 8).map((block, index) => {
+                            const item = asRecord(block);
+                            const blockKey = JSON.stringify(block);
+                            return (
+                              <div key={blockKey} className="rounded-lg border border-border/70 p-3">
+                                <p className="text-xs font-medium uppercase text-muted-foreground">
+                                  {String(item.block_type ?? `block-${index + 1}`)}
+                                </p>
+                                <p className="mt-2 line-clamp-5 whitespace-pre-wrap text-sm leading-relaxed">
+                                  {structuredPreview(item.content, 700)}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
+                      Chưa có handoff backend. Lưu kịch bản, chạy phân tích timeline rồi bấm Tạo handoff backend để review trước khi tạo AI Video project.
+                    </div>
+                  )}
                 </section>
               </TabsContent>
             </Tabs>

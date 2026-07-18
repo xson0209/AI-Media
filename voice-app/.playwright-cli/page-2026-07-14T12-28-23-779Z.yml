@@ -1,0 +1,51 @@
+- generic [ref=f4e3]:
+  - generic [ref=f4e4]:
+    - generic [ref=f4e5]:
+      - img "Voicebox" [ref=f4e7]
+      - generic [ref=f4e8]:
+        - link "Tạo giọng" [ref=f4e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=f4e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=f4e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=f4e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=f4e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=f4e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Phân tích truyện tranh" [ref=f4e33] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=f4e38] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Dự án prompt video" [ref=f4e41] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Mô hình" [ref=f4e47] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=f4e51] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f4e55]: v0.5.0
+    - main [ref=f4e57]:
+      - generic [ref=f4e59]:
+        - generic [ref=f4e61]:
+          - heading "Phân tích truyện tranh" [level=1] [ref=f4e62]
+          - paragraph [ref=f4e63]: Đọc hình ảnh, chữ, nhân vật và bối cảnh; viết kịch bản tối ưu rồi chuyển sang Story Studio.
+        - generic [ref=f4e65]:
+          - generic [ref=f4e66]:
+            - textbox "Liên kết chương truyện" [ref=f4e70]:
+              - /placeholder: https://... link chương truyện
+            - combobox "Chế độ đọc truyện" [ref=f4e71]:
+              - option "Tự động" [selected]
+              - option "Truyện dọc"
+              - option "Trang trái → phải"
+              - option "Trang phải → trái"
+            - button "Tạo từ link" [disabled]
+            - generic [ref=f4e72]: Upload ảnh
+          - generic [ref=f4e74]:
+            - checkbox "Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này." [ref=f4e75]
+            - text: Tôi xác nhận có quyền phân tích / sử dụng nội dung nguồn này.
+        - main [ref=f4e80]:
+          - generic [ref=f4e81]: Chọn một lần phân tích để xem kết quả và tiếp tục luồng.
+  - region "Notifications (F8)":
+    - list

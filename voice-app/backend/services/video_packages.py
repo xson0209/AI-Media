@@ -467,6 +467,52 @@ def _phase2_prompt_text(project: DBVideoProject, shot: DBVideoShot, prompt: DBVi
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
 
+def _stored_prompt_download_text(project: DBVideoProject, shot: DBVideoShot, prompt: DBVideoShotPrompt) -> str:  # type: ignore[no-redef]  # noqa: F811
+    is_english = video_language.normalize_video_language(getattr(project, "target_language", None)) == "en"
+    transition_label = "Transition notes:" if is_english else "Chuyen canh:"
+    sound_label = "Sound design notes:" if is_english else "Am thanh/SFX:"
+    explanation_label = "Prompt explanation:" if is_english else "Ban giai thich tieng Viet:"
+    sound_note = (
+        "Note: this is a directing guide only if you have not yet mixed real SFX/BGM into the MP4."
+        if is_english
+        else "Ghi chu: day la chi dan dung neu chua co audio asset SFX/BGM that."
+    )
+    missing_explanation = (
+        "No separate prompt explanation is available for this prompt. Regenerate the video prompt if you need a full explanation."
+        if is_english
+        else "Chua co ban giai thich tieng Viet rieng. Hay tao lai prompt video neu can ban giai thich day du."
+    )
+    parts = [
+        (prompt.prompt or "").strip(),
+        "",
+        f"Video language: {video_language.video_language_english_name(getattr(project, 'target_language', None))}",
+        f"Aspect ratio: {prompt.aspect_ratio or project.aspect_ratio}",
+        f"Duration: {prompt.duration_seconds or shot.duration_seconds or ''} seconds",
+        f"Micro-scenes:\n{_micro_scene_text(shot.micro_scenes_json or [])}",
+        f"Camera movement: {prompt.camera_motion or shot.camera_motion or ''}",
+        f"Subject motion: {prompt.subject_motion or shot.subject_motion or ''}",
+        f"Environment motion: {prompt.environment_motion or shot.environment_motion or ''}",
+        f"Start frame: {prompt.start_frame or ''}",
+        f"End frame: {prompt.end_frame or ''}",
+        f"Lighting: {prompt.lighting or ''}",
+        f"Mood: {prompt.mood or ''}",
+        f"Continuity notes: {prompt.continuity_notes or ''}",
+    ]
+    if prompt.negative_prompt:
+        parts.extend(["", "Negative prompt:", prompt.negative_prompt.strip()])
+    if prompt.retention_notes:
+        parts.extend(["", "Retention:", prompt.retention_notes.strip()])
+    if prompt.transition_notes:
+        parts.extend(["", transition_label, prompt.transition_notes.strip()])
+    if prompt.sound_design_notes:
+        parts.extend(["", sound_label, prompt.sound_design_notes.strip(), sound_note])
+    parts.extend([
+        "",
+        explanation_label,
+        (prompt.prompt_explanation_vi or "").strip() or missing_explanation,
+    ])
+    return "\n".join(part for part in parts if part is not None).strip() + "\n"
+
 def _write_package_zip(
     *,
     project: DBVideoProject,

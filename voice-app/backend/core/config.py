@@ -20,6 +20,10 @@ DEFAULT_BACKEND_HOST = "127.0.0.1"
 DEFAULT_BACKEND_PORT = 17493
 DEFAULT_FRONTEND_HOST = "localhost"
 DEFAULT_FRONTEND_PORT = 5173
+# Keep the established 5173 contract while accepting the local web/app
+# workspaces that now launch on 4000. These remain fixed loopback dev ports,
+# rather than broadening CORS to arbitrary localhost origins.
+ADDITIONAL_LOCAL_FRONTEND_PORTS = (4000,)
 
 ENV_BACKEND_HOST = "VOICEBOX_BACKEND_HOST"
 ENV_BACKEND_PORT = "VOICEBOX_BACKEND_PORT"
@@ -116,15 +120,23 @@ def build_cors_origins(
     extra_origins: str | None = None,
 ) -> tuple[str, ...]:
     """Build the local-first CORS allowlist."""
+    frontend_ports = tuple(
+        dict.fromkeys((frontend_port, *ADDITIONAL_LOCAL_FRONTEND_PORTS))
+    )
     origins = [
-        f"http://localhost:{frontend_port}",
-        f"http://127.0.0.1:{frontend_port}",
-        f"http://localhost:{backend_port}",
-        f"http://127.0.0.1:{backend_port}",
-        "tauri://localhost",
-        "https://tauri.localhost",
-        "http://tauri.localhost",
+        origin
+        for port in frontend_ports
+        for origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}")
     ]
+    origins.extend(
+        [
+            f"http://localhost:{backend_port}",
+            f"http://127.0.0.1:{backend_port}",
+            "tauri://localhost",
+            "https://tauri.localhost",
+            "http://tauri.localhost",
+        ]
+    )
     origins.extend(_split_csv(extra_origins))
     return tuple(dict.fromkeys(origins))
 

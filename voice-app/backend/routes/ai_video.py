@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,8 @@ from ..features.ai_video import (
 )
 from ..services import (
     ai_planning,
+    series_references,
+    series_brain,
     settings as settings_service,
     video_assets,
     video_clip_generation,
@@ -27,7 +29,12 @@ from ..services import (
     video_phase2,
     video_planning,
     video_planning_pool,
+    video_publishing_metadata,
+    video_provider_project_bindings,
     video_provider_sessions,
+    video_project_memory,
+    video_quality,
+    video_series_memory,
     video_voice,
 )
 from ..utils.http import safe_content_disposition
@@ -184,6 +191,451 @@ async def update_video_series(series_id: str, data: models.VideoSeriesUpdate, db
     return series
 
 
+@router.get("/series/{series_id}/memory-cards", response_model=models.SeriesMemoryCardListResponse)
+async def list_series_memory_cards(
+    series_id: str,
+    card_type: str | None = Query(None),
+    status: str | None = Query(None),
+    episode_number: int | None = Query(None, ge=1, le=10000),
+    entity_ref: str | None = Query(None),
+    tag: str | None = Query(None),
+    min_importance: float | None = Query(None, ge=0.0, le=1.0),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_brain.list_memory_cards(
+            series_id,
+            db,
+            card_type=card_type,
+            status=status,
+            episode_number=episode_number,
+            entity_ref=entity_ref,
+            tag=tag,
+            min_importance=min_importance,
+        )
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.post("/series/{series_id}/memory-cards", response_model=models.SeriesMemoryCardResponse)
+async def create_series_memory_card(
+    series_id: str,
+    data: models.SeriesMemoryCardCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        card = series_brain.create_memory_card(series_id, data, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return card
+
+
+@router.post("/series/{series_id}/memory-cards/suggestions", response_model=models.SeriesMemorySuggestionResponse)
+async def suggest_series_memory_cards(
+    series_id: str,
+    data: models.SeriesMemorySuggestionRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = series_brain.suggest_memory_cards(series_id, data or models.SeriesMemorySuggestionRequest(), db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+    if result.saved:
+        video_series_memory.sync_series_memory_file(series_id, db)
+    return result
+
+
+@router.put("/series/{series_id}/memory-cards/{card_id}", response_model=models.SeriesMemoryCardResponse)
+async def update_series_memory_card(
+    series_id: str,
+    card_id: str,
+    data: models.SeriesMemoryCardUpdate,
+    db: Session = Depends(get_db),
+):
+    card = series_brain.update_memory_card(series_id, card_id, data, db)
+    if card is None:
+        raise _error(404, "Khong tim thay the nho.", "SERIES_MEMORY_CARD_NOT_FOUND")
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return card
+
+
+@router.post("/series/{series_id}/memory-cards/{card_id}/status", response_model=models.SeriesMemoryCardResponse)
+async def set_series_memory_card_status(
+    series_id: str,
+    card_id: str,
+    data: models.SeriesMemoryCardStatusRequest,
+    db: Session = Depends(get_db),
+):
+    card = series_brain.set_memory_card_status(series_id, card_id, data, db)
+    if card is None:
+        raise _error(404, "Khong tim thay the nho.", "SERIES_MEMORY_CARD_NOT_FOUND")
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return card
+
+
+@router.delete("/series/{series_id}/memory-cards/{card_id}")
+async def delete_series_memory_card(series_id: str, card_id: str, db: Session = Depends(get_db)):
+    if not series_brain.delete_memory_card(series_id, card_id, db):
+        raise _error(404, "Khong tim thay the nho.", "SERIES_MEMORY_CARD_NOT_FOUND")
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return {"deleted": True}
+
+
+@router.get("/series/{series_id}/current-states", response_model=models.SeriesCurrentStateListResponse)
+async def list_series_current_states(series_id: str, db: Session = Depends(get_db)):
+    try:
+        return series_brain.list_current_states(series_id, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.post("/series/{series_id}/current-states", response_model=models.SeriesCurrentStateResponse)
+async def create_series_current_state(
+    series_id: str,
+    data: models.SeriesCurrentStateCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        state = series_brain.create_current_state(series_id, data, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return state
+
+
+@router.post("/series/{series_id}/current-states/propose", response_model=models.SeriesCurrentStateResponse)
+async def propose_series_current_state(
+    series_id: str,
+    data: models.SeriesStateProposalRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        state = series_brain.propose_current_state(series_id, data, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return state
+
+
+@router.put("/series/{series_id}/current-states/{state_id}", response_model=models.SeriesCurrentStateResponse)
+async def update_series_current_state(
+    series_id: str,
+    state_id: str,
+    data: models.SeriesCurrentStateUpdate,
+    db: Session = Depends(get_db),
+):
+    state = series_brain.update_current_state(series_id, state_id, data, db)
+    if state is None:
+        raise _error(404, "Khong tim thay trang thai series.", "SERIES_CURRENT_STATE_NOT_FOUND")
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return state
+
+
+@router.post("/series/{series_id}/current-states/{state_id}/status", response_model=models.SeriesCurrentStateResponse)
+async def set_series_current_state_status(
+    series_id: str,
+    state_id: str,
+    data: models.SeriesCurrentStateStatusRequest,
+    db: Session = Depends(get_db),
+):
+    state = series_brain.set_current_state_status(series_id, state_id, data, db)
+    if state is None:
+        raise _error(404, "Khong tim thay trang thai series.", "SERIES_CURRENT_STATE_NOT_FOUND")
+    video_series_memory.sync_series_memory_file(series_id, db)
+    return state
+
+
+@router.post("/series/{series_id}/context/compile", response_model=models.SeriesContextCompileResponse)
+async def compile_series_context(
+    series_id: str,
+    data: models.SeriesContextCompileRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_brain.compile_context(series_id, data, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.get("/series/{series_id}/context/traces", response_model=models.SeriesContextTraceListResponse)
+async def list_series_context_traces(
+    series_id: str,
+    task_type: str | None = Query(None),
+    project_id: str | None = Query(None),
+    story_episode_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_brain.list_context_traces(
+            series_id,
+            db,
+            task_type=task_type,
+            project_id=project_id,
+            story_episode_id=story_episode_id,
+            limit=limit,
+        )
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.post("/series/{series_id}/canon-check", response_model=models.SeriesCanonCheckResponse)
+async def check_series_canon(
+    series_id: str,
+    data: models.SeriesCanonCheckRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_brain.check_canon(series_id, data, db)
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.get("/series/{series_id}/canon-checks", response_model=list[models.SeriesCanonCheckResponse])
+async def list_series_canon_checks(
+    series_id: str,
+    project_id: str | None = Query(None),
+    story_episode_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_brain.latest_canon_checks(
+            series_id,
+            db,
+            project_id=project_id,
+            story_episode_id=story_episode_id,
+            limit=limit,
+        )
+    except series_brain.SeriesBrainError as exc:
+        raise _error(404, str(exc), "SERIES_BRAIN_SERIES_NOT_FOUND") from exc
+
+
+@router.get("/series/{series_id}/character-profiles", response_model=list[models.SeriesCharacterProfileResponse])
+async def list_series_character_profiles(series_id: str, db: Session = Depends(get_db)):
+    profiles = video_projects.list_character_profiles(series_id, db)
+    if profiles is None:
+        raise _error(404, "Không tìm thấy series.", "AI_VIDEO_SERIES_NOT_FOUND")
+    return profiles
+
+@router.post("/series/{series_id}/character-profiles", response_model=models.SeriesCharacterProfileResponse)
+async def create_series_character_profile(
+    series_id: str,
+    data: models.SeriesCharacterProfileCreate,
+    db: Session = Depends(get_db),
+):
+    profile = video_projects.create_character_profile(series_id, data, db)
+    if profile is None:
+        raise _error(404, "Không tìm thấy series.", "AI_VIDEO_SERIES_NOT_FOUND")
+    return profile
+
+@router.put("/series/{series_id}/character-profiles/reorder", response_model=list[models.SeriesCharacterProfileResponse])
+async def reorder_series_character_profiles(
+    series_id: str,
+    data: models.SeriesCharacterProfileReorderRequest,
+    db: Session = Depends(get_db),
+):
+    profiles = video_projects.reorder_character_profiles(series_id, data, db)
+    if profiles is None:
+        raise _error(404, "Không tìm thấy series.", "AI_VIDEO_SERIES_NOT_FOUND")
+    return profiles
+
+@router.post(
+    "/series/{series_id}/character-profile-suggestions",
+    response_model=models.SeriesCharacterProfileSuggestionResponse,
+)
+async def suggest_series_character_profiles(series_id: str, db: Session = Depends(get_db)):
+    suggestion = video_projects.suggest_character_profiles_from_bible(series_id, db)
+    if suggestion is None:
+        raise _error(404, "Không tìm thấy series.", "AI_VIDEO_SERIES_NOT_FOUND")
+    return suggestion
+
+@router.put("/series/{series_id}/character-profiles/{profile_id}", response_model=models.SeriesCharacterProfileResponse)
+async def update_series_character_profile(
+    series_id: str,
+    profile_id: str,
+    data: models.SeriesCharacterProfileUpdate,
+    db: Session = Depends(get_db),
+):
+    profile = video_projects.update_character_profile(series_id, profile_id, data, db)
+    if profile is None:
+        raise _error(404, "Không tìm thấy Hồ sơ nhân vật.", "AI_VIDEO_CHARACTER_PROFILE_NOT_FOUND")
+    return profile
+
+@router.get("/series/{series_id}/reference-assets", response_model=models.SeriesReferenceAssetListResponse)
+async def list_series_reference_assets(
+    series_id: str,
+    entity_type: str | None = Query(None, pattern=models.SERIES_REFERENCE_ENTITY_PATTERN),
+    entity_id: str | None = Query(None),
+    approval_status: str | None = Query(None, pattern=models.SERIES_REFERENCE_STATUS_PATTERN),
+    active: bool | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.list_reference_assets(
+            series_id,
+            db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            approval_status=approval_status,
+            active=active,
+        )
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_REFERENCE_SERIES_NOT_FOUND") from exc
+
+@router.post("/series/{series_id}/reference-assets", response_model=models.SeriesReferenceAssetResponse)
+async def upload_series_reference_asset(
+    series_id: str,
+    entity_type: str = Form(..., pattern=models.SERIES_REFERENCE_ENTITY_PATTERN),
+    entity_id: str = Form(...),
+    reference_role: str = Form(..., pattern=models.SERIES_REFERENCE_ROLE_PATTERN),
+    label: str | None = Form(None),
+    source_type: str | None = Form("upload"),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.upload_reference_asset(
+            series_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            reference_role=reference_role,
+            filename=file.filename or "reference.png",
+            content_type=file.content_type,
+            data=await file.read(),
+            label=label,
+            source_type=source_type,
+            db=db,
+        )
+    except series_references.SeriesReferenceError as exc:
+        raise _error(422, str(exc), "SERIES_REFERENCE_UPLOAD_INVALID") from exc
+
+@router.get("/series/{series_id}/reference-assets/prompt-package")
+async def build_series_reference_prompt_package(
+    series_id: str,
+    prompt_text: str | None = Query(None),
+    provider: str = Query("provider-neutral"),
+    provider_supports_references: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.build_reference_prompt_package(
+            series_id,
+            db,
+            prompt_text=prompt_text,
+            provider=provider,
+            provider_supports_references=provider_supports_references,
+        )
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_REFERENCE_SERIES_NOT_FOUND") from exc
+
+@router.post("/series/{series_id}/reference-assets/{asset_id}/status", response_model=models.SeriesReferenceAssetResponse)
+async def update_series_reference_asset_status(
+    series_id: str,
+    asset_id: str,
+    data: models.SeriesReferenceAssetStatusRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        asset = series_references.update_reference_asset_status(series_id, asset_id, data, db)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(422, str(exc), "SERIES_REFERENCE_STATUS_INVALID") from exc
+    if asset is None:
+        raise _error(404, "Không tìm thấy ảnh tham chiếu.", "SERIES_REFERENCE_ASSET_NOT_FOUND")
+    return asset
+
+@router.delete("/series/{series_id}/reference-assets/{asset_id}")
+async def delete_series_reference_asset(series_id: str, asset_id: str, db: Session = Depends(get_db)):
+    result = series_references.delete_reference_asset(series_id, asset_id, db)
+    if result is None:
+        raise _error(404, "Không tìm thấy ảnh tham chiếu.", "SERIES_REFERENCE_ASSET_NOT_FOUND")
+    return result
+
+@router.get("/series/{series_id}/versions/{entity_type}/{entity_id}", response_model=models.SeriesVersionHistoryResponse)
+async def get_series_version_history(series_id: str, entity_type: str, entity_id: str, db: Session = Depends(get_db)):
+    try:
+        return series_references.version_history(series_id, entity_type, entity_id, db)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_VERSION_SERIES_NOT_FOUND") from exc
+
+@router.post("/series/{series_id}/dependencies", response_model=list[models.ArtifactDependencySnapshotResponse])
+async def record_series_artifact_dependencies(
+    series_id: str,
+    data: models.ArtifactDependencyRecordRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.record_dependency_snapshots(series_id, data, db)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_DEPENDENCY_SERIES_NOT_FOUND") from exc
+
+@router.get("/series/{series_id}/dependencies/{artifact_type}/{artifact_id}", response_model=list[models.ArtifactDependencySnapshotResponse])
+async def list_series_artifact_dependencies(
+    series_id: str,
+    artifact_type: str,
+    artifact_id: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.dependencies_for_artifact(series_id, artifact_type, artifact_id, db)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_DEPENDENCY_SERIES_NOT_FOUND") from exc
+
+@router.get("/series/{series_id}/stale-events", response_model=models.ArtifactStaleEventListResponse)
+async def list_series_stale_events(
+    series_id: str,
+    status: str | None = Query("active"),
+    artifact_type: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.list_stale_events(series_id, db, status=status, artifact_type=artifact_type, limit=limit)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_STALE_SERIES_NOT_FOUND") from exc
+
+@router.post("/series/{series_id}/stale-events/mark", response_model=models.ArtifactStaleEventListResponse)
+async def mark_series_dependency_stale(
+    series_id: str,
+    data: models.ArtifactStaleMarkRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.mark_dependency_stale(
+            series_id,
+            dependency_type=data.dependency_type,
+            dependency_id=data.dependency_id,
+            old_revision=data.old_revision,
+            new_revision=data.new_revision,
+            changed_scope=data.changed_scope,
+            reason_vi=data.reason_vi,
+            db=db,
+        )
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_STALE_SERIES_NOT_FOUND") from exc
+
+@router.post("/series/{series_id}/stale-events/regenerate", response_model=models.ArtifactTargetedRegenerationResponse)
+async def request_series_targeted_regeneration(
+    series_id: str,
+    data: models.ArtifactTargetedRegenerationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return series_references.request_targeted_regeneration(series_id, data, db)
+    except series_references.SeriesReferenceError as exc:
+        raise _error(404, str(exc), "SERIES_STALE_SERIES_NOT_FOUND") from exc
+
+@router.delete("/series/{series_id}/character-profiles/{profile_id}")
+async def delete_series_character_profile(series_id: str, profile_id: str, db: Session = Depends(get_db)):
+    try:
+        deleted = video_projects.delete_character_profile(series_id, profile_id, db)
+    except video_projects.VideoProjectOperationError as exc:
+        raise _error(409, str(exc), exc.error_code, exc=exc, series_id=series_id) from exc
+    if not deleted:
+        raise _error(404, "Không tìm thấy Hồ sơ nhân vật.", "AI_VIDEO_CHARACTER_PROFILE_NOT_FOUND")
+    return {"message": "Đã xoá Hồ sơ nhân vật."}
+
 @router.delete("/series/{series_id}")
 async def delete_video_series(
     series_id: str,
@@ -234,6 +686,101 @@ async def get_video_project(project_id: str, db: Session = Depends(get_db)):
         raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return project
 
+
+@router.get("/projects/{project_id}/memory", response_model=models.VideoProjectMemoryListResponse)
+async def list_video_project_memory(project_id: str, db: Session = Depends(get_db)):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_project_memory.list_project_memory(project_id, db)
+
+@router.get("/projects/{project_id}/target-timeline", response_model=models.VideoProjectTargetTimelineResponse)
+async def list_video_project_target_timeline(project_id: str, db: Session = Depends(get_db)):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_project_memory.list_target_timeline(project_id, db)
+
+@router.post("/projects/{project_id}/context/compile", response_model=models.VideoProjectContextSnapshotResponse)
+async def compile_video_project_context(
+    project_id: str,
+    data: models.VideoProjectContextCompileRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        return video_project_memory.compile_context(project_id, data, db)
+    except video_project_memory.VideoProjectMemoryError as exc:
+        raise _error(exc.status_code, str(exc), exc.error_code, exc=exc, project_id=project_id) from exc
+
+@router.get("/projects/{project_id}/context/snapshots", response_model=models.VideoProjectContextSnapshotListResponse)
+async def list_video_project_context_snapshots(
+    project_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_project_memory.list_context_snapshots(project_id, db, limit=limit)
+
+@router.post("/projects/{project_id}/quality/reports", response_model=models.VideoQualityReportResponse)
+async def run_video_project_quality_report(
+    project_id: str,
+    data: models.VideoQualityRunRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        report = video_quality.run_project_quality_report(project_id, data or models.VideoQualityRunRequest(), db)
+    except video_quality.VideoQualityError as exc:
+        raise _error(exc.status_code, str(exc), exc.error_code, exc=exc, project_id=project_id) from exc
+    if report is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return report
+
+@router.get("/projects/{project_id}/quality/reports/latest", response_model=models.VideoQualityReportResponse | None)
+async def get_latest_video_project_quality_report(project_id: str, db: Session = Depends(get_db)):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_quality.get_latest_project_report(project_id, db)
+
+@router.get("/projects/{project_id}/quality/reports", response_model=models.VideoQualityReportListResponse)
+async def list_video_project_quality_reports(
+    project_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_quality.list_project_reports(project_id, db, limit=limit)
+
+@router.post("/quality/reports/{report_id}/override", response_model=models.VideoQualityReportResponse)
+async def override_video_quality_report(
+    report_id: str,
+    data: models.VideoQualityOverrideRequest,
+    db: Session = Depends(get_db),
+):
+    report = video_quality.override_report(report_id, data, db)
+    if report is None:
+        raise _error(404, "Không tìm thấy báo cáo chất lượng.", "VIDEO_QUALITY_REPORT_NOT_FOUND")
+    return report
+
+@router.post("/projects/{project_id}/retention-datasets", response_model=models.PlatformRetentionDatasetResponse)
+async def import_video_project_retention_dataset(
+    project_id: str,
+    data: models.PlatformRetentionDatasetCreateRequest,
+    db: Session = Depends(get_db),
+):
+    dataset = video_quality.create_project_retention_dataset(project_id, data, db)
+    if dataset is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return dataset
+
+@router.get("/projects/{project_id}/retention-datasets", response_model=models.PlatformRetentionDatasetListResponse)
+async def list_video_project_retention_datasets(
+    project_id: str,
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_quality.list_project_retention_datasets(project_id, db, limit=limit)
 
 @router.put("/projects/{project_id}", response_model=models.VideoProjectResponse)
 async def update_video_project(
@@ -372,6 +919,47 @@ async def get_video_project_status(project_id: str, db: Session = Depends(get_db
     return status
 
 
+@router.get("/projects/{project_id}/publishing-metadata", response_model=models.VideoPublishingMetadataResponse)
+async def get_video_publishing_metadata(project_id: str, db: Session = Depends(get_db)):
+    metadata = video_publishing_metadata.get_publishing_metadata(project_id, db)
+    if metadata is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return metadata
+
+@router.post("/projects/{project_id}/publishing-metadata", response_model=models.VideoPublishingMetadataResponse)
+async def generate_video_publishing_metadata(
+    project_id: str,
+    data: models.VideoPublishingMetadataGenerateRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        metadata = video_publishing_metadata.generate_publishing_metadata(
+            project_id,
+            data or models.VideoPublishingMetadataGenerateRequest(),
+            db,
+        )
+    except video_publishing_metadata.VideoPublishingMetadataError as exc:
+        raise _error(
+            exc.status_code,
+            str(exc),
+            exc.error_code,
+            exc=exc,
+            project_id=project_id,
+            step_name="publishing_metadata_generation",
+        ) from exc
+    except ai_planning.AIPlanningError as exc:
+        raise _error(
+            _planning_error_status(exc),
+            _planning_error_message(exc),
+            exc.error_code,
+            exc=exc,
+            project_id=project_id,
+            step_name="publishing_metadata_generation",
+        ) from exc
+    if metadata is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return metadata
+
 @router.post("/projects/{project_id}/auto-runs", response_model=models.VideoAutoRunResponse)
 async def start_video_auto_run(
     project_id: str,
@@ -474,6 +1062,23 @@ async def get_video_clip_generation_job(project_id: str, job_id: str, db: Sessio
     if job is None:
         raise _error(404, "Không tìm thấy job tạo clip Veo.", "VIDEO_CLIP_JOB_NOT_FOUND")
     return job
+
+@router.get("/projects/{project_id}/provider-flow/binding", response_model=models.VideoProviderProjectBindingResponse | None)
+async def get_video_provider_project_binding(project_id: str, db: Session = Depends(get_db)):
+    project_exists = db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first()
+    if project_exists is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return video_provider_project_bindings.get_project_binding(project_id, db)
+
+@router.post("/projects/{project_id}/provider-flow/open", response_model=models.VideoProviderProjectBindingResponse)
+async def open_video_provider_project_binding(project_id: str, db: Session = Depends(get_db)):
+    try:
+        binding = video_provider_project_bindings.open_project_binding(project_id, db)
+    except video_provider_project_bindings.VideoProviderProjectBindingError as exc:
+        raise _error(400, str(exc), exc.error_code, exc=exc, project_id=project_id, step_name="provider_flow_open") from exc
+    if binding is None:
+        raise _error(404, "Project chưa có Flow project binding active.", "VIDEO_PROVIDER_PROJECT_BINDING_NOT_FOUND")
+    return binding
 
 @router.post("/projects/{project_id}/clip-generation/jobs/{job_id}/retry", response_model=models.VideoClipGenerationJobResponse)
 async def retry_video_clip_generation_job(
@@ -799,6 +1404,24 @@ async def get_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get
         raise _error(404, "Không tìm thấy shot video.", "VIDEO_SHOT_NOT_FOUND")
     clip = video_rendering.get_active_clip(project_id, shot_id, db)
     return clip
+
+
+@router.get("/projects/{project_id}/shots/{shot_id}/clip/download")
+async def download_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    shot_exists = (
+        db.query(DBVideoShot.id).filter(DBVideoShot.project_id == project_id, DBVideoShot.id == shot_id).first()
+    )
+    if shot_exists is None:
+        raise _error(404, "Không tìm thấy shot video.", "VIDEO_SHOT_NOT_FOUND")
+    result = video_rendering.get_active_clip_download(project_id, shot_id, db)
+    if result is None:
+        raise _error(404, "Shot này chưa có video clip sẵn sàng để xem.", "VIDEO_SHOT_CLIP_NOT_FOUND")
+    filename, path, media_type = result
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Content-Disposition": safe_content_disposition("inline", filename)},
+    )
 
 
 @router.post("/projects/{project_id}/shots/{shot_id}/clip", response_model=models.VideoShotClipResponse)

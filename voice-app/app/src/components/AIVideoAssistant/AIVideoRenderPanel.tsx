@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, Check, Download, FileText, Film, Loader2, Music2, Settings2, Sparkles, Trash2, UploadCloud, Video } from 'lucide-react';
+import { AlertCircle, Check, Download, Eye, FileText, Film, Loader2, Music2, Settings2, Sparkles, Trash2, UploadCloud, Video } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api/client';
@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS: VideoRenderSettings = {
 };
 
 function shotLabel(shot: VideoShotResponse): string {
-  return `Segment ${String(shot.shot_order).padStart(2, '0')}`;
+  return `Phân đoạn ${String(shot.shot_order).padStart(2, '0')}`;
 }
 
 function formatDuration(value?: number | null): string {
@@ -61,6 +61,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<VideoRenderSettings>(DEFAULT_SETTINGS);
   const [uploadingShotId, setUploadingShotId] = useState<string | null>(null);
+  const [previewShotId, setPreviewShotId] = useState<string | null>(null);
 
   const enabled = !!projectId && shots.length > 0;
   const renderQueryKey = useMemo(() => ['ai-video', 'render', projectId, settings], [projectId, settings]);
@@ -110,7 +111,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
     mutationFn: ({ shot, file }: { shot: VideoShotResponse; file: File }) => apiClient.uploadVideoShotClip(shot.project_id, shot.id, file),
     onMutate: ({ shot }) => setUploadingShotId(shot.id),
     onSuccess: (_, { shot }) => {
-      onNotice(`Đã upload video clip cho ${shotLabel(shot)}.`);
+      onNotice(`Đã tải clip video cho ${shotLabel(shot)}.`);
       invalidateRender();
     },
     onSettled: () => setUploadingShotId(null),
@@ -119,7 +120,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   const deleteClip = useMutation({
     mutationFn: (shot: VideoShotResponse) => apiClient.deleteVideoShotClip(shot.project_id, shot.id),
     onSuccess: (_, shot) => {
-      onNotice(`Đã xóa video clip của ${shotLabel(shot)}.`);
+      onNotice(`Đã xóa clip video của ${shotLabel(shot)}.`);
       invalidateRender();
     },
   });
@@ -127,7 +128,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   const uploadSfxAsset = useMutation({
     mutationFn: (file: File) => apiClient.uploadVideoRenderSfxAsset(projectId!, file),
     onSuccess: (asset) => {
-      onNotice(`Đã upload SFX/BGM: ${asset.filename}.`);
+      onNotice(`Đã tải hiệu ứng/nhạc nền: ${asset.filename}.`);
       invalidateRender();
     },
   });
@@ -135,7 +136,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   const deleteSfxAsset = useMutation({
     mutationFn: (asset: VideoRenderSfxAssetResponse) => apiClient.deleteVideoRenderSfxAsset(projectId!, asset.asset_id),
     onSuccess: () => {
-      onNotice('Đã xóa asset SFX/BGM.');
+      onNotice('Đã xóa hiệu ứng/nhạc nền.');
       invalidateRender();
     },
   });
@@ -143,14 +144,14 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
   const createRender = useMutation({
     mutationFn: () => apiClient.createVideoRenderJob(projectId!, settings),
     onSuccess: () => {
-      onNotice('Đã bắt đầu dựng MP4. Bạn có thể theo dõi tiến độ trong panel này.');
+      onNotice('Đã bắt đầu dựng MP4. Bạn có thể theo dõi tiến độ trong bảng này.');
       invalidateRender();
     },
   });
 
   const saveDownload = async (download: Promise<DownloadedBlob>) => {
     const result = await download;
-    await platform.filesystem.saveFile(result.filename, result.blob, [{ name: 'Tệp render', extensions: ['mp4', 'md', 'json', 'csv'] }]);
+    await platform.filesystem.saveFile(result.filename, result.blob, [{ name: 'Tệp dựng', extensions: ['mp4', 'md', 'json', 'csv'] }]);
   };
 
   const latestJob = latestJobQuery.data;
@@ -179,7 +180,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
       <div className="mt-4 space-y-4">
         {shots.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
-            Chưa có segment. Hãy tạo segment breakdown trước khi upload clip và dựng MP4.
+            Chưa có phân đoạn. Hãy tạo bản phân đoạn trước khi tải clip lên và dựng MP4.
           </div>
         ) : clipQueries.some((query) => query.isLoading) ? (
           <RenderSkeleton />
@@ -193,8 +194,8 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
               const needsTimer = readiness?.missing_timer_shot_ids.includes(shot.id);
               const isUploading = uploadingShotId === shot.id;
               const requirementBadges = [
-                clipMissing ? 'Cần clip' : null,
-                needsVoice ? 'Cần voice' : null,
+                clipMissing ? 'Cần clip video' : null,
+                needsVoice ? 'Cần giọng đọc' : null,
                 needsTimer ? 'Cần thời lượng' : null,
               ].filter((label): label is string => Boolean(label));
               return (
@@ -205,25 +206,25 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <p className="min-w-0 text-sm font-semibold leading-tight tracking-tight">{shotLabel(shot)}</p>
                     <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-5', statusTone(!!clip && clip.status === 'ready'))}>
-                      {clip?.status === 'ready' ? 'clip sẵn sàng' : clipInvalid ? 'clip lỗi' : 'thiếu clip'}
+                      {clip?.status === 'ready' ? 'clip video sẵn sàng' : clipInvalid ? 'clip video lỗi' : 'thiếu clip video'}
                     </span>
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-lg border border-border/60 bg-card/40 px-2.5 py-2">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Timer</p>
+                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Thời lượng</p>
                       <p className="mt-1 truncate text-xs font-semibold text-foreground">
                         {formatDuration(shot.english_narration?.trim() ? shot.audio_duration : shot.duration_seconds)}
                       </p>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-card/40 px-2.5 py-2">
-                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Clip</p>
+                      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Clip video</p>
                       <p className="mt-1 truncate text-xs font-semibold text-foreground">{formatDuration(clip?.duration_seconds)}</p>
                     </div>
                   </div>
 
                   {clip?.original_filename ? (
-                    <p className="mt-2 truncate text-xs leading-relaxed text-foreground/75">File: {clip.original_filename}</p>
+                    <p className="mt-2 truncate text-xs leading-relaxed text-foreground/75">Tệp: {clip.original_filename}</p>
                   ) : null}
                   {clip?.failure_reason ? <p className="mt-2 text-xs leading-relaxed text-destructive">{clip.failure_reason}</p> : null}
                   {requirementBadges.length ? (
@@ -238,8 +239,41 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                       ))}
                     </div>
                   ) : null}
+                  {clip?.status === 'ready' && previewShotId === shot.id ? (
+                    <div className="mt-3 overflow-hidden rounded-lg border border-border/70 bg-black">
+                      <video
+                        key={clip.id}
+                        className="aspect-video w-full bg-black object-contain"
+                        controls
+                        preload="metadata"
+                        src={apiClient.getVideoShotClipDownloadUrl(projectId, shot.id)}
+                      />
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 grid gap-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-10 w-full active:translate-y-[1px]"
+                        disabled={!clip || clip.status !== 'ready'}
+                        onClick={() => setPreviewShotId((current) => (current === shot.id ? null : shot.id))}
+                      >
+                        <Eye className="h-4 w-4" />
+                        {previewShotId === shot.id ? 'Ẩn xem trước' : 'Xem clip video'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-10 w-full active:translate-y-[1px]"
+                        disabled={!clip || clip.status !== 'ready'}
+                        onClick={() => saveDownload(apiClient.downloadVideoShotClip(projectId, shot.id, clip?.original_filename || 'clip.mp4'))}
+                      >
+                        <Download className="h-4 w-4" />
+                        Tải clip video
+                      </Button>
+                    </div>
                     <label
                       aria-disabled={isUploading}
                       className={cn(
@@ -248,7 +282,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                       )}
                     >
                       {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                      <span className="truncate">{isUploading ? 'Đang upload' : clip ? 'Thay clip' : 'Chọn clip'}</span>
+                      <span className="truncate">{isUploading ? 'Đang tải lên' : clip ? 'Thay clip video' : 'Chọn clip video'}</span>
                       <input
                         type="file"
                         accept="video/mp4,video/quicktime,video/webm,video/x-matroska"
@@ -270,7 +304,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                       onClick={() => deleteClip.mutate(shot)}
                     >
                       {deleteClip.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      Xóa clip
+                      Xóa clip video
                     </Button>
                   </div>
                 </div>
@@ -282,7 +316,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
         <div className="grid gap-3 border-t border-border/70 pt-4">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Settings2 className="h-4 w-4" />
-            Thiết lập render
+            Thiết lập dựng
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <SettingSelect label="Độ phân giải" value={settings.resolution} onChange={(value) => setSettings((current) => ({ ...current, resolution: value as VideoRenderSettings['resolution'] }))}>
@@ -290,23 +324,23 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
               <option value="720p">720p</option>
               <option value="1080p">1080p</option>
             </SettingSelect>
-            <SettingSelect label="FPS" value={String(settings.fps)} onChange={(value) => setSettings((current) => ({ ...current, fps: Number(value) }))}>
+            <SettingSelect label="Số khung/giây (FPS)" value={String(settings.fps)} onChange={(value) => setSettings((current) => ({ ...current, fps: Number(value) }))}>
               <option value="24">24</option>
               <option value="30">30</option>
               <option value="60">60</option>
             </SettingSelect>
             <SettingSelect label="Khung hình" value={settings.fit_mode} onChange={(value) => setSettings((current) => ({ ...current, fit_mode: value as VideoRenderSettings['fit_mode'] }))}>
-              <option value="crop">Crop đầy khung</option>
+              <option value="crop">Cắt vừa khung</option>
               <option value="pad">Giữ toàn ảnh</option>
             </SettingSelect>
             <SettingSelect label="Phụ đề" value={settings.subtitle_mode} onChange={(value) => setSettings((current) => ({ ...current, subtitle_mode: value as VideoRenderSettings['subtitle_mode'] }))}>
-              <option value="burn_in">Burn-in vào video</option>
+              <option value="burn_in">Nhúng phụ đề vào video</option>
               <option value="sidecar">SRT rời</option>
               <option value="none">Không phụ đề</option>
             </SettingSelect>
           </div>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Burn-in dùng file .srt đã chia cue theo voice và render karaoke màu vàng theo từng từ. Nếu timing lệch, tạo lại phụ đề sau khi voice đã hoàn tất.
+            Nhúng phụ đề dùng file .srt đã chia mốc theo giọng đọc và dựng chữ karaoke màu vàng theo từng từ. Nếu thời gian lệch, tạo lại phụ đề sau khi giọng đọc đã hoàn tất.
           </p>
         </div>
 
@@ -317,18 +351,18 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
           </div>
           <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,9.5rem),1fr))]">
             <ToggleRow
-              label="Chuyển cảnh/SFX"
+              label="Chuyển cảnh/hiệu ứng âm thanh"
               checked={Boolean(settings.enhanced_render)}
               onChange={(checked) => setSettings((current) => ({ ...current, enhanced_render: checked }))}
             />
             <ToggleRow
-              label="Mix SFX/BGM thật"
+              label="Trộn hiệu ứng/nhạc nền thật"
               checked={Boolean(settings.enhanced_audio)}
               disabled={!settings.enhanced_render}
               onChange={(checked) => setSettings((current) => ({ ...current, enhanced_audio: checked }))}
             />
             <ToggleRow
-              label="AI review"
+              label="Đánh giá AI"
               checked={Boolean(settings.ai_review)}
               disabled={!settings.enhanced_render}
               onChange={(checked) => setSettings((current) => ({ ...current, ai_review: checked }))}
@@ -336,7 +370,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
           </div>
           <div className="mt-3 grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr))] sm:items-end">
             <SettingSelect
-              label="Số vòng auto-fix"
+              label="Số vòng tự sửa"
               value={String(settings.max_fix_attempts ?? 1)}
               onChange={(value) => setSettings((current) => ({ ...current, max_fix_attempts: Number(value) }))}
             >
@@ -352,7 +386,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
               )}
             >
               {uploadSfxAsset.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Music2 className="h-4 w-4" />}
-              <span className="min-w-0 whitespace-normal">{uploadSfxAsset.isPending ? 'Đang upload' : 'Thêm SFX/BGM'}</span>
+              <span className="min-w-0 whitespace-normal">{uploadSfxAsset.isPending ? 'Đang tải lên' : 'Thêm hiệu ứng/nhạc nền'}</span>
               <input
                 type="file"
                 accept="audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/flac,.wav,.mp3,.m4a,.aac,.ogg,.flac"
@@ -373,7 +407,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                   <div className="min-w-0">
                     <p className="truncate text-xs font-semibold">{asset.filename}</p>
                     <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                      {(asset.cue_aliases || []).join(', ') || 'chưa có alias'} · {asset.status}
+                      {(asset.cue_aliases || []).join(', ') || 'chưa có tên gợi nhớ'} · {asset.status}
                     </p>
                   </div>
                   <Button
@@ -382,7 +416,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
                     className="h-8 w-8 shrink-0 p-0"
                     disabled={deleteSfxAsset.isPending}
                     onClick={() => deleteSfxAsset.mutate(asset)}
-                    title="Xóa asset"
+                    title="Xóa tài nguyên"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -391,7 +425,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
             </div>
           ) : (
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Chưa có asset SFX/BGM. Cue như tiếng kính vỡ sẽ được ghi fallback nếu chưa upload asset thật.
+              Chưa có hiệu ứng/nhạc nền. Gợi ý như tiếng kính vỡ sẽ được ghi dự phòng nếu chưa tải tài nguyên thật.
             </p>
           )}
         </div>
@@ -401,7 +435,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
             {readiness?.ready ? <Check className="mt-0.5 h-4 w-4" /> : <AlertCircle className="mt-0.5 h-4 w-4" />}
             <div className="min-w-0">
               <p className="font-medium">{readiness?.ready ? 'Đã đủ điều kiện dựng MP4.' : 'Chưa đủ điều kiện dựng MP4.'}</p>
-              {!readiness ? <p className="mt-1 text-xs opacity-80">Đang kiểm tra readiness render.</p> : null}
+              {!readiness ? <p className="mt-1 text-xs opacity-80">Đang kiểm tra điều kiện dựng.</p> : null}
               {readiness && !readiness.ready ? (
                 <ul className="mt-2 space-y-1 text-xs opacity-85">
                   {readiness.missing_reasons.map((reason) => <li key={reason}>{reason}</li>)}
@@ -461,7 +495,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
             onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, reviewArtifact?.kind || 'ai_review_report'))}
           >
             <FileText className="h-4 w-4" />
-            <span className="min-w-0">Tải AI review</span>
+            <span className="min-w-0">Tải đánh giá AI</span>
           </Button>
           <Button
             className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
@@ -470,7 +504,7 @@ export function AIVideoRenderPanel({ projectId, shots, onNotice }: AIVideoRender
             onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, manifestArtifact?.kind || 'timeline_manifest'))}
           >
             <Download className="h-4 w-4" />
-            <span className="min-w-0">Tải manifest</span>
+            <span className="min-w-0">Tải bảng dòng thời gian</span>
           </Button>
         </div>
       </div>
@@ -487,7 +521,7 @@ function RenderHeader() {
         </div>
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold tracking-tight">Dựng nhanh MP4</h2>
-          <p className="truncate text-xs text-muted-foreground">Ghép clip, voice và phụ đề theo timer thật</p>
+          <p className="truncate text-xs text-muted-foreground">Ghép clip, giọng đọc và phụ đề theo thời lượng thật</p>
         </div>
       </div>
     </div>

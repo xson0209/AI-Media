@@ -16,7 +16,7 @@ from ..database import (
     VideoShot as DBVideoShot,
     VideoSubtitle as DBVideoSubtitle,
 )
-from . import video_errors, video_observability, video_rendering, video_state, video_storage
+from . import series_brain, video_errors, video_observability, video_rendering, video_state, video_storage
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?\u3002\uff01\uff1f])\s+")
 _MAX_CHARS_BY_RATIO = {
@@ -200,6 +200,13 @@ def _shot_cue_models(project: DBVideoProject, shots: list[DBVideoShot]) -> list[
     cue_index = 1
     for shot in shots:
         if not _requires_shot_narration(shot):
+            duration = video_rendering.resolve_shot_duration(shot)
+            if duration is None:
+                raise VideoSubtitleError(
+                    f"Segment {video_storage.shot_number(shot.shot_order)} không có narration nhưng thiếu duration timeline hợp lệ.",
+                    error_code="VIDEO_SUBTITLE_TIMELINE_DURATION_REQUIRED",
+                )
+            cursor += float(duration)
             continue
         duration = float(shot.audio_duration or 0)
         chunks = _split_caption_text(shot.english_narration or "", aspect_ratio=project.aspect_ratio, duration=duration)
@@ -222,6 +229,31 @@ def _shot_cue_models(project: DBVideoProject, shots: list[DBVideoShot]) -> list[
             cue_index += 1
             cursor = end
     return cues
+
+def mark_subtitle_stale(
+    project_id: str,
+    db: Session,
+    *,
+    reason: str | None = None,
+    commit: bool = False,
+) -> bool:
+    row = db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).first()
+    if row is None:
+        return False
+    row.status = "stale"
+    row.updated_at = datetime.utcnow()
+    if commit:
+        db.commit()
+    if reason:
+        video_observability.log_event(
+            db,
+            step_name="subtitle_stale",
+            status="info",
+            project_id=project_id,
+            message=reason,
+            technical_details={"subtitle_id": row.id},
+        )
+    return True
 
 
 def _srt_content(cues: list[models.VideoSubtitleCue]) -> str:
@@ -306,6 +338,33 @@ def generate_subtitle(project_id: str, db: Session) -> models.VideoSubtitleRespo
             "Dự án chưa có lời thoại nào cần tạo phụ đề.",
             error_code="VIDEO_SUBTITLE_NO_DIALOGUE",
         )
+
+    if project.series_id:
+        try:
+            series_brain.compile_prompt_context(
+                project.series_id,
+                db,
+                task_type="subtitle",
+                episode_number=project.episode_number,
+                project_id=project_id,
+                user_input="\n".join(cue.text for cue in cues),
+                current_payload={
+                    "cue_count": len(cues),
+                    "source": "shots" if shots else "scenes",
+                    "cues": [cue.model_dump() for cue in cues],
+                },
+                persist_trace=True,
+            )
+        except Exception as exc:
+            video_observability.log_event(
+                db,
+                step_name="subtitle_series_context_trace",
+                status="warning",
+                project_id=project_id,
+                error_code="SERIES_CONTEXT_TRACE_FAILED",
+                exc=exc,
+                message="Khong luu duoc trace bo nho series cho subtitle.",
+            )
 
     now = datetime.utcnow()
     existing = db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).first()
