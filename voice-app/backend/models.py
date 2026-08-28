@@ -511,6 +511,7 @@ class VideoShotUpdate(BaseModel):
         default=None,
         pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
     )
+    speech_mode: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     vietnamese_description: Optional[str] = Field(default=None, max_length=12000)
     english_narration: Optional[str] = Field(default=None, max_length=20000)
     primary_action: Optional[str] = Field(default=None, max_length=4000)
@@ -1875,6 +1876,7 @@ class VideoProjectUpdate(_VisualStyleLimitedModel):
     language: Optional[str] = Field(default=None, max_length=20)
     target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
     speech_source: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
+    speech_mode: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)

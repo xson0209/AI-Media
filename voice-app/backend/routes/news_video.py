@@ -56,6 +56,8 @@ def get_news_project(project_id: str, db: Session = Depends(get_db)):
 def update_news_project(project_id: str, data: models.VideoProjectUpdate, db: Session = Depends(get_db)):
     _project_or_404(project_id, db)
     try:
+        if data.speech_mode is not None:
+            data = data.model_copy(update={"speech_source": data.speech_mode})
         result = video_projects.update_project(project_id, data, db)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -76,6 +78,16 @@ def list_news_shots(project_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án Video tin tức.")
     shots = db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id).order_by(DBVideoShot.shot_order.asc()).all()
     return [models.VideoShotResponse.model_validate(shot) for shot in shots]
+
+@router.patch("/projects/{project_id}/shots/{shot_id}", response_model=models.VideoShotResponse)
+def update_news_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db: Session = Depends(get_db)):
+    project = _project_or_404(project_id, db)
+    if data.speech_mode is not None:
+        data = data.model_copy(update={"speech_source_override": data.speech_mode})
+    result = video_phase2.update_shot(project_id, shot_id, data, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
+    return result
 
 
 @router.post("/projects/{project_id}/prompts")
