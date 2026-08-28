@@ -11,6 +11,12 @@ export type VideoPurpose =
   | 'sales_ad'
   | 'localized_variant';
 export type DialogueMode = 'voiceover' | 'character_lines' | 'mixed';
+export type NewsSpeechMode =
+  | 'veo_narration'
+  | 'veo_dialogue'
+  | 'voicebox_co_context'
+  | 'voicebox_khong_context'
+  | 'none';
 export type NarrationDensity = 'light' | 'balanced' | 'dense';
 export type CallToActionStyle = 'none' | 'soft' | 'direct' | 'urgent';
 
@@ -677,6 +683,7 @@ export interface VideoProjectCreate {
   episode_title?: string | null;
   language?: string;
   target_language?: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
@@ -702,6 +709,7 @@ export interface VideoProjectUpdate {
   episode_title?: string | null;
   language?: string;
   target_language?: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
@@ -1529,6 +1537,7 @@ export interface VideoProjectResponse {
   topic: string;
   language: string;
   target_language: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose: VideoPurpose;
   dialogue_mode: DialogueMode;
   narration_density: NarrationDensity;

@@ -561,6 +561,8 @@ class VideoProject(Base):
     script_approved = Column(Boolean, nullable=False, default=False)
     phase = Column(String, nullable=False, default="phase1")
     target_language = Column(String, nullable=False, default="en")
+    # Explicit News Video speech mode; NULL preserves legacy language fallback.
+    speech_source = Column(String, nullable=True)
     video_purpose = Column(String, nullable=False, default="custom")
     dialogue_mode = Column(String, nullable=False, default="voiceover")
     narration_density = Column(String, nullable=False, default="balanced")
@@ -580,6 +582,16 @@ class VideoProject(Base):
     planning_error = Column(Text, nullable=True)
     last_request_id = Column(String, nullable=True)
     package_stale = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class NewsVideoWorkflow(Base):
+    """News-specific metadata; presence of this row discriminates News projects."""
+    __tablename__ = "news_video_workflows"
+    project_id = Column(String, ForeignKey("video_projects.id"), primary_key=True)
+    visual_format = Column(String, nullable=False, default="9:16")
+    source_note = Column(Text, nullable=True)
+    default_speech_source = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -839,6 +851,8 @@ class VideoShot(Base):
     sound_design_json = Column(JSON, nullable=True)
     micro_scenes_json = Column(JSON, nullable=True)
     speech_cues_json = Column(JSON, nullable=True)
+    # Per-shot News Video override; NULL inherits project/legacy resolver.
+    speech_source_override = Column(String, nullable=True)
     retainability_quality_check = Column(JSON, nullable=True)
     locked = Column(Boolean, nullable=False, default=False)
     status = Column(String, nullable=False, default="draft")

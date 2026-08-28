@@ -9,25 +9,25 @@
 ## 2. Giai đoạn B — Shared prompt/audio builder
 
 - [ ] 2.1 Sửa instruction planner: bỏ mâu thuẫn `video_phase2.py:2688` vs `:3795`; field `prompt` chỉ mô tả hình ảnh, cấm viết lời thoại.
-- [ ] 2.2 Tạo `build_provider_prompt(visual, speech_mode, cues, negative, continuity)` trả `provider_prompt`, `negative_prompt`, `audio_contract`, `input_fingerprint`.
-- [ ] 2.3 Implement audio contract `veo_narration`: exact line, off-screen speaker, voice/delivery/emotion/pronunciation, timing, nói một lần, cấm lời thừa.
-- [ ] 2.4 Implement `veo_dialogue`: visible speaker, identity/wardrobe continuity, exact line, lip-sync, cấm đổi speaker/paraphrase.
-- [ ] 2.5 Implement `voicebox_co_context`: giữ lời làm ngữ cảnh canh nhịp nhưng cấm Veo phát ra tiếng nói/lip-sync.
-- [ ] 2.6 Implement `voicebox_khong_context`: không đưa lời vào prompt, cấm mọi spoken audio.
-- [ ] 2.7 Implement `none`: cấm mọi speech/dialogue/voiceover; ambience/SFX chỉ khi policy cho phép.
-- [ ] 2.8 Compose provider content **lúc đọc** cho Copy, Download, prompt pack và provider automation; không lưu cột `provider_ready_prompt`.
-- [ ] 2.9 Xoá `FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS[2]` (`video_clip_generation.py:138-140`) và `_strip_provider_spoken_audio_blockers` (`:262-272`).
-- [ ] 2.10 Thêm `pronunciation_notes` vào `VideoShotSpeechCue` (`backend/models.py:469-485`); giữ tương thích cue cũ.
+- [x] 2.2 Tạo `build_provider_prompt(visual, speech_mode, cues, negative, continuity)` trả `provider_prompt`, `negative_prompt`, `audio_contract`, `input_fingerprint`.
+- [x] 2.3 Implement audio contract `veo_narration`: exact line, off-screen speaker, voice/delivery/emotion/pronunciation, timing, nói một lần, cấm lời thừa.
+- [x] 2.4 Implement `veo_dialogue`: visible speaker, identity/wardrobe continuity, exact line, lip-sync, cấm đổi speaker/paraphrase.
+- [x] 2.5 Implement `voicebox_co_context`: giữ lời làm ngữ cảnh canh nhịp nhưng cấm Veo phát ra tiếng nói/lip-sync.
+- [x] 2.6 Implement `voicebox_khong_context`: không đưa lời vào prompt, cấm mọi spoken audio.
+- [x] 2.7 Implement `none`: cấm mọi speech/dialogue/voiceover; ambience/SFX chỉ khi policy cho phép.
+- [x] 2.8 Compose provider content **lúc đọc** cho Copy, Download, prompt pack và provider automation; không lưu cột `provider_ready_prompt`.
+- [x] 2.9 Xoá `FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS[2]` (`video_clip_generation.py:138-140`) và `_strip_provider_spoken_audio_blockers` (`:262-272`).
+- [x] 2.10 Thêm `pronunciation_notes` vào `VideoShotSpeechCue` (`backend/models.py:469-485`); giữ tương thích cue cũ.
 - [ ] 2.11 Thêm word-budget theo thời lượng; vượt ngưỡng trả lỗi tiếng Việt yêu cầu rút ngắn/chia shot, không tự cắt câu.
 - [ ] 2.12 Ghép negative prompt bằng khối `NEGATIVE PROMPT`/`Avoid:` khi provider không có ô riêng.
 - [ ] 2.13 Spike đối chiếu word-budget (2,5–3,0 từ/giây) với timing TTS tiếng Việt thật trước khi khóa ngưỡng.
 
 ## 3. Giai đoạn C — Override nguồn lời năm mode
 
-- [ ] 3.1 Thêm cột nullable `video_projects.speech_source` vào `project_column_defaults` (`migrations.py:~1104`) và `video_shots.speech_source_override` vào `shot_column_defaults` (`:1140`).
-- [ ] 3.2 Sửa `uses_veo_native_speech()` (`video_speech.py:34-39`) đọc override trước; `NULL` giữ `speech_source_for_language`.
-- [ ] 3.3 Tạo resolver shot override → project override → legacy; trả cả `speech_mode` và `effective_speech_source`.
-- [ ] 3.4 Sửa ba chỗ gọi `speech_source_for_language` trực tiếp (`video_packages.py:284,328,411`) để đọc override.
+- [x] 3.1 Thêm cột nullable `video_projects.speech_source` vào `project_column_defaults` (`migrations.py:~1104`) và `video_shots.speech_source_override` vào `shot_column_defaults` (`:1140`).
+- [x] 3.2 Sửa `uses_veo_native_speech()` (`video_speech.py:34-39`) đọc override trước; `NULL` giữ `speech_source_for_language`.
+- [x] 3.3 Tạo resolver shot override → project override → legacy; trả cả `speech_mode` và `effective_speech_source`.
+- [x] 3.4 Sửa ba chỗ gọi `speech_source_for_language` trực tiếp (`video_packages.py:284,328,411`) để đọc override.
 - [ ] 3.5 Implement derive `dialogue_mode` và `clip_audio_mode` từ `speech_mode`; không cho set độc lập.
 - [ ] 3.6 Refactor `build_veo_native_speech_section()` nhận explicit source/cue thay vì suy từ ngôn ngữ.
 - [ ] 3.7 Thêm `speech_source` vào danh sách field làm stale prompt (`video_phase2.py:3517`).
@@ -37,13 +37,13 @@
 
 ## 4. Giai đoạn D — Route `/news-video` parity đầy đủ
 
-- [ ] 4.1 Tạo `app/src/components/NewsVideo/NewsVideo.tsx`, đăng ký route `/news-video` trong `router.tsx` theo pattern hiện có (import trực tiếp, không lazy).
-- [ ] 4.2 Thêm `/news-video` vào `isWideWorkspace` (`router.tsx:83-89`) và mục Sidebar “Video tin tức”.
-- [ ] 4.3 Tạo `backend/routes/news_video.py` prefix `/news-video`, `route_class=video_errors.AIVideoRoute`; đăng ký trong `backend/routes/__init__.py`.
-- [ ] 4.4 Tạo bảng `news_video_workflows` (1 dòng/project, FK `video_projects.id`) cho `visual_format`, `source_note`, `default_speech_source`.
+- [x] 4.1 Tạo `app/src/components/NewsVideo/NewsVideo.tsx`, đăng ký route `/news-video` trong `router.tsx` theo pattern hiện có (import trực tiếp, không lazy).
+- [x] 4.2 Thêm `/news-video` vào `isWideWorkspace` (`router.tsx:83-89`) và mục Sidebar “Video tin tức”.
+- [x] 4.3 Tạo `backend/routes/news_video.py` prefix `/news-video`, `route_class=video_errors.AIVideoRoute`; đăng ký trong `backend/routes/__init__.py`.
+- [x] 4.4 Tạo bảng `news_video_workflows` (1 dòng/project, FK `video_projects.id`) cho `visual_format`, `source_note`, `default_speech_source`.
 - [ ] 4.5 Dùng nguyên `STEP_ORDER` (`video_auto_runs.py:73-91`) và `material_target` (`:59-62`) cho auto-run News; không tạo stepper riêng.
-- [ ] 4.6 CRUD project/shot và `POST /projects/{id}/plan` với input tin tức, 9:16, thời lượng shot; response/error tiếng Việt.
-- [ ] 4.7 `POST /projects/{id}/prompts`, `GET /prompt-pack`, `GET /shots/{shot_id}/prompt` dùng cùng builder giai đoạn B.
+- [x] 4.6 CRUD project/shot và `POST /projects/{id}/plan` với input tin tức, 9:16, thời lượng shot; response/error tiếng Việt.
+- [x] 4.7 `POST /projects/{id}/prompts`, `GET /prompt-pack`, `GET /shots/{shot_id}/prompt` dùng cùng builder giai đoạn B.
 - [ ] 4.8 Facade upload clip, probe metadata, speech-review và voice/TTS; mọi thao tác nhận `shot_id` explicit.
 - [ ] 4.9 Readiness theo effective source; native cần audio + approved, Voicebox cần TTS completed, none không cần speech.
 - [ ] 4.10 Tái dùng `AIVideoRenderPanel.tsx` để **dựng MP4 tại chỗ** ở `/news-video`; truyền `effective_speech_source` vào render manifest.

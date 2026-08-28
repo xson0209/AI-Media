@@ -1016,6 +1016,37 @@ class ApiClient {
     return this.request<VideoProjectResponse[]>('/ai-video/projects');
   }
 
+  async listNewsVideoProjects(): Promise<VideoProjectResponse[]> {
+    return this.request<VideoProjectResponse[]>('/news-video/projects');
+  }
+
+  async createNewsVideoProject(data: VideoProjectCreate): Promise<VideoProjectResponse> {
+    return this.request<VideoProjectResponse>('/news-video/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getNewsVideoProject(projectId: string): Promise<VideoProjectDetailResponse> {
+    return this.request<VideoProjectDetailResponse>(`/news-video/projects/${projectId}`);
+  }
+
+  async planNewsVideoProject(projectId: string): Promise<VideoShotResponse[]> {
+    return this.request<VideoShotResponse[]>(`/news-video/projects/${projectId}/plan`, { method: 'POST' });
+  }
+
+  async generateNewsVideoPrompts(projectId: string): Promise<VideoShotPromptPackResponse> {
+    return this.request<VideoShotPromptPackResponse>(`/news-video/projects/${projectId}/prompts`, { method: 'POST' });
+  }
+
+  async getNewsVideoPrompt(projectId: string, shotId: string): Promise<VideoPromptContentResponse> {
+    return this.request<VideoPromptContentResponse>(`/news-video/projects/${projectId}/shots/${shotId}/prompt`);
+  }
+
+  async downloadNewsVideoPromptPack(projectId: string): Promise<DownloadedBlob> {
+    return this.download(`/news-video/projects/${projectId}/prompt-pack`, `news-video-prompts-${projectId}.txt`);
+  }
+
   async getVideoProjectCharacterFlow(projectId: string): Promise<VideoProjectCharacterFlowResponse> {
     return this.request<VideoProjectCharacterFlowResponse>(
       `/ai-video/projects/${projectId}/character-flow`,

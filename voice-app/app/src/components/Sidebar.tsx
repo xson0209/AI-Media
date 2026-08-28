@@ -30,6 +30,7 @@ const tabs: Array<{
   { id: 'video-inspiration', path: '/video-inspiration', icon: FileVideo, label: 'Lấy cảm hứng từ video' },
   { id: 'research', path: '/research', icon: BookOpenCheck, label: 'Nghiên cứu ý tưởng' },
   { id: 'ai-video', path: '/ai-video', icon: Clapperboard, label: 'Dự án prompt video' },
+  { id: 'news-video', path: '/news-video', icon: Clapperboard, label: 'Video tin tức' },
   { id: 'product-video', path: '/product-video', icon: Package, label: 'Prompt video sản phẩm' },
   { id: 'comic-series-analysis', path: '/comic-series-analysis', icon: BookImage, label: 'Phân tích truyện tranh' },
   { id: 'story-studio', path: '/story-studio', icon: BookOpenText, label: 'Story Studio' },

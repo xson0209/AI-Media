@@ -1105,6 +1105,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             "episode_title": "VARCHAR",
             "phase": "VARCHAR NOT NULL DEFAULT 'phase1'",
             "target_language": "VARCHAR NOT NULL DEFAULT 'en'",
+            "speech_source": "VARCHAR",
             "video_purpose": "VARCHAR NOT NULL DEFAULT 'custom'",
             "dialogue_mode": "VARCHAR NOT NULL DEFAULT 'voiceover'",
             "narration_density": "VARCHAR NOT NULL DEFAULT 'balanced'",
@@ -1129,6 +1130,17 @@ def _migrate_ai_video_assistant(engine) -> None:
             if column_name not in project_columns:
                 conn.execute(text(f"ALTER TABLE video_projects ADD COLUMN {column_name} {column_sql}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_video_projects_series_episode ON video_projects(series_id, episode_number)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS news_video_workflows (
+                project_id VARCHAR PRIMARY KEY,
+                visual_format VARCHAR NOT NULL DEFAULT 'tech_explainer',
+                source_note TEXT,
+                default_speech_source VARCHAR NOT NULL DEFAULT 'voicebox_khong_context',
+                created_at DATETIME,
+                updated_at DATETIME,
+                FOREIGN KEY (project_id) REFERENCES video_projects(id)
+            )
+        """))
         scene_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(video_scenes)")).fetchall()}
         if "approved" not in scene_columns:
             conn.execute(text("ALTER TABLE video_scenes ADD COLUMN approved BOOLEAN NOT NULL DEFAULT 0"))
@@ -1143,6 +1155,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             "sound_design_json": "JSON",
             "micro_scenes_json": "JSON",
             "speech_cues_json": "JSON",
+            "speech_source_override": "VARCHAR",
             "retainability_quality_check": "JSON",
             "revision": "INTEGER NOT NULL DEFAULT 1",
         }

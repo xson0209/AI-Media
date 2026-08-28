@@ -16,6 +16,16 @@ from . import video_series_characters
 VEO_NATIVE_LANGUAGE = "vi"
 SPEECH_SOURCE_VEO_NATIVE = "veo_native"
 SPEECH_SOURCE_PROJECT_AUDIO = "project_audio"
+SPEECH_SOURCE_NONE = "none"
+
+# News Video UI modes. Legacy projects continue to use the two canonical sources.
+NEWS_SPEECH_MODES = {
+    "veo_narration",
+    "veo_dialogue",
+    "voicebox_co_context",
+    "voicebox_khong_context",
+    "none",
+}
 
 
 def _text(value: Any, *, max_length: int = 6000) -> str:
@@ -31,11 +41,37 @@ def speech_source_for_language(target_language: str | None) -> str:
     return SPEECH_SOURCE_VEO_NATIVE if language == VEO_NATIVE_LANGUAGE else SPEECH_SOURCE_PROJECT_AUDIO
 
 
-def uses_veo_native_speech(project_or_language: DBVideoProject | str | None) -> bool:
+def speech_mode_for(project: DBVideoProject | None, shot: DBVideoShot | None = None) -> str | None:
+    """Resolve explicit News speech mode; NULL keeps legacy behavior."""
+    shot_mode = getattr(shot, "speech_source_override", None) if shot is not None else None
+    project_mode = getattr(project, "speech_source", None) if project is not None else None
+    for value in (shot_mode, project_mode):
+        mode = _text(value, max_length=80).lower()
+        if mode in NEWS_SPEECH_MODES:
+            return mode
+    return None
+
+
+def effective_speech_source(project: DBVideoProject | None, shot: DBVideoShot | None = None) -> str:
+    mode = speech_mode_for(project, shot)
+    if mode in {"veo_narration", "veo_dialogue"}:
+        return SPEECH_SOURCE_VEO_NATIVE
+    if mode in {"voicebox_co_context", "voicebox_khong_context", "none"}:
+        return SPEECH_SOURCE_PROJECT_AUDIO
+    language = getattr(project, "target_language", None) if project is not None else project
+    return speech_source_for_language(language)
+
+
+def uses_veo_native_speech(project_or_language: DBVideoProject | str | None, shot: DBVideoShot | None = None) -> bool:
     if isinstance(project_or_language, str) or project_or_language is None:
         language = project_or_language
+        project = None
     else:
+        project = project_or_language
         language = getattr(project_or_language, "target_language", None)
+    mode = speech_mode_for(project, shot)
+    if mode is not None:
+        return mode in {"veo_narration", "veo_dialogue"}
     return speech_source_for_language(language) == SPEECH_SOURCE_VEO_NATIVE
 
 
@@ -101,6 +137,7 @@ def normalize_speech_cues(
                 or None,
                 "emotion": _text(raw.get("emotion") or raw.get("emotional_tone"), max_length=2000) or None,
                 "context": _text(raw.get("context") or raw.get("scene_context") or shot_context, max_length=6000) or None,
+                "pronunciation_notes": _text(raw.get("pronunciation_notes") or raw.get("pronunciation"), max_length=4000) or None,
                 "start_seconds": float(start_seconds) if isinstance(start_seconds, (int, float)) and start_seconds >= 0 else None,
                 "end_seconds": float(end_seconds) if isinstance(end_seconds, (int, float)) and end_seconds >= 0 else None,
                 "lip_sync_required": bool(raw.get("lip_sync_required", speaker_role == "visible_character")),
@@ -128,6 +165,7 @@ def normalize_speech_cues(
             "voice_description": None,
             "delivery": None,
             "emotion": _text(first_visible.get("expression") if first_visible else None, max_length=2000) or None,
+            "pronunciation_notes": None,
             "context": _text(shot_context, max_length=6000) or None,
             "start_seconds": None,
             "end_seconds": None,
@@ -244,6 +282,7 @@ def build_veo_native_speech_section(project: DBVideoProject, shot: DBVideoShot, 
                 f"- Personality affecting delivery: {personality or 'follow the established character personality and remain consistent'}",
                 f"- Current emotion: {emotion or 'natural emotion matching the scene'}",
                 f"- Delivery and pacing: {delivery or 'clear Vietnamese speech paced to fit this clip without rushing or truncation'}",
+                f"- Pronunciation notes: {_text(cue.get('pronunciation_notes'), max_length=4000) or 'none'}",
                 f"- Scene context: {context or 'follow the visual action and emotional state already described in the visual prompt'}",
                 f"- Lip sync: {'required for the visible speaker' if cue.get('lip_sync_required') else 'not required; use a natural off-screen voice if the speaker is not visible'}",
                 f'- Speak exactly once in Vietnamese: "{_text(cue.get("text"), max_length=20000)}"',
@@ -258,3 +297,54 @@ def build_veo_native_speech_section(project: DBVideoProject, shot: DBVideoShot, 
         ]
     )
     return "\n".join(lines).strip()
+
+
+def build_provider_audio_contract(
+    project: DBVideoProject,
+    shot: DBVideoShot,
+    db: Session | None = None,
+) -> str:
+    """Return deterministic audio instructions for manual/provider prompt consumers."""
+    mode = speech_mode_for(project, shot)
+    if mode in {"veo_narration", "veo_dialogue"}:
+        if db is not None:
+            return build_veo_native_speech_section(project, shot, db)
+        cues = speech_cues_for_shot(shot, project)
+        kind = "off-screen Vietnamese narration" if mode == "veo_narration" else "visible Vietnamese dialogue with accurate lip-sync"
+        lines = ["AUDIO CONTRACT — VEO NATIVE:", f"Generate {kind} inside the clip.", "Speak each line exactly once; no paraphrase, translation, extra words, subtitles, logos, or watermarks."]
+        lines.extend(f'Speaker {cue.get("speaker_name", "Narrator")}: "{cue.get("text", "")}"' for cue in cues)
+        return "\n".join(lines)
+    if mode == "voicebox_co_context":
+        context = spoken_text_for_shot(shot, project)
+        return (
+            "ÂM THANH — TTS VOICEBOX HẬU KỲ:\n"
+            f"Nội dung lời chỉ là ngữ cảnh nhịp hình, không được phát thành tiếng: {context}\n"
+            "CẤM spoken words, narration, dialogue, voiceover, lip-sync, subtitle, chữ, logo và watermark. "
+            "Voicebox sẽ tạo lời đọc sau khi clip được upload."
+        )
+    if mode in {"voicebox_khong_context", "none"}:
+        return (
+            "ÂM THANH — KHÔNG LỜI:\n"
+            "CẤM mọi spoken words, narration, dialogue, voiceover và lip-sync. "
+            "Chỉ ambience/SFX không lời nếu policy cho phép; không tạo subtitle, chữ, logo hoặc watermark."
+        )
+    return ""
+
+def build_provider_prompt(visual: str, speech_mode: str | None, cues: list[dict[str, Any]] | None = None, negative: str | None = None, continuity: str | None = None) -> dict[str, Any]:
+    """Compose deterministic Veo-ready content at read time."""
+    import hashlib
+    mode = _text(speech_mode, max_length=80).lower() or "none"
+    if mode not in NEWS_SPEECH_MODES:
+        mode = "none"
+    cue_lines = [f'Speaker {c.get("speaker_name", "Narrator")}: "{_text(c.get("text"), max_length=20000)}"' for c in (cues or []) if _text(c.get("text"))]
+    if mode == "veo_narration":
+        audio = "AUDIO CONTRACT — VEO NATIVE NARRATION: Speak exact lines once as off-screen Vietnamese narration. No paraphrase, extra words, subtitles, or text overlays.\n" + "\n".join(cue_lines)
+    elif mode == "veo_dialogue":
+        audio = "AUDIO CONTRACT — VEO NATIVE DIALOGUE: Visible speaker, stable identity/wardrobe, exact Vietnamese lines with lip-sync; never swap speaker or paraphrase.\n" + "\n".join(cue_lines)
+    elif mode == "voicebox_co_context":
+        audio = "AUDIO CONTRACT — VOICEBOX: Lines are timing context only. Veo must be silent: no spoken words, narration, dialogue, voiceover, or lip-sync. Voicebox adds TTS after upload.\n" + "\n".join(cue_lines)
+    else:
+        audio = "AUDIO CONTRACT — SILENT CLIP: No speech, narration, dialogue, voiceover, or lip-sync; ambience/SFX only if allowed."
+    negative_text = _text(negative, max_length=12000) or "subtitles, captions, text overlays, logos, watermarks, extra speakers, paraphrased dialogue"
+    provider = "\n\n".join(part for part in [_text(visual, max_length=20000), f"Continuity: {_text(continuity)}" if _text(continuity) else "", audio, "NEGATIVE PROMPT:\n" + negative_text] if part)
+    return {"provider_prompt": provider, "negative_prompt": negative_text, "audio_contract": audio, "input_fingerprint": hashlib.sha256(provider.encode("utf-8")).hexdigest()}

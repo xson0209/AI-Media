@@ -29,6 +29,7 @@ import { StoryStudio } from '@/components/StoryStudio/StoryStudio';
 import { Toaster } from '@/components/ui/toaster';
 import { ComicSeriesAnalysis } from '@/components/ComicSeriesAnalysis/ComicSeriesAnalysis';
 import { VideoInspiration } from '@/components/VideoInspiration/VideoInspiration';
+import { NewsVideo } from '@/components/NewsVideo/NewsVideo';
 import { VoicesTab } from '@/components/VoicesTab/VoicesTab';
 import { useGenerationProgress } from '@/lib/hooks/useGenerationProgress';
 import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
@@ -85,6 +86,7 @@ function RootLayout() {
     routerState.location.pathname === '/product-video' ||
     routerState.location.pathname === '/story-studio' ||
     routerState.location.pathname === '/video-inspiration' ||
+    routerState.location.pathname === '/news-video' ||
     routerState.location.pathname === '/research' ||
     routerState.location.pathname.startsWith('/comic-series-analysis');
 
@@ -239,6 +241,12 @@ const videoInspirationRoute = createRoute({
   component: VideoInspiration,
 });
 
+const newsVideoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/news-video',
+  component: NewsVideo,
+});
+
 // Models route
 const modelsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -337,6 +345,7 @@ const routeTree = rootRoute.addChildren([
   voicesRoute,
   effectsRoute,
   videoInspirationRoute,
+  newsVideoRoute,
   researchRoute,
   comicSeriesAnalysisRoute,
   comicSeriesAnalysisDetailRoute,

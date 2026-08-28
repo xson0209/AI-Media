@@ -3496,11 +3496,12 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
         "sound_design_json",
         "micro_scenes",
         "speech_cues",
+        "speech_source_override",
         "retainability_quality_check",
     }
     if any(key in changed for key in prompt_affecting_fields):
         shot.prompt_status = "stale"
-        if any(key in changed for key in {"english_narration", "duration_seconds", "speech_cues"}):
+        if any(key in changed for key in {"english_narration", "duration_seconds", "speech_cues", "speech_source_override"}):
             shot.subtitle_status = "stale"
             from . import video_subtitles
 
@@ -3514,7 +3515,7 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
     shot.updated_at = datetime.utcnow()
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is not None:
-        if video_speech.uses_veo_native_speech(project) and any(
+        if video_speech.uses_veo_native_speech(project, shot) and any(
             key in changed for key in prompt_affecting_fields
         ):
             db.query(DBVideoShotClip).filter(
@@ -3663,6 +3664,15 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
         parts.extend(["", "Negative prompt:", prompt.negative_prompt.strip()])
     if prompt.prompt_explanation_vi.strip():
         parts.extend(["", "Bản giải thích tiếng Việt:", prompt.prompt_explanation_vi.strip()])
+    # Compose the audio policy at read time so manual Veo copy/download and
+    # provider automation share one deterministic contract.
+    mode = video_speech.speech_mode_for(project, shot)
+    if mode:
+        contract = video_speech.build_provider_prompt(
+            "", mode, video_speech.speech_cues_for_shot(shot, project),
+            prompt.negative_prompt, prompt.continuity_notes,
+        )
+        parts.extend(["", contract["audio_contract"]])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
 
@@ -4196,13 +4206,18 @@ def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> mode
     if project is None or shot is None or prompt is None:
         return None
     scene = db.query(DBVideoScene).filter(DBVideoScene.id == shot.scene_id).first() if shot.scene_id else None
+    content = _stored_prompt_download_text(prompt, shot, project)
+    mode = video_speech.speech_mode_for(project, shot)
+    if mode:
+        contract = video_speech.build_provider_prompt(prompt.prompt or "", mode, video_speech.speech_cues_for_shot(shot, project), prompt.negative_prompt, prompt.continuity_notes)
+        content = contract["provider_prompt"] + "\n"
     return models.VideoPromptContentResponse(
         project_id=project_id,
         scene_id=shot.scene_id,
         shot_id=shot_id,
         prompt_id=prompt.id,
         filename=video_storage.video_prompt_filename(scene.scene_order if scene else None, shot.shot_order),
-        content=prompt.prompt,
+        content=content,
         prompt_explanation_vi=prompt.prompt_explanation_vi,
         negative_prompt=prompt.negative_prompt,
         retention_notes=prompt.retention_notes,

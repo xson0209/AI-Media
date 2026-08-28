@@ -75,6 +75,7 @@ from .models import (
     VideoProviderProjectBinding,
     VideoProviderSession,
     VideoProject,
+    NewsVideoWorkflow,
     VideoProjectContextSnapshot,
     VideoProjectMemoryCard,
     VideoProjectTargetTimelineBeat,

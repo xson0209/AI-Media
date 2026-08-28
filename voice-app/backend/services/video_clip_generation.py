@@ -134,10 +134,6 @@ FLOW_PROVIDER_CONTEXT_ONLY_NOTE = (
 FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS = (
     (re.compile(r"\bAnimation and subtitle-safe rule:\s*", re.IGNORECASE), "Motion and context rule: "),
     (re.compile(r"\balign visible action beats with(?: the)? narration timing\b", re.IGNORECASE), "align visible action beats with the provided story timing"),
-    (
-        re.compile(r"\bUse (?!the provided\b)([^.]*?)\b(?:voice[-\s]?over|narration|narrator|spoken audio)\b[^.]*\.\s*", re.IGNORECASE),
-        r"Use the provided \1narration/subtitle context only to guide the visuals. ",
-    ),
     (re.compile(r"\s*(?:while|so that|so)\s+(?:the\s+)?(?:voice[-\s]?over|narration|narrator|spoken audio)[^.,;\n]*(?=[.,;\n]|$)", re.IGNORECASE), ""),
     (re.compile(r",?\s*(?:and\s+)?leave the lower caption area[^.\n]*(?:\.|$)", re.IGNORECASE), "."),
     (re.compile(r"\b(?:yellow\s+)?karaoke\s+subtitle\s+added\s+during\s+render\b", re.IGNORECASE), "post-render subtitle added by Voicebox"),
@@ -288,7 +284,6 @@ def provider_safe_prompt_for_veo(
     safe = _strip_provider_post_render_cues(safe)
     safe = compact_prompt_for_veo_provider(safe)
     if native_speech_section and native_speech_section.strip():
-        safe = _strip_provider_spoken_audio_blockers(safe)
         safe = "\n\n".join([safe.strip(), native_speech_section.strip()]).strip()
     else:
         safe = _strip_provider_post_render_cues(safe, add_context_note=True, narration_context=narration_context)
@@ -976,7 +971,7 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
                 provider_project_url = active_binding.provider_project_url if active_binding else None
                 native_speech_section = (
                     video_speech.build_veo_native_speech_section(project, shot, db)
-                    if video_speech.uses_veo_native_speech(project)
+                    if video_speech.uses_veo_native_speech(project, shot)
                     else None
                 )
                 provider_prompt, provider_prompt_sanitized = provider_safe_prompt_for_veo(

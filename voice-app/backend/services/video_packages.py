@@ -281,7 +281,7 @@ def get_package_readiness(project_id: str, db: Session) -> models.VideoPackageRe
         project_id=project_id,
         language=video_language.normalize_video_language(getattr(project, "target_language", None)),
         speech_source=(
-            video_speech.speech_source_for_language(getattr(project, "target_language", None))
+            video_speech.effective_speech_source(project)
             if getattr(project, "phase", "phase1") == "phase2"
             else video_speech.SPEECH_SOURCE_PROJECT_AUDIO
         ),
@@ -325,7 +325,7 @@ def _manifest(project: DBVideoProject, scenes: list[DBVideoScene], db: Session) 
         project_title=project.title,
         language=video_language.normalize_video_language(getattr(project, "target_language", None)),
         speech_source=(
-            video_speech.speech_source_for_language(getattr(project, "target_language", None))
+            video_speech.effective_speech_source(project)
             if getattr(project, "phase", "phase1") == "phase2"
             else video_speech.SPEECH_SOURCE_PROJECT_AUDIO
         ),
@@ -408,7 +408,7 @@ def _shot_list_csv(project: DBVideoProject, shots: list[DBVideoShot], db: Sessio
             shot.duration_seconds or "",
             shot.vietnamese_description or "",
             shot.english_narration or "",
-            video_speech.speech_source_for_language(getattr(project, "target_language", None)),
+            video_speech.effective_speech_source(project, shot),
             json.dumps(shot.speech_cues_json or [], ensure_ascii=False),
             shot.shot_type or "",
             shot.camera_angle or "",
