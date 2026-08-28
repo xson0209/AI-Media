@@ -101,6 +101,17 @@ def review_news_shot_speech(project_id: str, shot_id: str, db: Session = Depends
     mode = video_speech.speech_mode_for(project, shot)
     return {"shot_id": shot_id, "speech_mode": mode, "effective_speech_source": video_speech.effective_speech_source(project, shot), "cues": video_speech.speech_cues_for_shot(shot, project), "text": video_speech.spoken_text_for_shot(shot, project)}
 
+@router.get("/projects/{project_id}/speech-audit")
+def audit_news_speech(project_id: str, db: Session = Depends(get_db)):
+    project = _project_or_404(project_id, db)
+    issues = []
+    for shot in db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id).order_by(DBVideoShot.shot_order.asc()).all():
+        expected = video_speech.spoken_text_for_shot(shot, project)
+        prompt = video_phase2.get_video_prompt_content(project_id, shot.id, db)
+        if expected and (prompt is None or expected.casefold() not in prompt.content.casefold()):
+            issues.append({"shot_id": shot.id, "shot_order": shot.shot_order, "reason": "Prompt chưa chứa đúng lời thoại.", "expected_text": expected})
+    return {"project_id": project_id, "issues": issues, "count": len(issues)}
+
 @router.get("/projects/{project_id}/prompt-pack", response_class=PlainTextResponse)
 def download_news_prompt_pack(project_id: str, db: Session = Depends(get_db)):
     _project_or_404(project_id, db)

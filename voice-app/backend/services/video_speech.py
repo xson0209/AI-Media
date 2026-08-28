@@ -26,6 +26,8 @@ NEWS_SPEECH_MODES = {
     "voicebox_khong_context",
     "none",
 }
+WORDS_PER_SECOND_MIN = 2.5
+WORDS_PER_SECOND_MAX = 3.0
 
 
 def _text(value: Any, *, max_length: int = 6000) -> str:
@@ -197,6 +199,19 @@ def spoken_text_for_shot(shot: DBVideoShot, project: DBVideoProject | None = Non
     text = " ".join(line for line in lines if line).strip()
     return text or _text(getattr(shot, "english_narration", None), max_length=20000)
 
+def word_budget_warning(text: str | None, duration_seconds: float | None) -> str | None:
+    """Return a Vietnamese warning when speech cannot fit the shot duration."""
+    if not text or not duration_seconds or duration_seconds <= 0:
+        return None
+    words = len(_text(text, max_length=20000).split())
+    maximum = int(duration_seconds * WORDS_PER_SECOND_MAX)
+    if words > maximum:
+        return f"Lời thoại có {words} từ nhưng shot {duration_seconds:g}s chỉ nên tối đa khoảng {maximum} từ; hãy rút ngắn hoặc chia shot, không tự cắt câu."
+    minimum = int(duration_seconds * WORDS_PER_SECOND_MIN)
+    if words < minimum:
+        return f"Lời thoại có {words} từ, thấp hơn nhịp khuyến nghị khoảng {minimum} từ cho shot {duration_seconds:g}s; hãy cân nhắc thêm ngữ cảnh."
+    return None
+
 
 def _profile_maps(project: DBVideoProject, db: Session) -> tuple[dict[str, DBSeriesCharacterProfile], dict[str, DBSeriesCharacterProfile]]:
     if not project.series_id:
@@ -347,4 +362,4 @@ def build_provider_prompt(visual: str, speech_mode: str | None, cues: list[dict[
         audio = "AUDIO CONTRACT — SILENT CLIP: No speech, narration, dialogue, voiceover, or lip-sync; ambience/SFX only if allowed."
     negative_text = _text(negative, max_length=12000) or "subtitles, captions, text overlays, logos, watermarks, extra speakers, paraphrased dialogue"
     provider = "\n\n".join(part for part in [_text(visual, max_length=20000), f"Continuity: {_text(continuity)}" if _text(continuity) else "", audio, "NEGATIVE PROMPT:\n" + negative_text] if part)
-    return {"provider_prompt": provider, "negative_prompt": negative_text, "audio_contract": audio, "input_fingerprint": hashlib.sha256(provider.encode("utf-8")).hexdigest()}
+    return {"provider_prompt": provider, "negative_prompt": negative_text, "audio_contract": audio, "input_fingerprint": hashlib.sha256(provider.encode("utf-8")).hexdigest(), "word_budget_warning": None}

@@ -2,7 +2,7 @@
 
 - [ ] 1.1 Thêm kiểm tra vào `_quality_check()` (`video_phase2.py:3553-3577`): shot có `speech_cues_json` hoặc `english_narration` không rỗng mà provider content không chứa thoại → `needs_review`.
 - [ ] 1.2 Chặn Copy/Download cho shot `needs_review` vì thiếu thoại; trả lý do tiếng Việt kèm số shot.
-- [ ] 1.3 Thêm endpoint/script audit liệt kê shot có cue nhưng prompt thiếu thoại, theo project.
+- [x] 1.3 Thêm endpoint/script audit liệt kê shot có cue nhưng prompt thiếu thoại, theo project.
 - [ ] 1.4 Chạy audit trên 30 project Cartoon, xác nhận đúng 24 shot và 7 shot đã có clip.
 - [ ] 1.5 Test gate: shot có cue + prompt thiếu thoại → chặn; shot không cue → không chặn; shot đủ thoại → pass.
 
@@ -18,7 +18,7 @@
 - [x] 2.8 Compose provider content **lúc đọc** cho Copy, Download, prompt pack và provider automation; không lưu cột `provider_ready_prompt`.
 - [x] 2.9 Xoá `FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS[2]` (`video_clip_generation.py:138-140`) và `_strip_provider_spoken_audio_blockers` (`:262-272`).
 - [x] 2.10 Thêm `pronunciation_notes` vào `VideoShotSpeechCue` (`backend/models.py:469-485`); giữ tương thích cue cũ.
-- [ ] 2.11 Thêm word-budget theo thời lượng; vượt ngưỡng trả lỗi tiếng Việt yêu cầu rút ngắn/chia shot, không tự cắt câu.
+- [x] 2.11 Thêm word-budget theo thời lượng; vượt ngưỡng trả lỗi tiếng Việt yêu cầu rút ngắn/chia shot, không tự cắt câu.
 - [ ] 2.12 Ghép negative prompt bằng khối `NEGATIVE PROMPT`/`Avoid:` khi provider không có ô riêng.
 - [ ] 2.13 Spike đối chiếu word-budget (2,5–3,0 từ/giây) với timing TTS tiếng Việt thật trước khi khóa ngưỡng.
 
