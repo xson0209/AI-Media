@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from . import video_errors
 from ..database import VideoProject as DBVideoProject, VideoShot as DBVideoShot, NewsVideoWorkflow as DBNewsWorkflow, get_db
-from ..services import video_phase2, video_projects, video_rendering
+from ..services import video_phase2, video_projects, video_rendering, video_speech
 
 router = APIRouter(prefix="/news-video", tags=["news-video"], route_class=video_errors.AIVideoRoute)
 
@@ -92,6 +92,15 @@ def get_news_shot_prompt(project_id: str, shot_id: str, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Không tìm thấy prompt Veo 3 cho shot này.")
     return content
 
+@router.get("/projects/{project_id}/shots/{shot_id}/speech-review")
+def review_news_shot_speech(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    project = _project_or_404(project_id, db)
+    shot = db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id, DBVideoShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
+    mode = video_speech.speech_mode_for(project, shot)
+    return {"shot_id": shot_id, "speech_mode": mode, "effective_speech_source": video_speech.effective_speech_source(project, shot), "cues": video_speech.speech_cues_for_shot(shot, project), "text": video_speech.spoken_text_for_shot(shot, project)}
+
 @router.get("/projects/{project_id}/prompt-pack", response_class=PlainTextResponse)
 def download_news_prompt_pack(project_id: str, db: Session = Depends(get_db)):
     _project_or_404(project_id, db)
@@ -130,3 +139,29 @@ async def upload_news_shot_clip(
     if clip is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy shot video.")
     return clip
+
+@router.get("/projects/{project_id}/shots/{shot_id}/clip", response_model=models.VideoShotClipResponse | None)
+def get_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    return video_rendering.get_active_clip(project_id, shot_id, db)
+
+@router.delete("/projects/{project_id}/shots/{shot_id}/clip")
+def delete_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    deleted = video_rendering.delete_shot_clip(project_id, shot_id, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy clip của shot.")
+    return {"deleted": True}
+
+@router.get("/projects/{project_id}/render/readiness")
+def news_render_readiness(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    return video_rendering.get_render_readiness(project_id, db, video_rendering.render_settings_for_project(project_id, db))
+
+@router.post("/projects/{project_id}/render/jobs", response_model=models.VideoRenderJobResponse)
+async def create_news_render_job(project_id: str, data: models.VideoRenderJobCreateRequest | None = None, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    try:
+        return await video_rendering.create_render_job(project_id, data or models.VideoRenderJobCreateRequest(), db)
+    except video_rendering.VideoRenderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
