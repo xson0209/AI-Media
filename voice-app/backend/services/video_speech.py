@@ -250,11 +250,21 @@ def _guest_maps(project: DBVideoProject) -> tuple[dict[str, dict[str, Any]], dic
     return by_id, by_name
 
 
-def build_veo_native_speech_section(project: DBVideoProject, shot: DBVideoShot, db: Session) -> str:
+def build_veo_native_speech_section(
+    project: DBVideoProject,
+    shot: DBVideoShot,
+    db: Session,
+    *,
+    speech_mode: str | None = None,
+    cues: list[dict[str, Any]] | None = None,
+) -> str:
     """Build an append-only provider section; the existing visual prompt remains untouched."""
-    if not uses_veo_native_speech(project):
+    resolved_mode = speech_mode or speech_mode_for(project, shot)
+    if resolved_mode is not None and resolved_mode not in {"veo_narration", "veo_dialogue"}:
         return ""
-    cues = speech_cues_for_shot(shot, project)
+    if resolved_mode is None and not uses_veo_native_speech(project, shot):
+        return ""
+    cues = cues if cues is not None else speech_cues_for_shot(shot, project)
     if not cues:
         return ""
     profiles_by_id, profiles_by_name = _profile_maps(project, db)
@@ -336,7 +346,7 @@ def build_provider_audio_contract(
     mode = speech_mode_for(project, shot)
     if mode in {"veo_narration", "veo_dialogue"}:
         if db is not None:
-            return build_veo_native_speech_section(project, shot, db)
+            return build_veo_native_speech_section(project, shot, db, speech_mode=mode, cues=speech_cues_for_shot(shot, project))
         cues = speech_cues_for_shot(shot, project)
         kind = "off-screen Vietnamese narration" if mode == "veo_narration" else "visible Vietnamese dialogue with accurate lip-sync"
         lines = ["AUDIO CONTRACT — VEO NATIVE:", f"Generate {kind} inside the clip.", "Speak each line exactly once; no paraphrase, translation, extra words, subtitles, logos, or watermarks."]
