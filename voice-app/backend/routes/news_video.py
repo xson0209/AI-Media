@@ -111,7 +111,7 @@ def review_news_shot_speech(project_id: str, shot_id: str, db: Session = Depends
     if shot is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
     mode = video_speech.speech_mode_for(project, shot)
-    return {"shot_id": shot_id, "speech_mode": mode, "effective_speech_source": video_speech.effective_speech_source(project, shot), "cues": video_speech.speech_cues_for_shot(shot, project), "text": video_speech.spoken_text_for_shot(shot, project)}
+    return {"shot_id": shot_id, "speech_mode": mode, "effective_speech_source": video_speech.effective_speech_source(project, shot), "audio_policy": video_speech.audio_policy_for(project, shot), "cues": video_speech.speech_cues_for_shot(shot, project), "text": video_speech.spoken_text_for_shot(shot, project)}
 
 @router.get("/projects/{project_id}/speech-audit")
 def audit_news_speech(project_id: str, db: Session = Depends(get_db)):

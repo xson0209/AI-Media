@@ -28,12 +28,12 @@
 - [x] 3.2 Sửa `uses_veo_native_speech()` (`video_speech.py:34-39`) đọc override trước; `NULL` giữ `speech_source_for_language`.
 - [x] 3.3 Tạo resolver shot override → project override → legacy; trả cả `speech_mode` và `effective_speech_source`.
 - [x] 3.4 Sửa ba chỗ gọi `speech_source_for_language` trực tiếp (`video_packages.py:284,328,411`) để đọc override.
-- [ ] 3.5 Implement derive `dialogue_mode` và `clip_audio_mode` từ `speech_mode`; không cho set độc lập.
+- [x] 3.5 Implement derive `dialogue_mode` và `clip_audio_mode` từ `speech_mode`; không cho set độc lập.
 - [ ] 3.6 Refactor `build_veo_native_speech_section()` nhận explicit source/cue thay vì suy từ ngôn ngữ.
 - [ ] 3.7 Thêm `speech_source` vào danh sách field làm stale prompt (`video_phase2.py:3517`).
-- [ ] 3.8 API: PATCH project/shot nhận `speech_mode`; validate năm giá trị, lỗi tiếng Việt.
+- [x] 3.8 API: PATCH project/shot nhận `speech_mode`; validate năm giá trị, lỗi tiếng Việt.
 - [ ] 3.9 UI dropdown nguồn lời mức project và override mức shot cho `/ai-video`; hiển thị mode hiệu lực.
-- [ ] 3.10 Migration chạy được trên DB mới, DB legacy và chạy lặp; row `NULL` fallback đúng.
+- [x] 3.10 Migration chạy được trên DB mới, DB legacy và chạy lặp; row `NULL` fallback đúng.
 
 ## 4. Giai đoạn D — Route `/news-video` parity đầy đủ
 
@@ -51,8 +51,8 @@
 - [ ] 4.12 Hiển thị tiến trình bước xoá watermark rõ ràng, kèm cảnh báo lần đầu phải tải model, để người dùng không tưởng treo.
 - [ ] 4.13 Tái dùng `AIVideoPublishingMetadataPanel.tsx` cho bước hoàn thiện.
 - [ ] 4.14 Bước “Nguồn tin & chủ đề”: bài/transcript, ghi chú nguồn, `visual_format`, 9:16, thời lượng shot.
-- [ ] 4.15 Nhận URL làm **ghi chú nguồn**, sanitize scheme; helper text nói rõ hệ thống KHÔNG tự đọc bài và người dùng phải dán nội dung.
-- [ ] 4.16 Bước “Shot & âm thanh”: default mode + override năm mode theo shot, helper audio policy, word-budget warning.
+- [x] 4.15 Nhận URL làm **ghi chú nguồn**, sanitize scheme; helper text nói rõ hệ thống KHÔNG tự đọc bài và người dùng phải dán nội dung.
+- [x] 4.16 Bước “Shot & âm thanh”: default mode + override năm mode theo shot, helper audio policy, word-budget warning.
 - [ ] 4.17 Bước “Prompt Veo 3”: hiển thị riêng visual/audio/negative/provider content, Copy từng shot, Copy đủ điều kiện, tải pack UTF-8.
 - [ ] 4.18 Bước upload clip: chọn shot explicit, filename `news_<slug>_s01_v1.mp4`, probe duration/aspect/audio, mapping review.
 - [ ] 4.19 Editorial gate: source note/narration/disclosure/`asset_mode` tối thiểu; cô lập prompt injection trong input.

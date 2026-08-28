@@ -63,6 +63,19 @@ def effective_speech_source(project: DBVideoProject | None, shot: DBVideoShot | 
     language = getattr(project, "target_language", None) if project is not None else project
     return speech_source_for_language(language)
 
+def audio_policy_for(project: DBVideoProject | None, shot: DBVideoShot | None = None) -> dict[str, str | bool]:
+    """Derive render policy from one speech mode; dialogue/audio cannot diverge."""
+    mode = speech_mode_for(project, shot)
+    if mode == "veo_dialogue":
+        return {"speech_mode": mode, "dialogue_mode": "visible_character", "clip_audio_mode": "clip_only", "requires_tts": False}
+    if mode == "veo_narration":
+        return {"speech_mode": mode, "dialogue_mode": "voiceover", "clip_audio_mode": "clip_only", "requires_tts": False}
+    if mode == "voicebox_co_context":
+        return {"speech_mode": mode, "dialogue_mode": "voiceover", "clip_audio_mode": "voiceover", "requires_tts": True}
+    if mode == "none":
+        return {"speech_mode": mode, "dialogue_mode": "none", "clip_audio_mode": "clip_only", "requires_tts": False}
+    return {"speech_mode": mode or "legacy", "dialogue_mode": getattr(project, "dialogue_mode", "voiceover"), "clip_audio_mode": "voiceover", "requires_tts": True}
+
 
 def uses_veo_native_speech(project_or_language: DBVideoProject | str | None, shot: DBVideoShot | None = None) -> bool:
     if isinstance(project_or_language, str) or project_or_language is None:
