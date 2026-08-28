@@ -33,6 +33,7 @@ from . import (
     video_provider_sessions,
     video_provider_storage,
     video_rendering,
+    video_speech,
     video_storage,
     video_veo_chrome,
 )
@@ -258,7 +259,25 @@ def compact_prompt_for_veo_provider(prompt: str) -> str:
     compact = _normalize_flow_provider_prompt("\n\n".join(sections))
     return _truncate_flow_provider_prompt(compact)
 
-def provider_safe_prompt_for_veo(prompt: str, *, narration_context: str | None = None) -> tuple[str, bool]:
+def _strip_provider_spoken_audio_blockers(prompt: str) -> str:
+    safe = str(prompt or "")
+    safe = safe.replace(FLOW_PROVIDER_CONTEXT_ONLY_NOTE, "")
+    safe = re.sub(
+        r"\b(?:do not|don't|never)\s+(?:render|generate|include)\s+(?:any\s+)?spoken audio\b[.,;:]?",
+        "",
+        safe,
+        flags=re.IGNORECASE,
+    )
+    safe = re.sub(r"\bno\s+spoken audio\b[.,;:]?", "", safe, flags=re.IGNORECASE)
+    return _normalize_flow_provider_prompt(safe)
+
+
+def provider_safe_prompt_for_veo(
+    prompt: str,
+    *,
+    narration_context: str | None = None,
+    native_speech_section: str | None = None,
+) -> tuple[str, bool]:
     """Remove risky cues and provider-unfriendly duplicate notes before sending to Veo/Flow."""
     safe = prompt
     for pattern, replacement in PUBLIC_FIGURE_PROVIDER_REPLACEMENTS:
@@ -268,7 +287,11 @@ def provider_safe_prompt_for_veo(prompt: str, *, narration_context: str | None =
     replaced_public_figure_cues = safe != prompt
     safe = _strip_provider_post_render_cues(safe)
     safe = compact_prompt_for_veo_provider(safe)
-    safe = _strip_provider_post_render_cues(safe, add_context_note=True, narration_context=narration_context)
+    if native_speech_section and native_speech_section.strip():
+        safe = _strip_provider_spoken_audio_blockers(safe)
+        safe = "\n\n".join([safe.strip(), native_speech_section.strip()]).strip()
+    else:
+        safe = _strip_provider_post_render_cues(safe, add_context_note=True, narration_context=narration_context)
     if replaced_public_figure_cues:
         safe = (
             safe.strip()
@@ -868,7 +891,10 @@ async def _handoff_render(job_id: str) -> None:
         job = db.query(DBVideoClipGenerationJob).filter(DBVideoClipGenerationJob.id == job_id).first()
         if job is None or job.status not in {"completed", "completed_with_render_blocked"}:
             return
-        readiness = video_rendering.get_render_readiness(job.project_id, db)
+        # Same source of truth as the auto run: the settings of the project's last render,
+        # so an auto-render after clip generation honours what the user chose.
+        settings = video_rendering.render_settings_for_project(job.project_id, db)
+        readiness = video_rendering.get_render_readiness(job.project_id, db, settings)
         if readiness is None or not readiness.ready:
             job.status = "completed_with_render_blocked"
             job.current_step = "render_blocked"
@@ -876,7 +902,9 @@ async def _handoff_render(job_id: str) -> None:
             job.updated_at = _now()
             db.commit()
             return
-        render = await video_rendering.create_render_job(job.project_id, models.VideoRenderJobCreateRequest(), db)
+        render = await video_rendering.create_render_job(
+            job.project_id, models.VideoRenderJobCreateRequest(settings=settings), db
+        )
         if render is not None:
             job.render_job_id = render.id
             job.current_step = "auto_render_started"
@@ -946,9 +974,15 @@ def _run_job_sync(job_id: str) -> dict[str, Any]:
                     raise VideoClipGenerationError("Không tìm thấy project để resolve Flow binding.", error_code="VIDEO_PROJECT_NOT_FOUND")
                 active_binding = video_provider_project_bindings.active_binding_for_project(project, db)
                 provider_project_url = active_binding.provider_project_url if active_binding else None
+                native_speech_section = (
+                    video_speech.build_veo_native_speech_section(project, shot, db)
+                    if video_speech.uses_veo_native_speech(project)
+                    else None
+                )
                 provider_prompt, provider_prompt_sanitized = provider_safe_prompt_for_veo(
                     prompt.prompt,
-                    narration_context=shot.english_narration,
+                    narration_context=None if native_speech_section else shot.english_narration,
+                    native_speech_section=native_speech_section,
                 )
                 def remember_provider_project(provider_project_url: str, provider_project_ref_hash: str | None = None) -> None:
                     nonlocal active_binding

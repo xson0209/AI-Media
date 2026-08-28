@@ -734,24 +734,9 @@ def _validate_generation_inputs(project: DBVideoProject, db: Session) -> None:
             error_code="VIDEO_PUBLISHING_METADATA_PHASE_REQUIRED",
             status_code=422,
         )
-    shots = _ordered_shots(project.id, db)
-    if not shots:
-        raise VideoPublishingMetadataError(
-            "Cần tạo segment và prompt video trước khi tạo nội dung đăng.",
-            error_code="VIDEO_PUBLISHING_METADATA_PROMPTS_REQUIRED",
-            status_code=422,
-        )
-    missing = []
-    for shot in shots:
-        prompt = _latest_prompt(project.id, shot.id, db)
-        if prompt is None or shot.prompt_status in {"missing", "stale"}:
-            missing.append(str(shot.shot_order))
-    if missing:
-        raise VideoPublishingMetadataError(
-            "Cần tạo đủ prompt video mới nhất trước khi tạo nội dung đăng: segment " + ", ".join(missing),
-            error_code="VIDEO_PUBLISHING_METADATA_PROMPTS_REQUIRED",
-            status_code=422,
-        )
+    # Publishing metadata is an early draft artifact. Incomplete or missing
+    # shot prompts lower its accuracy/readiness, but must not block generation.
+    return
 
 
 def _create_or_get_row(project: DBVideoProject, db: Session, *, request_id: str) -> DBVideoPublishingMetadata:

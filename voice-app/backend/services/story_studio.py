@@ -441,6 +441,13 @@ def _has_nested_key(value: Any, *keys: str) -> bool:
         current = current[key]
     return True
 
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
 def _image_size_for_aspect(aspect_ratio: str) -> tuple[int, int]:
     return {
         "9:16": (720, 1280),
@@ -482,7 +489,25 @@ def _normalize_output_settings(value: Any, *, language_profile: str = "vi") -> m
         width, height = _image_size_for_aspect(str(aspect))
         defaults["image"]["width"] = width
         defaults["image"]["height"] = height
-    return models.StoryEpisodeOutputSettings.model_validate(_deep_merge_settings(defaults, raw))
+    merged = _deep_merge_settings(defaults, raw)
+    raw_video = raw.get("video") if isinstance(raw.get("video"), dict) else {}
+    merged_video = merged.get("video") if isinstance(merged.get("video"), dict) else None
+    if merged_video is not None:
+        has_raw_prompt_segment_settings = bool(
+            _positive_int(raw_video.get("prompt_segment_count"))
+            and _positive_int(raw_video.get("prompt_segment_duration_seconds"))
+        )
+        has_raw_target_duration = _positive_int(raw_video.get("target_duration_seconds")) is not None
+        if not has_raw_prompt_segment_settings:
+            if has_raw_target_duration:
+                merged_video["prompt_segment_count"] = None
+                merged_video["prompt_segment_duration_seconds"] = None
+            else:
+                merged_video["default_shot_duration_seconds"] = None
+                merged_video["prompt_segment_count"] = models.DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT
+                merged_video["prompt_segment_duration_seconds"] = models.DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS
+                merged_video["micro_scenes_per_prompt"] = models.DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT
+    return models.StoryEpisodeOutputSettings.model_validate(merged)
 
 def _settings_json(settings: models.StoryEpisodeOutputSettings) -> dict[str, Any]:
     return settings.model_dump(mode="json")
@@ -881,7 +906,7 @@ def _validate_candidate_script(payload: dict[str, Any], *, episode: DBStoryEpiso
     if not isinstance(payload, dict):
         raise StoryStudioError("AI trả candidate không đúng cấu trúc object.")
     if _clean(payload.get("strategy_type")) != strategy_type:
-        raise StoryStudioError(f"Candidate khÃ´ng Ä‘Ãºng strategy {strategy_type}.")
+        raise StoryStudioError(f"Candidate không đúng strategy {strategy_type}.")
     normalized = _normalize_story_payload(payload, episode=episode, strategy_type=strategy_type)
     _validate_master_story(normalized)
     if normalized.get("strategy_type") != strategy_type:
@@ -2090,6 +2115,18 @@ def _refresh_video_adaptation(row: DBStoryAdaptation, db: Session) -> None:
     render = _latest_render_job(project_id, db)
     payload["linked_video_project_id"] = project_id
     payload["ai_video_url"] = payload.get("ai_video_url") or f"/ai-video?projectId={project_id}"
+    auto_run_id = _clean(payload.get("auto_run_id"))
+    if auto_run_id:
+        auto_run = video_auto_runs.get_auto_run(project_id, auto_run_id, db)
+        if auto_run is not None:
+            payload["auto_run_status"] = auto_run.status
+            payload["auto_run_step"] = auto_run.current_step
+            payload["auto_run_progress"] = float(auto_run.progress or 0.0)
+            payload["auto_run_failure_reason"] = auto_run.failure_reason
+            payload["auto_run_error_code"] = auto_run.error_code
+            payload["auto_run_completed_at"] = (
+                auto_run.completed_at.isoformat() if auto_run.completed_at else None
+            )
     if render is None:
         payload["render_status"] = "not_requested"
         payload["latest_render_job"] = None
@@ -4213,6 +4250,42 @@ def _maybe_start_story_video_auto_run(
     row.payload_json = payload
     row.updated_at = datetime.utcnow()
 
+def _sync_existing_video_project_prompt_segments(
+    row: DBStoryAdaptation,
+    video_settings: models.StoryVideoHandoffSettings,
+    db: Session,
+) -> None:
+    payload = dict(row.payload_json) if isinstance(row.payload_json, dict) else {}
+    payload["handoff_settings"] = video_settings.model_dump(mode="json")
+    payload["settings_source"] = "story_episode.output_settings"
+    row.payload_json = payload
+    row.updated_at = datetime.utcnow()
+    if not row.linked_video_project_id:
+        return
+    project = db.get(DBVideoProject, row.linked_video_project_id)
+    if project is None:
+        return
+    count = _positive_int(video_settings.prompt_segment_count)
+    duration = _positive_int(video_settings.prompt_segment_duration_seconds)
+    if not count or not duration:
+        return
+    micro_count = _positive_int(video_settings.micro_scenes_per_prompt) or models.DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT
+    has_project_segment_settings = bool(
+        _positive_int(project.prompt_segment_count)
+        and _positive_int(project.prompt_segment_duration_seconds)
+    )
+    if not has_project_segment_settings:
+        project.default_shot_duration_seconds = None
+        project.prompt_segment_count = count
+        project.prompt_segment_duration_seconds = duration
+        project.micro_scenes_per_prompt = micro_count
+        if not _positive_int(project.target_duration_seconds):
+            project.target_duration_seconds = video_settings.target_duration_seconds or count * duration
+        project.updated_at = datetime.utcnow()
+    elif not _positive_int(project.micro_scenes_per_prompt):
+        project.micro_scenes_per_prompt = micro_count
+        project.updated_at = datetime.utcnow()
+
 def create_video_adaptation(
     episode_id: str,
     data: models.StoryVideoHandoffRequest,
@@ -4228,6 +4301,7 @@ def create_video_adaptation(
         raise StoryStudioError(
             "Story Studio chỉ hỗ trợ auto-run đến bước prompt video (material_target=prompts_only) để tránh render ngoài ý muốn."
         )
+    video_settings = _episode_output_settings(episode).video
     resolved_source_mode, image_row, image_panels, prompt_count = _resolve_video_handoff_source_mode(episode, data, db)
     if resolved_source_mode == "master_story":
         if episode.output_intent not in VIDEO_INTENTS:
@@ -4258,6 +4332,7 @@ def create_video_adaptation(
             raise StoryStudioError(
                 "Tập này đã có AI Video project từ nguồn khác. Hãy mở project hiện có hoặc tạo tập mới để tránh ghi đè nhầm."
             )
+        _sync_existing_video_project_prompt_segments(existing, video_settings, db)
         _maybe_start_story_video_auto_run(existing, data, db)
         db.commit()
         db.refresh(existing)
@@ -4270,7 +4345,6 @@ def create_video_adaptation(
     if duplicate is not None:
         raise StoryStudioError("Series đã có AI Video project cùng số tập. Hãy mở project đã có hoặc đổi số tập.")
     visual_style = _effective_story_visual_style(series, episode, db, fallback="")
-    video_settings = _episode_output_settings(episode).video
     target_language = video_settings.target_language
     if resolved_source_mode == "image_story_prompts":
         source_blocks = _image_story_video_source_blocks(

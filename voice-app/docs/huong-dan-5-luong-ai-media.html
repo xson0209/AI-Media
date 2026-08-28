@@ -1,0 +1,1907 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230c4a40'/%3E%3Cpath d='M18 18h28v8H27v8h16v8H27v12h-9z' fill='%23fffdf7'/%3E%3C/svg%3E">
+  <meta name="description" content="Hướng dẫn vận hành năm workspace AI Media của Voicebox: Research, Comic Series Analysis, Story Studio, Video Inspiration và AI Video.">
+  <title>Hướng dẫn vận hành 5 luồng AI Media — Voicebox</title>
+  <style>
+    :root {
+      --paper: #f3efe5;
+      --surface: #fffdf7;
+      --surface-strong: #ebe5d7;
+      --ink: #18231f;
+      --muted: #53635c;
+      --line: #c9c2b2;
+      --accent: #126859;
+      --accent-dark: #0c4a40;
+      --accent-soft: #dcece6;
+      --signal: #a54c2e;
+      --signal-soft: #f5dfd4;
+      --warning: #785817;
+      --warning-soft: #f6e9bc;
+      --success: #25633b;
+      --success-soft: #ddefd9;
+      --code: #27322e;
+      --focus: #006fe6;
+      --shadow: 0 18px 45px rgb(31 42 37 / 9%);
+      --radius-sm: 0.45rem;
+      --radius-md: 0.8rem;
+      --radius-lg: 1.15rem;
+      --content: 76rem;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 1.5rem;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, transparent 0, transparent calc(100% - 1px), rgb(24 35 31 / 5%) calc(100% - 1px)) 0 0 / 3.5rem 100%,
+        var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 1rem;
+      line-height: 1.65;
+      text-rendering: optimizeLegibility;
+    }
+
+    a {
+      color: var(--accent-dark);
+      text-decoration-thickness: 0.1em;
+      text-underline-offset: 0.18em;
+    }
+
+    a:hover {
+      color: var(--signal);
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    summary:focus-visible {
+      outline: 0.2rem solid var(--focus);
+      outline-offset: 0.2rem;
+      border-radius: 0.2rem;
+    }
+
+    code,
+    kbd {
+      padding: 0.1em 0.32em;
+      border: 1px solid rgb(24 35 31 / 16%);
+      border-radius: 0.28rem;
+      color: var(--code);
+      background: #eee9dd;
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.88em;
+      overflow-wrap: anywhere;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 100;
+      inset-block-start: 0.75rem;
+      inset-inline-start: 0.75rem;
+      transform: translateY(-180%);
+      padding: 0.65rem 0.9rem;
+      color: #fff;
+      background: var(--accent-dark);
+      border-radius: var(--radius-sm);
+      font-weight: 800;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .masthead {
+      border-block-end: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .masthead__inner {
+      width: min(calc(100% - 2rem), var(--content));
+      margin-inline: auto;
+      padding-block: clamp(2.5rem, 7vw, 6.5rem) clamp(2rem, 5vw, 4.5rem);
+    }
+
+    .eyebrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 1rem;
+      align-items: center;
+      margin: 0 0 1rem;
+      color: var(--accent-dark);
+      font-size: 0.78rem;
+      font-weight: 850;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow__date {
+      padding-inline-start: 1rem;
+      border-inline-start: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      margin-block-start: 0;
+      line-height: 1.14;
+      text-wrap: balance;
+    }
+
+    h1 {
+      max-width: 13ch;
+      margin-block-end: 1.25rem;
+      font-family: Cambria, "Times New Roman", serif;
+      font-size: clamp(2.65rem, 7vw, 5.8rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      margin-block-end: 1rem;
+      font-family: Cambria, "Times New Roman", serif;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      font-weight: 600;
+      letter-spacing: -0.012em;
+    }
+
+    h3 {
+      margin-block-end: 0.65rem;
+      font-size: clamp(1.25rem, 2.2vw, 1.65rem);
+    }
+
+    h4 {
+      margin-block-end: 0.45rem;
+      font-size: 1rem;
+      letter-spacing: 0.02em;
+    }
+
+    p {
+      margin-block: 0 1rem;
+    }
+
+    .lead {
+      max-width: 68ch;
+      margin-block-end: 1.65rem;
+      color: var(--muted);
+      font-size: clamp(1.06rem, 2vw, 1.3rem);
+      line-height: 1.62;
+    }
+
+    .route-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .route-strip a {
+      display: inline-flex;
+      min-height: 2.75rem;
+      align-items: center;
+      padding: 0.58rem 0.82rem;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+      font-size: 0.9rem;
+      font-weight: 780;
+      text-decoration: none;
+    }
+
+    .route-strip a:hover {
+      color: #fff;
+      background: var(--accent-dark);
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+      gap: clamp(1.5rem, 4vw, 4rem);
+      width: min(calc(100% - 2rem), var(--content));
+      margin-inline: auto;
+      padding-block: clamp(2rem, 5vw, 5rem);
+    }
+
+    .toc {
+      align-self: start;
+      position: sticky;
+      inset-block-start: 1rem;
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgb(255 253 247 / 92%);
+      box-shadow: 0 10px 30px rgb(31 42 37 / 6%);
+    }
+
+    .toc h2 {
+      margin-block-end: 0.65rem;
+      font-family: inherit;
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-inline-start: 1.2rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .toc li + li {
+      margin-block-start: 0.35rem;
+    }
+
+    .toc a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      color: var(--signal);
+      text-decoration: underline;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .section {
+      padding-block: clamp(1.5rem, 4vw, 3.5rem);
+      border-block-end: 1px solid var(--line);
+    }
+
+    .section:first-child {
+      padding-block-start: 0;
+    }
+
+    .section:last-child {
+      border-block-end: 0;
+    }
+
+    .section__intro {
+      max-width: 72ch;
+      color: var(--muted);
+      font-size: 1.06rem;
+    }
+
+    .kicker {
+      display: block;
+      margin-block-end: 0.55rem;
+      color: var(--signal);
+      font-size: 0.77rem;
+      font-weight: 850;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .callout {
+      margin-block: 1.25rem;
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--line);
+      border-inline-start-width: 0.35rem;
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    .callout > :last-child {
+      margin-block-end: 0;
+    }
+
+    .callout--important {
+      border-inline-start-color: var(--signal);
+      background: var(--signal-soft);
+    }
+
+    .callout--warning {
+      border-inline-start-color: var(--warning);
+      background: var(--warning-soft);
+    }
+
+    .callout--success {
+      border-inline-start-color: var(--success);
+      background: var(--success-soft);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+      margin-block: 1.25rem;
+    }
+
+    .card {
+      padding: 1.1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      box-shadow: 0 8px 25px rgb(31 42 37 / 4%);
+    }
+
+    .card > :last-child {
+      margin-block-end: 0;
+    }
+
+    .card__label {
+      display: block;
+      margin-block-end: 0.45rem;
+      color: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .route-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: start;
+      margin-block: 1rem 1.4rem;
+      padding: 1rem;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-md);
+      background: var(--accent-soft);
+    }
+
+    .route-card p {
+      margin: 0;
+    }
+
+    .route-card a {
+      display: inline-flex;
+      min-height: 2.75rem;
+      align-items: center;
+      justify-content: center;
+      padding: 0.55rem 0.85rem;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      background: var(--accent-dark);
+      font-weight: 800;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .route-card a:hover {
+      background: var(--signal);
+    }
+
+    .steps {
+      margin-block: 1rem 1.25rem;
+      padding: 0;
+      list-style: none;
+      counter-reset: steps;
+    }
+
+    .steps li {
+      position: relative;
+      min-height: 3.25rem;
+      padding: 0.2rem 0 1.15rem 3.35rem;
+      counter-increment: steps;
+    }
+
+    .steps li::before {
+      content: counter(steps, decimal-leading-zero);
+      position: absolute;
+      inset-block-start: 0;
+      inset-inline-start: 0;
+      display: grid;
+      width: 2.4rem;
+      height: 2.4rem;
+      place-items: center;
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      color: var(--accent-dark);
+      background: var(--surface);
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 0.75rem;
+      font-weight: 850;
+    }
+
+    .steps li:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      inset-block-start: 2.45rem;
+      inset-block-end: 0;
+      inset-inline-start: 1.18rem;
+      width: 1px;
+      background: var(--line);
+    }
+
+    .steps strong {
+      display: block;
+      margin-block-end: 0.15rem;
+    }
+
+    .checklist {
+      margin-block: 0.75rem 1.25rem;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      position: relative;
+      padding-inline-start: 1.65rem;
+    }
+
+    .checklist li + li {
+      margin-block-start: 0.42rem;
+    }
+
+    .checklist li::before {
+      content: "✓";
+      position: absolute;
+      inset-inline-start: 0;
+      color: var(--success);
+      font-weight: 900;
+    }
+
+    .flow-map {
+      display: grid;
+      gap: 0.75rem;
+      margin-block: 1.25rem;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 0.8rem;
+      align-items: center;
+      padding: 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+    }
+
+    .flow-row__node {
+      min-width: 0;
+    }
+
+    .flow-row__node strong {
+      display: block;
+    }
+
+    .flow-row__node small {
+      display: block;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    .flow-row__arrow {
+      color: var(--signal);
+      font-size: 1.4rem;
+      font-weight: 900;
+    }
+
+    .table-wrap {
+      max-width: 100%;
+      margin-block: 1.25rem;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      min-width: 52rem;
+      border-collapse: collapse;
+      font-size: 0.91rem;
+      line-height: 1.5;
+    }
+
+    caption {
+      padding: 0.85rem 1rem;
+      color: var(--muted);
+      text-align: start;
+      font-size: 0.86rem;
+    }
+
+    th,
+    td {
+      padding: 0.78rem 0.88rem;
+      border-block-start: 1px solid var(--line);
+      text-align: start;
+      vertical-align: top;
+    }
+
+    thead th {
+      border-block-start: 0;
+      color: #fff;
+      background: var(--accent-dark);
+      font-size: 0.78rem;
+      letter-spacing: 0.025em;
+    }
+
+    tbody th {
+      width: 18%;
+      color: var(--accent-dark);
+      background: #f1ede3;
+    }
+
+    details {
+      margin-block: 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+    }
+
+    summary {
+      min-height: 2.8rem;
+      padding: 0.68rem 0.85rem;
+      cursor: pointer;
+      color: var(--accent-dark);
+      font-weight: 800;
+    }
+
+    details[open] summary {
+      border-block-end: 1px solid var(--line);
+      background: var(--surface-strong);
+    }
+
+    .details__body {
+      padding: 0.85rem;
+    }
+
+    .details__body > :last-child {
+      margin-block-end: 0;
+    }
+
+    .workspace {
+      margin-block: 1.5rem;
+      padding: clamp(1.15rem, 3vw, 2rem);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .workspace__header {
+      padding-block-end: 1rem;
+      border-block-end: 1px solid var(--line);
+    }
+
+    .workspace__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-block: 0.8rem 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .workspace__meta li {
+      padding: 0.25rem 0.55rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: #f4f0e7;
+      font-size: 0.78rem;
+      font-weight: 750;
+    }
+
+    .workspace__body {
+      padding-block-start: 1.25rem;
+    }
+
+    .status-list {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-block: 1rem;
+    }
+
+    .status-item {
+      padding: 0.85rem;
+      border-block-start: 0.22rem solid var(--accent);
+      background: #f2eee5;
+    }
+
+    .status-item strong {
+      display: block;
+      margin-block-end: 0.3rem;
+    }
+
+    .record {
+      margin-block: 1rem;
+      padding: 1rem;
+      border: 1px dashed var(--accent);
+      border-radius: var(--radius-sm);
+      background: #f0f7f4;
+    }
+
+    .record dl {
+      display: grid;
+      grid-template-columns: minmax(8.5rem, 0.35fr) minmax(0, 1fr);
+      gap: 0.4rem 1rem;
+      margin: 0;
+    }
+
+    .record dt {
+      color: var(--muted);
+      font-weight: 760;
+    }
+
+    .record dd {
+      min-width: 0;
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .footer {
+      border-block-start: 1px solid var(--line);
+      background: var(--ink);
+      color: #eef3ef;
+    }
+
+    .footer__inner {
+      width: min(calc(100% - 2rem), var(--content));
+      margin-inline: auto;
+      padding-block: 2rem;
+    }
+
+    .footer a {
+      color: #b7e4d4;
+    }
+
+    .footer p:last-child {
+      margin-block-end: 0;
+    }
+
+    @media (max-width: 62rem) {
+      .page {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        position: static;
+        max-height: none;
+      }
+
+      .toc ol {
+        columns: 2;
+        column-gap: 2rem;
+      }
+
+      .status-list {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 42rem) {
+      body {
+        background: var(--paper);
+      }
+
+      .masthead__inner,
+      .page,
+      .footer__inner {
+        width: min(calc(100% - 1.2rem), var(--content));
+      }
+
+      .eyebrow__date {
+        width: 100%;
+        padding-inline-start: 0;
+        border-inline-start: 0;
+      }
+
+      .grid,
+      .status-list {
+        grid-template-columns: 1fr;
+      }
+
+      .toc ol {
+        columns: 1;
+      }
+
+      .route-card,
+      .flow-row {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-row__arrow {
+        transform: rotate(90deg);
+        justify-self: start;
+      }
+
+      .route-card a {
+        width: 100%;
+        white-space: normal;
+        text-align: center;
+      }
+
+      .record dl {
+        grid-template-columns: 1fr;
+      }
+
+      .record dd + dt {
+        margin-block-start: 0.5rem;
+      }
+
+      .workspace {
+        border-radius: var(--radius-md);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        color: #000;
+        font-size: 10pt;
+      }
+
+      .skip-link,
+      .toc,
+      .route-strip {
+        display: none;
+      }
+
+      .masthead,
+      .footer {
+        color: #000;
+        background: #fff;
+      }
+
+      .page {
+        display: block;
+        width: 100%;
+        padding: 0;
+      }
+
+      .section,
+      .workspace,
+      .card,
+      .callout,
+      .table-wrap {
+        box-shadow: none;
+        break-inside: avoid;
+      }
+
+      a {
+        color: #000;
+      }
+
+      a[href^="http"]::after {
+        content: " (" attr(href) ")";
+        font-size: 0.8em;
+        overflow-wrap: anywhere;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#noi-dung">Bỏ qua mục lục, đến nội dung chính</a>
+
+  <header class="masthead">
+    <div class="masthead__inner">
+      <p class="eyebrow">
+        <span>Voicebox · AI Media workbench</span>
+        <span class="eyebrow__date">Bản vận hành kiểm chứng ngày 12/08/2026</span>
+      </p>
+      <h1>Chọn đúng luồng. Giữ đúng nguồn.</h1>
+      <p class="lead">
+        Hướng dẫn đầu-cuối cho năm workspace AI Media. Nội dung dưới đây dùng bản ghi thật đang có trong dự án;
+        riêng Research dùng xuyên suốt project <strong>“Nghiên cứu Series: Người Que”</strong>, không tạo dữ liệu
+        thử nghiệm tên chung chung và không ghi đè dữ liệu gốc.
+      </p>
+      <nav aria-label="Mở nhanh năm workspace">
+        <ul class="route-strip">
+          <li><a href="http://localhost:4000/research">Research</a></li>
+          <li><a href="http://localhost:4000/comic-series-analysis">Comic Series Analysis</a></li>
+          <li><a href="http://localhost:4000/story-studio">Story Studio</a></li>
+          <li><a href="http://localhost:4000/video-inspiration">Video Inspiration</a></li>
+          <li><a href="http://localhost:4000/ai-video">AI Video</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <div class="page">
+    <nav class="toc" aria-labelledby="toc-heading">
+      <h2 id="toc-heading">Mục lục</h2>
+      <ol>
+        <li><a href="#bat-dau">Trước khi bắt đầu</a></li>
+        <li><a href="#chon-luong">Chọn workspace</a></li>
+        <li><a href="#handoff">Bản đồ handoff</a></li>
+        <li><a href="#research">Research Người Que</a></li>
+        <li><a href="#comic">Comic Series Analysis</a></li>
+        <li><a href="#story">Story Studio</a></li>
+        <li><a href="#inspiration">Video Inspiration</a></li>
+        <li><a href="#ai-video">AI Video</a></li>
+        <li><a href="#trang-thai">Đọc trạng thái</a></li>
+        <li><a href="#xu-ly-loi">Xử lý lỗi</a></li>
+        <li><a href="#kiem-tra-cuoi">Checklist đầu-cuối</a></li>
+        <li><a href="#ho-so-that">Hồ sơ thật đã dùng</a></li>
+      </ol>
+    </nav>
+
+    <main id="noi-dung" tabindex="-1">
+      <section class="section" id="bat-dau">
+        <span class="kicker">01 · Nền chạy</span>
+        <h2>Trước khi bắt đầu</h2>
+        <p class="section__intro">
+          Năm workspace dùng chung frontend, backend, database và provider lập kế hoạch. Kiểm tra nền chạy trước
+          giúp phân biệt lỗi giao diện, lỗi dữ liệu và lỗi provider.
+        </p>
+
+        <div class="grid">
+          <article class="card">
+            <span class="card__label">Frontend</span>
+            <h3>Vite trên cổng 4000</h3>
+            <p>Mở <a href="http://localhost:4000">http://localhost:4000</a>. Nếu trang không lên, kiểm tra tiến trình dev web trước khi thao tác dữ liệu.</p>
+          </article>
+          <article class="card">
+            <span class="card__label">Backend</span>
+            <h3>FastAPI trên cổng 17493</h3>
+            <p>Readiness thực tế ở <a href="http://localhost:17493/health/ready">/health/ready</a>. HTTP 200 chỉ là bước đầu; nội dung, action và handoff vẫn phải được kiểm tra.</p>
+          </article>
+          <article class="card">
+            <span class="card__label">AI planning</span>
+            <h3>Codex CLI phải ready</h3>
+            <p>Trong Settings, dùng nút kiểm tra provider. Bản xác minh gần nhất trả về model <code>gpt-5.6-sol</code>, reasoning <code>low</code> và không tái hiện lỗi thinking.</p>
+          </article>
+          <article class="card">
+            <span class="card__label">Dữ liệu</span>
+            <h3>Giữ nguyên database thật</h3>
+            <p>Không reset, seed hoặc xóa bản ghi cũ. Tái sử dụng series, job, run và project đã có; mọi bản ghi mới phải có tên/nội dung dùng được thật.</p>
+          </article>
+        </div>
+
+        <div class="callout callout--important">
+          <h3>Quy tắc bắt buộc cho Research</h3>
+          <p>
+            Luôn mở project <strong>“Nghiên cứu Series: Người Que”</strong> — ID
+            <code>229f1f94-18bd-4b15-a22d-9a078d7689e3</code>. Dùng hai nguồn, các run, 21 ý tưởng,
+            selection và Series Memory hiện có. Không tạo project hoặc nội dung kiểu <code>codex_test</code>.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="chon-luong">
+        <span class="kicker">02 · Quyết định</span>
+        <h2>Chọn workspace theo nguồn và đầu ra</h2>
+        <p class="section__intro">
+          Hãy bắt đầu từ loại tài sản bạn thực sự có. AI Video là nơi sản xuất, không phải lúc nào cũng là nơi
+          nhập nguồn tốt nhất.
+        </p>
+
+        <div class="table-wrap" role="region" aria-label="Ma trận chọn workspace" tabindex="0">
+          <table>
+            <caption>Ma trận chọn workspace hoặc chuỗi workspace tối ưu theo mục tiêu vận hành.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Chủ đề / mục đích</th>
+                <th scope="col">Nguồn đang có</th>
+                <th scope="col">Bắt đầu ở</th>
+                <th scope="col">Chuỗi khuyến nghị</th>
+                <th scope="col">Mức kiểm soát</th>
+                <th scope="col">Đầu ra chính</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Tìm hướng tập mới cho một series</th>
+                <td>Memory, ghi chú canon, nguồn nghiên cứu hoặc chủ đề</td>
+                <td>Research</td>
+                <td>Research → AI Video</td>
+                <td>Chọn/chấm điểm ý tưởng trước khi sản xuất</td>
+                <td>Ý tưởng đã duyệt, memory revision, project AI Video có provenance</td>
+              </tr>
+              <tr>
+                <th scope="row">Biến truyện tranh/webtoon thành series</th>
+                <td>Ảnh panel, chapter hoặc URL nguồn</td>
+                <td>Comic Series Analysis</td>
+                <td>Comic → Story Studio → AI Video</td>
+                <td>Cao: duyệt phân tích, rewrite, canon, nhân vật và từng tập</td>
+                <td>Analysis package, series/tập, storyboard/prompt, dự án video</td>
+              </tr>
+              <tr>
+                <th scope="row">Phát triển series và tập theo canon</th>
+                <td>Series, nhân vật, episode, reference và prompt ảnh</td>
+                <td>Story Studio</td>
+                <td>Story Studio → AI Video</td>
+                <td>Rất cao: quản lý canon, character bible, revision và output config</td>
+                <td>Tập đã duyệt, panel/prompt, handoff video giữ series/episode</td>
+              </tr>
+              <tr>
+                <th scope="row">Học cấu trúc từ một video thật</th>
+                <td>Video upload, file hoặc link có transcript/timeline</td>
+                <td>Video Inspiration</td>
+                <td>Video Inspiration → AI Video</td>
+                <td>Trung bình–cao: giữ source, chọn rewrite và định hướng dựng</td>
+                <td>Transcript, timeline, analysis, optimized script và project đích</td>
+              </tr>
+              <tr>
+                <th scope="row">Sản xuất prompt, metadata, clip và render</th>
+                <td>Brief đã rõ hoặc handoff từ workspace khác</td>
+                <td>AI Video</td>
+                <td>AI Video → prompt → metadata → clip/voice/subtitle → render</td>
+                <td>Theo stage: review-gated hoặc full-auto tùy dự án</td>
+                <td>Story, scene, shot, prompt, publishing kit, clip/package/render</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout callout--warning">
+          <h3>Khi nào không nên vào thẳng AI Video?</h3>
+          <p>
+            Nếu nguồn là chapter truyện, một series có canon dài, hoặc video tham khảo cần bóc transcript/timeline,
+            hãy xử lý ở workspace nguồn trước. Handoff sẽ mang theo provenance và giảm nguy cơ brief mất ngữ cảnh.
+          </p>
+        </div>
+      </section>
+
+      <section class="section" id="handoff">
+        <span class="kicker">03 · Liên kết</span>
+        <h2>Bản đồ handoff giữa các workspace</h2>
+        <p class="section__intro">
+          Một handoff đạt yêu cầu khi bản ghi đích mở được và giữ cả ID lẫn nội dung: title/brief, source,
+          lựa chọn đã duyệt, ngôn ngữ, mục đích, tỷ lệ và liên kết series/episode khi API hỗ trợ.
+        </p>
+
+        <div class="flow-map" aria-label="Bốn luồng handoff chính">
+          <div class="flow-row">
+            <div class="flow-row__node">
+              <strong>Research · Người Que</strong>
+              <small>Project 229f1f94… · revision 3 · idea đã chọn</small>
+            </div>
+            <div class="flow-row__arrow" aria-hidden="true">→</div>
+            <div class="flow-row__node">
+              <strong>AI Video · Khu Rừng Đi Ngược Thời Gian</strong>
+              <small>Project d8c9240d… · 180 giây · 9:16 · tiếng Việt</small>
+            </div>
+          </div>
+
+          <div class="flow-row">
+            <div class="flow-row__node">
+              <strong>Comic · Test Coffeemanga chapter 1</strong>
+              <small>Job 7f747875… · revision 1 · 90 panel</small>
+            </div>
+            <div class="flow-row__arrow" aria-hidden="true">→</div>
+            <div class="flow-row__node">
+              <strong>Story Studio · Test Coffeemanga Matriarch Chapter 1</strong>
+              <small>Series 4f71a821… · episode fea26d33… · source document b054ecca…</small>
+            </div>
+          </div>
+
+          <div class="flow-row">
+            <div class="flow-row__node">
+              <strong>Story Studio · Tập 1 đã có 44 prompt ảnh</strong>
+              <small>Image adaptation ea22ffed… · revision 1</small>
+            </div>
+            <div class="flow-row__arrow" aria-hidden="true">→</div>
+            <div class="flow-row__node">
+              <strong>AI Video · Tập 1</strong>
+              <small>Project 4e18aaa9… · 60 giây · 6 segment · 9:16 · tiếng Việt</small>
+            </div>
+          </div>
+
+          <div class="flow-row">
+            <div class="flow-row__node">
+              <strong>Video Inspiration · FTU Smart Campus</strong>
+              <small>Job 09f61d07… · upload thật · script tiếng Việt đã tối ưu</small>
+            </div>
+            <div class="flow-row__arrow" aria-hidden="true">→</div>
+            <div class="flow-row__node">
+              <strong>AI Video · Handoff nguồn tiếng Việt đã xác minh</strong>
+              <small>Project fb3de180… · giữ job ID, file nguồn và analysis package</small>
+            </div>
+          </div>
+        </div>
+
+        <ul class="checklist">
+          <li>Đối chiếu source ID ở workspace gửi với source block/topic/memory ở project nhận.</li>
+          <li>Mở project đích sau refresh; không dừng ở thông báo “tạo thành công”.</li>
+          <li>Kiểm tra title, brief, target language, video purpose, aspect ratio và duration.</li>
+          <li>Với series: kiểm tra thêm series ID, episode ID, revision, nhân vật và canon.</li>
+          <li>Ghi request ID và project/record ID để lần sau truy ngược được.</li>
+        </ul>
+      </section>
+
+      <section class="section" id="research">
+        <span class="kicker">04 · Workspace</span>
+        <article class="workspace">
+          <header class="workspace__header">
+            <h2>Research — Nghiên cứu Series: Người Que</h2>
+            <p>
+              Dùng khi cần phát hiện hướng nội dung, tạo phương án, chấm điểm, phát triển lựa chọn và cập nhật
+              Series Memory trước khi đưa ý tưởng vào sản xuất video.
+            </p>
+            <ul class="workspace__meta" aria-label="Thông tin Research">
+              <li>2 nguồn thật</li>
+              <li>2 run cũ + run retry</li>
+              <li>21 ý tưởng gốc</li>
+              <li>1 selection accepted</li>
+              <li>Memory revision 3</li>
+            </ul>
+          </header>
+
+          <div class="workspace__body">
+            <div class="route-card">
+              <p><strong>Route:</strong> <code>/research</code><br>Chờ project Người Que hiện ra sau lazy-load rồi mới kết luận trạng thái.</p>
+              <a href="http://localhost:4000/research">Mở Research</a>
+            </div>
+
+            <div class="record">
+              <dl>
+                <dt>Project</dt>
+                <dd>Nghiên cứu Series: Người Que</dd>
+                <dt>Project ID</dt>
+                <dd><code>229f1f94-18bd-4b15-a22d-9a078d7689e3</code></dd>
+                <dt>Selection đã có</dt>
+                <dd>“Tập mở màn — Thành phố mất trọng lực” · <code>c3fbd800-6392-4c56-987a-fddfb9937075</code></dd>
+                <dt>Run hoàn tất gần nhất</dt>
+                <dd><code>10455b97-c172-470b-8c87-8a090207239f</code> · cả research và creative đều completed</dd>
+                <dt>Phương án được khuyên chọn</dt>
+                <dd>“Tập 2 — Khu Rừng Đi Ngược Thời Gian”</dd>
+              </dl>
+            </div>
+
+            <h3>Quy trình vận hành</h3>
+            <ol class="steps">
+              <li>
+                <strong>Chọn đúng project Người Que.</strong>
+                Xác minh tên project, hai nguồn và Series Memory trước khi tạo run mới. Không dùng project trống hoặc dữ liệu mẫu thay thế.
+              </li>
+              <li>
+                <strong>Đọc memory và lựa chọn đã duyệt.</strong>
+                Nắm hook, thế giới, quy tắc hình ảnh và các hướng đã dùng để tránh tạo tập lặp hoặc làm mất canon.
+              </li>
+              <li>
+                <strong>Chọn chế độ phù hợp.</strong>
+                Dùng Research nếu cần bằng chứng/nguồn; Creative nếu cần mở rộng ý tưởng; dùng “Cả hai” khi muốn hợp nhất hai nhánh.
+              </li>
+              <li>
+                <strong>Viết brief thật cho Series Người Que.</strong>
+                Nêu rõ mục tiêu tập, xung đột, bối cảnh và điều phải giữ. Tên run/nội dung mới phải có ý nghĩa sử dụng lâu dài.
+              </li>
+              <li>
+                <strong>Chờ cả nhánh AI hoàn tất.</strong>
+                Với run dài, theo dõi trạng thái từng nhánh. Không coi trạng thái partial là hoàn tất toàn bộ.
+              </li>
+              <li>
+                <strong>Chấm điểm hoặc chọn phương án.</strong>
+                Đọc điểm, lý do, rủi ro và mức khớp memory; chỉ handoff phương án thực sự muốn sản xuất.
+              </li>
+              <li>
+                <strong>Cập nhật memory có chủ đích.</strong>
+                Ghi selection/revision mới, rồi refresh để bảo đảm lựa chọn và memory vẫn còn sau thao tác ghi.
+              </li>
+              <li>
+                <strong>Handoff sang AI Video.</strong>
+                Kiểm tra project đích giữ research project ID, revision, idea/selection, thời lượng, tỷ lệ và tiếng Việt.
+              </li>
+            </ol>
+
+            <h3>Đầu ra đạt yêu cầu</h3>
+            <div class="status-list">
+              <div class="status-item">
+                <strong>Run</strong>
+                Research/creative có trạng thái completed hoặc lỗi có mã hành động được.
+              </div>
+              <div class="status-item">
+                <strong>Selection</strong>
+                Ý tưởng được chấm/chọn và còn nguyên sau refresh.
+              </div>
+              <div class="status-item">
+                <strong>Memory</strong>
+                Revision mới giữ đúng nội dung Người Que và provenance.
+              </div>
+              <div class="status-item">
+                <strong>Handoff</strong>
+                Project AI Video mở được, có title/brief Người Que thật.
+              </div>
+              <div class="status-item">
+                <strong>Ngôn ngữ</strong>
+                Viewer-facing text và output config giữ tiếng Việt.
+              </div>
+              <div class="status-item">
+                <strong>An toàn dữ liệu</strong>
+                Không xóa run/source/selection cũ, không reset database.
+              </div>
+            </div>
+
+            <h3>Lỗi thường gặp</h3>
+            <details>
+              <summary>Project chưa hiện ngay sau khi mở route</summary>
+              <div class="details__body">
+                <p>Research lazy-load lâu hơn các route khác. Chờ đến khi thấy tên “Nghiên cứu Series: Người Que” và request dữ liệu hoàn tất; không snapshot empty state quá sớm.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Run ở trạng thái partial hoặc RESEARCH_CLI_TIMEOUT</summary>
+              <div class="details__body">
+                <p>Đọc trạng thái từng nhánh. Run cũ từng timeout ở 180 giây; backend hiện tôn trọng timeout AI Planning tối đa 600 giây. Retry từ UI trên cùng project, không tạo project giả để né lỗi.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Ý tưởng mới lệch khỏi Series Người Que</summary>
+              <div class="details__body">
+                <p>Quay lại memory/source thật, bổ sung ràng buộc canon vào brief và không accept phương án lệch chủ đề. Không dùng placeholder chung chung làm nội dung “tạm”.</p>
+              </div>
+            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="section" id="comic">
+        <span class="kicker">05 · Workspace</span>
+        <article class="workspace">
+          <header class="workspace__header">
+            <h2>Comic Series Analysis</h2>
+            <p>
+              Dùng để biến chapter/panel truyện thật thành analysis package có nhân vật, địa điểm, plot beat,
+              scene, arc, optimized script và handoff sang Story Studio.
+            </p>
+            <ul class="workspace__meta" aria-label="Thông tin Comic job">
+              <li>90 panel</li>
+              <li>119 text/dialogue</li>
+              <li>28 nhân vật</li>
+              <li>24 địa điểm</li>
+              <li>19 plot beat</li>
+              <li>18 scene · 6 arc</li>
+            </ul>
+          </header>
+
+          <div class="workspace__body">
+            <div class="route-card">
+              <p><strong>Route:</strong> <code>/comic-series-analysis</code><br>Mở job đã duyệt để xem đủ panel, analysis, review và hành động theo state machine.</p>
+              <a href="http://localhost:4000/comic-series-analysis">Mở Comic Analysis</a>
+            </div>
+
+            <div class="record">
+              <dl>
+                <dt>Job thật</dt>
+                <dd>Test Coffeemanga chapter 1</dd>
+                <dt>Job ID</dt>
+                <dd><code>7f747875-3fa3-46d6-8fbb-e22b03023661</code></dd>
+                <dt>Trạng thái</dt>
+                <dd>Đã duyệt · revision 1 · optimized script sẵn sàng</dd>
+                <dt>Handoff ID</dt>
+                <dd><code>2012ccc6-5858-4bc4-b3b6-8d8e51742507</code></dd>
+                <dt>Series đích</dt>
+                <dd><code>4f71a821-42e1-4024-8984-22ee90134311</code></dd>
+                <dt>Episode đích</dt>
+                <dd><code>fea26d33-bac2-43c7-84be-1d845f89df65</code></dd>
+              </dl>
+            </div>
+
+            <h3>Quy trình vận hành</h3>
+            <ol class="steps">
+              <li>
+                <strong>Chọn job đúng nguồn.</strong>
+                Xác minh tên chapter, source, số ảnh/panel và trạng thái ingest trước khi chạy action.
+              </li>
+              <li>
+                <strong>Đọc panel và text extraction.</strong>
+                Kiểm tra thứ tự panel, OCR/dialogue và cảnh báo codec; panel sai thứ tự sẽ kéo sai plot beat và scene.
+              </li>
+              <li>
+                <strong>Đọc analysis package.</strong>
+                So khớp nhân vật, địa điểm, plot beat, scene và arc với panel thật; không chỉ nhìn trạng thái completed.
+              </li>
+              <li>
+                <strong>Chạy action hợp lệ theo trạng thái.</strong>
+                Với job đã duyệt, có thể “Viết kịch bản tối ưu” hoặc mở kết quả đã có. Tránh “Phân tích lại truyện” nếu không cần tạo revision mới.
+              </li>
+              <li>
+                <strong>Refresh và xác minh output.</strong>
+                Đảm bảo action response, revision, optimized script và trạng thái review vẫn nhất quán sau reload.
+              </li>
+              <li>
+                <strong>Mở handoff hiện có.</strong>
+                Nếu series/episode đã được tạo, mở lại thay vì tạo trùng. Đối chiếu title, revision, nhân vật, canon và source document.
+              </li>
+            </ol>
+
+            <div class="callout callout--warning">
+              <h3>Tránh tạo series/tập trùng</h3>
+              <p>
+                Job hiện tại đã có handoff sang Story Studio. Trước khi bấm “Đưa vào Story Studio”, kiểm tra handoff ID,
+                series ID và episode ID ở trên. Nếu chúng mở được và đúng provenance, hãy dùng bản ghi hiện có.
+              </p>
+            </div>
+
+            <h3>Đầu ra đạt yêu cầu</h3>
+            <ul class="checklist">
+              <li>Source và 90 panel vẫn truy được sau refresh.</li>
+              <li>Analysis revision 1 giữ đủ nhân vật, địa điểm, beat, scene và arc.</li>
+              <li>Optimized script hiển thị nội dung thật, không chỉ badge “sẵn sàng”.</li>
+              <li>Story series/tập đích giữ source document <code>b054ecca-a059-4d57-8b35-19582bc40a7f</code>.</li>
+              <li>Không tạo thêm series/episode nếu handoff cũ đã hợp lệ.</li>
+            </ul>
+
+            <h3>Lỗi thường gặp</h3>
+            <details>
+              <summary>Nút action không phù hợp với trạng thái</summary>
+              <div class="details__body">
+                <p>Đọc state machine và trạng thái review. Action hợp lệ hiện thấy trên job gồm “Phân tích lại truyện”, “Viết kịch bản tối ưu” và “Đưa vào Story Studio”; chọn action ít phá dữ liệu nhất để đạt mục tiêu.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Handoff báo thành công nhưng series/tập không đúng nguồn</summary>
+              <div class="details__body">
+                <p>Mở record đích và so title, revision, character/canon, source job và source document. HTTP 200 hoặc toast thành công chưa đủ để chứng minh mapping đúng.</p>
+              </div>
+            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="section" id="story">
+        <span class="kicker">06 · Workspace</span>
+        <article class="workspace">
+          <header class="workspace__header">
+            <h2>Story Studio</h2>
+            <p>
+              Dùng để quản lý series/tập, canon, character bible, reference, image adaptation, storyboard,
+              prompt ảnh và handoff một tập đủ điều kiện sang AI Video.
+            </p>
+            <ul class="workspace__meta" aria-label="Thông tin Story Studio">
+              <li>1 series thật</li>
+              <li>28 hồ sơ nhân vật</li>
+              <li>1 episode</li>
+              <li>44 panel</li>
+              <li>44 prompt ảnh</li>
+              <li>Image adaptation revision 1</li>
+            </ul>
+          </header>
+
+          <div class="workspace__body">
+            <div class="route-card">
+              <p><strong>Route:</strong> <code>/story-studio</code><br>Mở series và episode, rồi kiểm tra từng lớp canon/reference/output trước handoff.</p>
+              <a href="http://localhost:4000/story-studio">Mở Story Studio</a>
+            </div>
+
+            <div class="record">
+              <dl>
+                <dt>Series</dt>
+                <dd>Test Coffeemanga Matriarch Chapter 1</dd>
+                <dt>Series ID</dt>
+                <dd><code>4f71a821-42e1-4024-8984-22ee90134311</code></dd>
+                <dt>Episode</dt>
+                <dd>Kiếp này tôi sẽ trở thành gia chủ — Chương 1: Cây thế giới và ngọn lửa</dd>
+                <dt>Episode ID</dt>
+                <dd><code>fea26d33-bac2-43c7-84be-1d845f89df65</code></dd>
+                <dt>Image adaptation</dt>
+                <dd><code>ea22ffed-4262-409f-9b35-e46530d9066f</code> · revision 1 · 44 panel/prompt</dd>
+                <dt>AI Video đích</dt>
+                <dd><code>4e18aaa9-a2f8-4d81-bee2-71e146956ed1</code></dd>
+              </dl>
+            </div>
+
+            <h3>Quy trình vận hành</h3>
+            <ol class="steps">
+              <li>
+                <strong>Chọn series và episode thật.</strong>
+                Xác minh title, episode number và liên kết nguồn Comic trước khi chỉnh nội dung.
+              </li>
+              <li>
+                <strong>Đọc canon và nhân vật.</strong>
+                Kiểm tra character profile, quan hệ, face/hair/outfit/personality/speech, reference và các quy tắc bất biến của series.
+              </li>
+              <li>
+                <strong>Kiểm tra image adaptation.</strong>
+                Mở revision 1, đọc đủ 44 panel và 44 prompt ảnh; xác minh ngôn ngữ, góc máy, dialogue/caption note và negative prompt.
+              </li>
+              <li>
+                <strong>Kiểm tra output config của tập.</strong>
+                Chốt mục đích video, ngôn ngữ, tỷ lệ, thời lượng, mật độ narration và kiểu CTA trước handoff.
+              </li>
+              <li>
+                <strong>Chạy action đọc/xuất trước.</strong>
+                Ưu tiên preview/export không phá dữ liệu để xác nhận episode đủ nguồn, canon và prompt.
+              </li>
+              <li>
+                <strong>Bấm “Tạo prompt video” khi đủ điều kiện.</strong>
+                Handoff hiện tại tạo project AI Video 60 giây, 6 segment × 10 giây, 4 micro-scene/segment, tỷ lệ 9:16 và tiếng Việt.
+              </li>
+              <li>
+                <strong>Kiểm tra Handoff đã duyệt.</strong>
+                UI nguồn phải hiển thị “Nguồn: Câu lệnh truyện ảnh”, 44 panel · 44 prompt và link mở project đích.
+              </li>
+              <li>
+                <strong>Mở project AI Video đích.</strong>
+                Đối chiếu series ID, story episode ID, image adaptation/revision, language lock, character notes, canon, style và avoid rules.
+              </li>
+            </ol>
+
+            <h3>Provenance bắt buộc ở project đích</h3>
+            <ul class="checklist">
+              <li>Title episode và series title không bị đổi thành tên chung chung.</li>
+              <li><code>series_id</code> và <code>story_episode_id</code> giữ đúng bản ghi nguồn.</li>
+              <li>Source block ghi image adaptation ID, revision 1, 44 panel và 44 prompt ảnh.</li>
+              <li>Language lock yêu cầu narration, thoại, subtitle, text và CTA tự nhiên bằng tiếng Việt.</li>
+              <li>Canon context, character notes, style notes và negative/avoid rules có mặt.</li>
+              <li>Output config giữ <code>global_short</code>, <code>9:16</code>, 60 giây và 6 segment.</li>
+            </ul>
+
+            <h3>Lỗi thường gặp</h3>
+            <details>
+              <summary>Auto-run đứng lâu ở develop_story, generate_shots hoặc generate_prompts</summary>
+              <div class="details__body">
+                <p>Provider có timeout tối đa 600 giây cho mỗi lần Codex exec. Theo dõi run ID, current step, updated_at và child process; không restart backend khi subprocess còn thực sự chạy. Sau timeout, đọc error code rồi dùng retry đúng run nếu UI cho phép.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Project đích có title nhưng thiếu source/canon</summary>
+              <div class="details__body">
+                <p>Đó là handoff chưa đạt. Kiểm tra source blocks và project memory, không chỉ project header. Record đích phải nêu episode ID, image adaptation, số panel/prompt, character notes và canon.</p>
+              </div>
+            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="section" id="inspiration">
+        <span class="kicker">07 · Workspace</span>
+        <article class="workspace">
+          <header class="workspace__header">
+            <h2>Video Inspiration</h2>
+            <p>
+              Dùng khi nguồn là video thật. Workspace này giữ transcript, keyframe/timeline, analysis package,
+              optimized script và provenance file/link trước khi chuyển sang AI Video.
+            </p>
+            <ul class="workspace__meta" aria-label="Thông tin Video Inspiration">
+              <li>Upload video thật</li>
+              <li>Transcript</li>
+              <li>Timeline</li>
+              <li>Analysis package</li>
+              <li>Optimized script tiếng Việt</li>
+              <li>Handoff có provenance</li>
+            </ul>
+          </header>
+
+          <div class="workspace__body">
+            <div class="route-card">
+              <p><strong>Route:</strong> <code>/video-inspiration</code><br>Mở job đã rewritten để kiểm tra từ nguồn đến optimized script và project đích.</p>
+              <a href="http://localhost:4000/video-inspiration">Mở Video Inspiration</a>
+            </div>
+
+            <div class="record">
+              <dl>
+                <dt>Job ID</dt>
+                <dd><code>09f61d07-7887-45c9-b7d4-ff910499afdb</code></dd>
+                <dt>Nguồn</dt>
+                <dd>Upload “video hướng dẫn giáo viên tạo sự kiện.mp4”</dd>
+                <dt>Chủ đề thật</dt>
+                <dd>FTU Smart Campus — hướng dẫn tạo sự kiện và gửi Admin phê duyệt</dd>
+                <dt>Trạng thái</dt>
+                <dd>Rewritten, có transcript/timeline/analysis/script thật</dd>
+                <dt>Project đích đã xác minh</dt>
+                <dd><code>fb3de180-1fb6-45f0-968d-fd8cdc2df882</code></dd>
+              </dl>
+            </div>
+
+            <h3>Quy trình vận hành</h3>
+            <ol class="steps">
+              <li>
+                <strong>Chọn job thật ở trạng thái phù hợp.</strong>
+                Ưu tiên <code>analyzed</code>, <code>rewritten</code> hoặc <code>ai_video_ready</code>.
+              </li>
+              <li>
+                <strong>Đọc nguồn và transcript.</strong>
+                Xác minh tên file/link, platform, transcript và ngôn ngữ; source phải còn truy được.
+              </li>
+              <li>
+                <strong>Đọc keyframe/timeline.</strong>
+                So khớp mốc thao tác và cảnh quan trọng với video gốc, đặc biệt các đoạn dùng làm hook hoặc payoff.
+              </li>
+              <li>
+                <strong>Đọc analysis package.</strong>
+                Kiểm tra hook, pacing, retention, visual rhythm, audio/SFX và cơ hội viết lại.
+              </li>
+              <li>
+                <strong>Chạy Rewrite hoặc dùng optimized script hiện có.</strong>
+                Với job FTU, giữ screen recording làm lớp hình bất biến; chỉ cắt, đổi nhịp, thêm spotlight, caption, voice tiếng Việt và hiệu ứng hỗ trợ.
+              </li>
+              <li>
+                <strong>Refresh để xác minh state/output.</strong>
+                Optimized script phải còn nguyên và job state nhất quán; transcript/timeline không được mất sau rewrite.
+              </li>
+              <li>
+                <strong>Handoff sang AI Video.</strong>
+                Kiểm tra project đích giữ job ID, source type, filename/path, analysis package, optimized idea/script và tiếng Việt.
+              </li>
+            </ol>
+
+            <h3>Đầu ra đạt yêu cầu</h3>
+            <ul class="checklist">
+              <li>Transcript và timeline vẫn hiển thị dữ liệu nguồn thật.</li>
+              <li>Optimized script không yêu cầu AI tái tạo giao diện FTU; chỉ dựng/composite trên footage nguồn.</li>
+              <li>Handoff đích giữ target language <code>vi</code> và định hướng voiceover tiếng Việt.</li>
+              <li>Topic/source block chứa job ID, file nguồn và analysis package.</li>
+              <li>Project đích mở được sau refresh và không mất provenance.</li>
+            </ul>
+
+            <h3>Lỗi thường gặp</h3>
+            <details>
+              <summary>Rewrite làm mất transcript hoặc timeline</summary>
+              <div class="details__body">
+                <p>Refresh job và kiểm tra từng tab. Rewrite phải bổ sung optimized script, không được thay thế dữ liệu ingest/analysis nguồn.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Handoff chỉ có brief, không có đường về video nguồn</summary>
+              <div class="details__body">
+                <p>Kiểm tra topic/source block ở AI Video. Bắt buộc có source job ID và khi contract hỗ trợ, giữ filename/path, source platform/link và analysis package.</p>
+              </div>
+            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="section" id="ai-video">
+        <span class="kicker">08 · Workspace</span>
+        <article class="workspace">
+          <header class="workspace__header">
+            <h2>AI Video</h2>
+            <p>
+              Nơi phát triển brief thành story, scene, shot, prompt, publishing metadata và kiểm tra readiness
+              cho voice/subtitle, clip, package và render. Dùng project thật hoặc project handoff từ bốn luồng nguồn.
+            </p>
+            <ul class="workspace__meta" aria-label="Thông tin AI Video Người Que">
+              <li>19 scene</li>
+              <li>18 shot</li>
+              <li>18 prompt</li>
+              <li>180 giây</li>
+              <li>9:16</li>
+              <li>Metadata 3 nền tảng</li>
+            </ul>
+          </header>
+
+          <div class="workspace__body">
+            <div class="route-card">
+              <p><strong>Route:</strong> <code>/ai-video</code><br>Chọn project từ danh sách hoặc mở trực tiếp bằng query <code>?projectId=...</code>.</p>
+              <a href="http://localhost:4000/ai-video">Mở AI Video</a>
+            </div>
+
+            <div class="record">
+              <dl>
+                <dt>Project chuẩn</dt>
+                <dd>Người Que — Tập 2: Khu Rừng Đi Ngược Thời Gian</dd>
+                <dt>Project ID</dt>
+                <dd><code>d8c9240d-bae1-4439-ac57-c7956622bdb3</code></dd>
+                <dt>Nguồn</dt>
+                <dd>Research revision 3 · idea <code>baf78948-9579-4520-b96f-c99bfc3f031b</code></dd>
+                <dt>Cấu hình</dt>
+                <dd>18 segment × 10 giây · 3 micro-scene/segment · 180 giây · 9:16 · tiếng Việt</dd>
+                <dt>Trạng thái</dt>
+                <dd><code>prompts_ready</code> · story/scene đã duyệt · 18 prompt hoàn tất</dd>
+              </dl>
+            </div>
+
+            <h3>Quy trình vận hành</h3>
+            <ol class="steps">
+              <li>
+                <strong>Chọn project và đọc provenance.</strong>
+                Xác minh title, source block, project memory, language/purpose/output config trước khi chạy planning.
+              </li>
+              <li>
+                <strong>Kiểm tra provider/resource readiness.</strong>
+                Codex CLI phải ready. Với Veo/Flow, kiểm tra login/session và project binding; không giả lập thành công nếu tài khoản ngoài chưa sẵn.
+              </li>
+              <li>
+                <strong>Phát triển story.</strong>
+                Đọc creative brief, script, strategy, continuity và detailed script; duyệt hoặc sửa theo canon nguồn.
+              </li>
+              <li>
+                <strong>Tạo scene và shot.</strong>
+                Số shot/segment phải khớp cấu hình thời lượng. Với Người Que: 18 shot liên tục, tổng đúng 180 giây.
+              </li>
+              <li>
+                <strong>Tạo và duyệt prompt video.</strong>
+                Mỗi prompt phải bám scene/shot thật, đúng ngôn ngữ và không rò canon của project khác.
+              </li>
+              <li>
+                <strong>Tạo publishing metadata.</strong>
+                Kiểm tra riêng YouTube, TikTok và Facebook; metadata phải có revision, không stale và giữ tiếng Việt.
+              </li>
+              <li>
+                <strong>Kiểm tra voice/subtitle/package.</strong>
+                Chỉ coi ready khi audio, duration và file subtitle thật đã có. Nút ZIP/render disabled là đúng nếu còn blocker.
+              </li>
+              <li>
+                <strong>Kiểm tra clip và render.</strong>
+                Mỗi shot cần clip, audio/duration phù hợp và subtitle hoàn tất trước khi burn-in/render MP4.
+              </li>
+              <li>
+                <strong>Refresh sạch và quan sát console/network.</strong>
+                Nội dung thật phải xuất hiện, không có request bắt buộc 4xx/5xx và không có console error nghiêm trọng.
+              </li>
+            </ol>
+
+            <h3>Readiness của project Người Que hiện tại</h3>
+            <div class="status-list">
+              <div class="status-item">
+                <strong>Planning · Ready</strong>
+                Story, 19 scene, 18 shot và 18 prompt đã sẵn.
+              </div>
+              <div class="status-item">
+                <strong>Publishing · Ready</strong>
+                Metadata YouTube, TikTok và Facebook đã hoàn tất.
+              </div>
+              <div class="status-item">
+                <strong>Veo · Blocked ngoài hệ thống</strong>
+                Chưa có project binding phù hợp cho tài khoản Flow/Veo.
+              </div>
+              <div class="status-item">
+                <strong>Voice/subtitle · Chưa ready</strong>
+                18 clip thiếu audio thoại Việt và chưa có file SRT.
+              </div>
+              <div class="status-item">
+                <strong>Package · Chưa ready</strong>
+                Không tạo ZIP khi media/subtitle chưa đủ.
+              </div>
+              <div class="status-item">
+                <strong>Render · Chưa ready</strong>
+                Thiếu 18 clip, duration/timer và subtitle burn-in.
+              </div>
+            </div>
+
+            <div class="callout callout--success">
+              <h3>Kiểm tra chống lẫn canon</h3>
+              <p>
+                18 prompt hiện tại của project Người Que phải chứa nội dung Người Que và không chứa tên/canon
+                <code>Tia</code>, <code>Florentia</code>, <code>Lombardy</code> hoặc <code>codex_test</code>.
+              </p>
+            </div>
+
+            <h3>Lỗi thường gặp</h3>
+            <details>
+              <summary>Shot/prompt thiếu số lượng hoặc tổng thời lượng sai</summary>
+              <div class="details__body">
+                <p>So số segment cấu hình với shot hiện có và duration từng shot. Không chấp nhận fallback chỉ tạo một phần danh sách. Với project Người Que, tiêu chí là 18 × 10 giây = 180 giây.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Prompt chứa nhân vật/canon của project khác</summary>
+              <div class="details__body">
+                <p>Dừng trước bước clip. Đối chiếu source block, scene, shot và fallback prompt; tạo lại prompt sau khi lớp nguồn/canon đã đúng. Không sửa bằng cách thay vài tên trong output cuối.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Package/render báo ready dù thiếu clip, audio hoặc subtitle</summary>
+              <div class="details__body">
+                <p>Kiểm tra readiness chi tiết theo từng shot và subtitle row. UI đúng phải nêu blocker và giữ nút tạo ZIP/render ở trạng thái disabled.</p>
+              </div>
+            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="section" id="trang-thai">
+        <span class="kicker">09 · Vận hành</span>
+        <h2>Đọc trạng thái đúng cách</h2>
+        <p class="section__intro">
+          Trạng thái là hợp đồng điều khiển action. Đừng bấm lại một bước dài chỉ vì UI chưa đổi ngay; hãy đọc
+          current step, updated time, request ID và output thực tế.
+        </p>
+
+        <div class="table-wrap" role="region" aria-label="Bảng ý nghĩa trạng thái" tabindex="0">
+          <table>
+            <caption>Cách diễn giải các trạng thái thường gặp trong năm workspace.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Trạng thái</th>
+                <th scope="col">Ý nghĩa</th>
+                <th scope="col">Hành động nên làm</th>
+                <th scope="col">Không nên làm</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>draft</code></th>
+                <td>Đã có record nhưng chưa đủ/được duyệt cho bước sau.</td>
+                <td>Đọc nguồn, bổ sung brief/config và chạy action hợp lệ.</td>
+                <td>Không coi project đã có title là hoàn tất.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>running</code></th>
+                <td>Job hoặc auto-run đang sở hữu tiến trình/slot xử lý.</td>
+                <td>Poll current step, updated_at và child process; chờ timeout hợp lệ.</td>
+                <td>Không restart backend hoặc tạo run trùng khi subprocess còn chạy.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>partial</code></th>
+                <td>Một phần nhánh hoàn tất, phần khác lỗi hoặc timeout.</td>
+                <td>Đọc từng branch và retry đúng phần/đúng run.</td>
+                <td>Không quảng bá kết quả như completed toàn bộ.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>needs_review</code></th>
+                <td>Đầu ra đã tạo nhưng chờ quyết định người dùng.</td>
+                <td>Đọc nội dung thật, duyệt hoặc yêu cầu sửa.</td>
+                <td>Không tiếp tục tự động nếu review gate chưa qua.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>needs_input</code></th>
+                <td>Thiếu voice profile, binding, config hoặc dữ liệu bắt buộc.</td>
+                <td>Đọc error code và bổ sung đúng đầu vào.</td>
+                <td>Không retry lặp lại khi điều kiện chưa thay đổi.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>prompts_ready</code></th>
+                <td>Story/shot/prompt sẵn, chưa đồng nghĩa clip/render sẵn.</td>
+                <td>Kiểm tra publishing, clip, voice, subtitle và render readiness riêng.</td>
+                <td>Không coi đây là video MP4 hoàn tất.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>failed</code></th>
+                <td>Job đã kết thúc với failure reason và error code.</td>
+                <td>Lưu request ID, dựng repro, sửa nguyên nhân rồi retry.</td>
+                <td>Không xóa record lỗi cũ để “làm sạch” giao diện.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section" id="xu-ly-loi">
+        <span class="kicker">10 · Chẩn đoán</span>
+        <h2>Xử lý lỗi theo bằng chứng</h2>
+        <p class="section__intro">
+          Mỗi lỗi cần một vòng kiểm tra có thể lặp lại: cùng action, cùng nguồn, bắt request/response, rồi mới
+          thay code hoặc cấu hình.
+        </p>
+
+        <h3>Lỗi 400 liên quan clear thinking</h3>
+        <div class="callout callout--important">
+          <p><strong>Thông báo:</strong> <code>clear_thinking_20251015 strategy requires thinking to be enabled or adaptive</code></p>
+          <p>
+            Lỗi này nói rằng request upstream dùng chiến lược clear thinking nhưng request đó không bật thinking/adaptive.
+            Không tự đổi model hoặc reasoning theo phỏng đoán.
+          </p>
+        </div>
+
+        <ol class="steps">
+          <li>
+            <strong>Ghi action vừa bấm.</strong>
+            Nêu rõ workspace, record/project ID, bước AI và thời điểm.
+          </li>
+          <li>
+            <strong>Lấy request ID mới.</strong>
+            Mở Network/response hoặc backend event. Request ID cũ không chứng minh lỗi hiện tại.
+          </li>
+          <li>
+            <strong>Chạy test provider trong Settings.</strong>
+            Nếu test trả ready với model/reasoning hiện hành, không sửa cấu hình thinking chỉ dựa trên lỗi lịch sử.
+          </li>
+          <li>
+            <strong>Đối chiếu log/database của đúng project.</strong>
+            Tìm error code, provider detail đã redact và step_name tương ứng.
+          </li>
+          <li>
+            <strong>Chỉ patch khi tái hiện được.</strong>
+            Tạo test hoặc HTTP/browser loop bắt đúng thông báo 400, sửa lớp tạo request rồi chạy lại cùng action.
+          </li>
+        </ol>
+
+        <div class="callout callout--success">
+          <h3>Trạng thái đã xác minh ngày 12/08/2026</h3>
+          <p>
+            Request ID <code>req_011CdRbAXxKR4wEj5VrhgSAF</code> là ID đã xuất hiện trong lịch sử từ 27/07/2026,
+            không phải request mới của flow hiện tại. Provider test mới <code>02944a52-c728-4ac0-8056-8493356b2189</code>
+            trả ready với <code>gpt-5.6-sol</code> / <code>low</code>; không tái hiện lỗi clear thinking.
+          </p>
+        </div>
+
+        <h3>Các lỗi vận hành khác</h3>
+        <details>
+          <summary>Route trả 200 nhưng nội dung thật không xuất hiện</summary>
+          <div class="details__body">
+            <p>Chờ điều kiện nội dung cụ thể: tên project, job, series hoặc heading. Kiểm tra API bắt buộc, console và empty/loading state. HTTP 200 không đủ để kết luận flow đạt.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Codex exec chạy lâu</summary>
+          <div class="details__body">
+            <p>Timeout provider tối đa hiện là 600 giây. Quan sát current step, updated_at và child process. Khi timeout, backend phải kết thúc cây process và lưu error code; sau đó mới retry hoặc rút gọn nguồn.</p>
+          </div>
+        </details>
+        <details>
+          <summary>Veo/Flow chưa login hoặc chưa có project binding</summary>
+          <div class="details__body">
+            <p>Đây có thể là blocker tài khoản ngoài hợp lệ. Ghi readiness/login action và project binding; không fake clip, không đánh dấu clip flow thành công và không làm hỏng planning output đã có.</p>
+          </div>
+        </details>
+        <details>
+          <summary>UI sau refresh quay về dữ liệu cũ</summary>
+          <div class="details__body">
+            <p>Đối chiếu response thao tác ghi, record ID, updated_at và GET sau refresh. Nếu API lưu đúng nhưng UI cũ, kiểm tra cache/query invalidation; nếu API không lưu, xử lý ở service/database contract.</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="section" id="kiem-tra-cuoi">
+        <span class="kicker">11 · Quality gate</span>
+        <h2>Checklist đầu-cuối trước khi kết luận hoàn tất</h2>
+
+        <div class="grid">
+          <article class="card">
+            <span class="card__label">Năm route</span>
+            <h3>UI thật</h3>
+            <ul class="checklist">
+              <li>Heading/workspace đúng.</li>
+              <li>Record thật xuất hiện.</li>
+              <li>Không console error nghiêm trọng.</li>
+              <li>Không request bắt buộc thất bại.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="card__label">Bốn handoff</span>
+            <h3>Provenance</h3>
+            <ul class="checklist">
+              <li>Comic → Story/Series.</li>
+              <li>Story → AI Video.</li>
+              <li>Research → AI Video.</li>
+              <li>Video Inspiration → AI Video.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="card__label">Nội dung</span>
+            <h3>Không lẫn nguồn</h3>
+            <ul class="checklist">
+              <li>Research dùng Người Que thật.</li>
+              <li>Title/brief giữ đúng nguồn.</li>
+              <li>Ngôn ngữ/mục đích/tỷ lệ đúng.</li>
+              <li>Prompt không rò canon project khác.</li>
+            </ul>
+          </article>
+          <article class="card">
+            <span class="card__label">Readiness</span>
+            <h3>Không báo thành công giả</h3>
+            <ul class="checklist">
+              <li>Planning và media tách trạng thái.</li>
+              <li>Veo blocker được ghi rõ.</li>
+              <li>Package cần đủ audio/subtitle.</li>
+              <li>Render cần đủ clip/duration/subtitle.</li>
+            </ul>
+          </article>
+        </div>
+
+        <h3>Bằng chứng cần lưu</h3>
+        <ul class="checklist">
+          <li>Route, record/project ID và action đã chạy.</li>
+          <li>Request ID/error code/response của bước ghi hoặc AI.</li>
+          <li>Screenshot ở mốc trước/sau, gồm desktop và mobile cho tài liệu này.</li>
+          <li>Console/network sau final reload sạch.</li>
+          <li>Kết quả test backend, typecheck, verifier và build frontend.</li>
+          <li>Residual risk thật như Veo account binding hoặc media chưa được cung cấp.</li>
+        </ul>
+      </section>
+
+      <section class="section" id="ho-so-that">
+        <span class="kicker">12 · Phụ lục</span>
+        <h2>Hồ sơ thật dùng trong hướng dẫn</h2>
+        <p class="section__intro">
+          Danh sách này giúp mở lại đúng record và tránh tạo dữ liệu trùng chỉ để kiểm tra.
+        </p>
+
+        <div class="table-wrap" role="region" aria-label="Danh sách hồ sơ thật" tabindex="0">
+          <table>
+            <caption>Các ID dưới đây là dữ liệu vận hành đã được dùng trong vòng kiểm chứng.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Workspace</th>
+                <th scope="col">Record</th>
+                <th scope="col">ID</th>
+                <th scope="col">Điểm xác minh chính</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Research</th>
+                <td>Nghiên cứu Series: Người Que</td>
+                <td><code>229f1f94-18bd-4b15-a22d-9a078d7689e3</code></td>
+                <td>2 nguồn, 21 ý tưởng, selection accepted, Memory revision 3</td>
+              </tr>
+              <tr>
+                <th scope="row">Research run</th>
+                <td>Run “Cả hai” hoàn tất</td>
+                <td><code>10455b97-c172-470b-8c87-8a090207239f</code></td>
+                <td>Research + creative completed; khuyên chọn Tập 2 Khu Rừng</td>
+              </tr>
+              <tr>
+                <th scope="row">Comic</th>
+                <td>Test Coffeemanga chapter 1</td>
+                <td><code>7f747875-3fa3-46d6-8fbb-e22b03023661</code></td>
+                <td>90 panel, revision 1, approved, optimized script</td>
+              </tr>
+              <tr>
+                <th scope="row">Story series</th>
+                <td>Test Coffeemanga Matriarch Chapter 1</td>
+                <td><code>4f71a821-42e1-4024-8984-22ee90134311</code></td>
+                <td>28 character profile, canon và source Comic</td>
+              </tr>
+              <tr>
+                <th scope="row">Story episode</th>
+                <td>Kiếp này tôi sẽ trở thành gia chủ — Chương 1</td>
+                <td><code>fea26d33-bac2-43c7-84be-1d845f89df65</code></td>
+                <td>44 panel, 44 prompt ảnh, image adaptation revision 1</td>
+              </tr>
+              <tr>
+                <th scope="row">Video Inspiration</th>
+                <td>FTU Smart Campus — video hướng dẫn tạo sự kiện</td>
+                <td><code>09f61d07-7887-45c9-b7d4-ff910499afdb</code></td>
+                <td>Upload, transcript, timeline, analysis, optimized script tiếng Việt</td>
+              </tr>
+              <tr>
+                <th scope="row">AI Video</th>
+                <td>Người Que — Tập 2: Khu Rừng Đi Ngược Thời Gian</td>
+                <td><code>d8c9240d-bae1-4439-ac57-c7956622bdb3</code></td>
+                <td>19 scene, 18 shot/prompt, 180 giây, metadata 3 nền tảng</td>
+              </tr>
+              <tr>
+                <th scope="row">AI Video</th>
+                <td>Story → AI Video: Kiếp này tôi sẽ trở thành gia chủ</td>
+                <td><code>4e18aaa9-a2f8-4d81-bee2-71e146956ed1</code></td>
+                <td>Giữ series/episode, 44-panel provenance, 60 giây, 9:16, tiếng Việt</td>
+              </tr>
+              <tr>
+                <th scope="row">AI Video</th>
+                <td>Video Inspiration → AI Video: FTU handoff tiếng Việt</td>
+                <td><code>fb3de180-1fb6-45f0-968d-fd8cdc2df882</code></td>
+                <td>Giữ source job, filename/path, analysis package và optimized brief</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callout callout--warning">
+          <h3>Lưu ý về trạng thái động</h3>
+          <p>
+            ID và provenance là ổn định; trạng thái job/project có thể thay đổi sau khi tiếp tục chạy AI, tạo media
+            hoặc duyệt output. Luôn refresh và đọc trạng thái hiện hành trước khi bấm action.
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <p><strong>Voicebox AI Media · Hướng dẫn vận hành tự chứa</strong></p>
+      <p>
+        Mở năm workspace tại <a href="http://localhost:4000">http://localhost:4000</a>.
+        Tài liệu không phụ thuộc font, ảnh, CSS hoặc JavaScript từ mạng.
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

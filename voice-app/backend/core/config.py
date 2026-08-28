@@ -174,6 +174,14 @@ def get_runtime_config() -> RuntimeConfig:
     return load_runtime_config()
 
 
+def is_feature_enabled(name: str, *, default: bool = True) -> bool:
+    """Read a runtime feature flag without changing the default behavior."""
+    value = get_runtime_config().feature_flags.get(name.lower())
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "off", "no", "disabled"}
+
+
 def configure_model_cache() -> None:
     """Apply the configured HuggingFace model cache early in process startup."""
     models_dir = os.environ.get(ENV_MODELS_DIR)
@@ -314,6 +322,7 @@ __all__ = [
     "get_models_dir",
     "get_profiles_dir",
     "get_runtime_config",
+    "is_feature_enabled",
     "load_runtime_config",
     "resolve_storage_path",
     "set_data_dir",

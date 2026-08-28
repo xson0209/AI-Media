@@ -17,23 +17,27 @@ import {
   Upload,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { AI_VIDEO_DRAFT_STORAGE_KEY, type AIVideoFormDraft } from '@/lib/aiVideoDraft';
+import {
+  AI_VIDEO_DRAFT_STORAGE_KEY,
+  type AIVideoFormDraft,
+  videoInspirationDraftConfig,
+} from '@/lib/aiVideoDraft';
 import { apiClient } from '@/lib/api/client';
-import { ALL_LANGUAGES, LANGUAGE_OPTIONS } from '@/lib/constants/languages';
-import { useProfiles } from '@/lib/hooks/useProfiles';
 import type {
   VideoInspirationAnalysisMode,
   VideoInspirationHandoffResponse,
   VideoInspirationJobResponse,
   VideoInspirationTargetLanguage,
 } from '@/lib/api/types';
+import { ALL_LANGUAGES, LANGUAGE_OPTIONS } from '@/lib/constants/languages';
+import { useProfiles } from '@/lib/hooks/useProfiles';
 import { cn } from '@/lib/utils/cn';
 
 const STEP_LABELS: Record<string, string> = {
@@ -98,6 +102,43 @@ const ANALYSIS_LABELS: Record<string, string> = {
 
 const AI_VIDEO_DRAFT_SECTION_MAX_LENGTH = 28000;
 const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
+
+interface VideoInspirationVariantCandidate {
+  variant_id?: string;
+  title?: string;
+  big_idea?: string;
+  hook_3_5s?: string;
+}
+
+interface VideoInspirationVariantReview {
+  candidate_index?: number;
+  score?: number;
+}
+
+interface VideoInspirationFinalVersion {
+  variant_id: string;
+  source_basis?: string[];
+}
+
+interface VideoInspirationVariantPipeline {
+  candidates?: VideoInspirationVariantCandidate[];
+  scoring?: {
+    variant_ids?: string[];
+    reviews?: VideoInspirationVariantReview[];
+  };
+  synthesis?: {
+    versions?: VideoInspirationFinalVersion[];
+  };
+}
+
+function variantPipelineFromAnalysis(
+  analysis: Record<string, unknown> | null | undefined,
+): VideoInspirationVariantPipeline {
+  const value = analysis?.variant_pipeline;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as VideoInspirationVariantPipeline)
+    : {};
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Có lỗi không xác định.';
@@ -220,7 +261,7 @@ function structuredPreview(value: unknown, limit = 1400): string {
     return String(item ?? '').trim();
   };
   const text = format(value).trim();
-  if (!text) return 'ChÆ°a cÃ³ dá»¯ liá»‡u.';
+  if (!text) return 'Chưa có dữ liệu.';
   return text.length > limit ? `${text.slice(0, limit).trimEnd()}...` : text;
 }
 
@@ -336,6 +377,21 @@ function frameDraftText(job: VideoInspirationJobResponse): string {
     .join('\n');
 }
 
+function sourceProvenanceText(job: VideoInspirationJobResponse): string {
+  return joinDraftSections(
+    [
+      ['Video Inspiration job ID', job.id],
+      ['Loại nguồn', job.source_type],
+      ['Tên file nguồn', job.original_filename],
+      ['Link nguồn', job.source_url],
+      ['Nền tảng nguồn', job.source_platform],
+      ['Đường dẫn file nguồn', job.source_path],
+      ['Gói phân tích', job.analysis_package_path],
+    ],
+    4000,
+  );
+}
+
 function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
   const rewrite = rewritePayload(job);
   const sourceBlocks = rewriteSourceBlocks(rewrite);
@@ -364,11 +420,20 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
   const userDirection = job.user_direction || '';
   const frameNotes = frameDraftText(job);
   const outputLanguageNote = languageLabel(job.target_language);
+  const sourceProvenance = sourceProvenanceText(job);
+  const analysisSeed = firstDraftText(
+    job.transcript_text,
+    analysisText(job, 'main_idea_vi'),
+    job.visual_summary,
+    'Chưa có kịch bản tối ưu; AI Video sẽ phát triển tiếp từ gói nghiên cứu sâu này.',
+  );
 
   return {
     source: 'video-inspiration',
+    preserveConfiguration: true,
     createdAt: new Date().toISOString(),
     title,
+    ...videoInspirationDraftConfig(job.target_language),
     visualStyle: compactDraftSections([
       ['Định hướng hình ảnh từ người dùng', userDirection],
       ['Tóm tắt hình ảnh video gốc', job.visual_summary],
@@ -380,6 +445,7 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
       {
         block_type: 'idea',
         content: joinDraftSections([
+          ['Provenance nguồn Video Inspiration', sourceProvenance],
           ['Dữ liệu đã tối ưu cho ô ý tưởng', sourceBlockText(sourceBlocks, 'idea')],
           ['Tên dự án', title],
           ['Ý tưởng chính', bigIdea],
@@ -394,9 +460,9 @@ function buildAIVideoDraft(job: VideoInspirationJobResponse): AIVideoFormDraft {
         block_type: 'rough_script',
         content: joinDraftSections([
           ['Dữ liệu đã tối ưu cho ô kịch bản thô', sourceBlockText(sourceBlocks, 'rough_script')],
-          ['Kịch bản tối ưu đã duyệt', job.rewritten_script],
+          ['Kịch bản tối ưu đã duyệt', job.rewritten_script || 'Chưa có; đây là handoff từ nghiên cứu sâu.'],
           ['Cấu trúc segment/cảnh từ bản rewrite', draftText(rewrite.segments)],
-          ['Transcript gốc để đối chiếu', job.transcript_text],
+          ['Transcript/gói nghiên cứu gốc để AI Video phát triển tiếp', job.transcript_text || analysisSeed],
         ]),
       },
       {
@@ -526,6 +592,34 @@ function useVideoInspirationMutations(setSelectedJobId: (jobId: string) => void)
         }),
       onSuccess: cacheJob,
     }),
+    deepResearch: useMutation({
+      mutationFn: (jobId: string) => apiClient.deepResearchVideoInspirationJob(jobId),
+      onSuccess: cacheJob,
+    }),
+    generateVariants: useMutation({
+      mutationFn: ({ jobId, candidateCount }: { jobId: string; candidateCount: 2 | 3 }) =>
+        apiClient.generateVideoInspirationVariants(jobId, { candidate_count: candidateCount }),
+      onSuccess: cacheJob,
+    }),
+    scoreVariants: useMutation({
+      mutationFn: ({ jobId, variantIds }: { jobId: string; variantIds: string[] }) =>
+        apiClient.scoreVideoInspirationVariants(jobId, { variant_ids: variantIds }),
+      onSuccess: cacheJob,
+    }),
+    synthesizeVariants: useMutation({
+      mutationFn: ({ jobId, variantIds, finalVersionCount, strategy }: { jobId: string; variantIds: string[]; finalVersionCount: 1 | 2 | 3; strategy: 'balanced' | 'hook' | 'emotion' | 'retention' | 'visual' }) =>
+        apiClient.synthesizeVideoInspirationVariants(jobId, {
+          variant_ids: variantIds,
+          final_version_count: finalVersionCount,
+          strategy,
+        }),
+      onSuccess: cacheJob,
+    }),
+    selectVariant: useMutation({
+      mutationFn: ({ jobId, variantId }: { jobId: string; variantId: string }) =>
+        apiClient.selectVideoInspirationVariant(jobId, { variant_id: variantId }),
+      onSuccess: cacheJob,
+    }),
     saveTranscript: useMutation({
       mutationFn: ({ jobId, text }: { jobId: string; text: string }) =>
         apiClient.updateVideoInspirationTranscript(jobId, { transcript_text: text }),
@@ -648,6 +742,11 @@ export function VideoInspiration() {
   const [scriptTitleDraft, setScriptTitleDraft] = useState('');
   const [bigIdeaDraft, setBigIdeaDraft] = useState('');
   const [hookDraft, setHookDraft] = useState('');
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [variantCount, setVariantCount] = useState<2 | 3>(2);
+  const [finalVersionCount, setFinalVersionCount] = useState<1 | 2 | 3>(1);
+  const [variantStrategy, setVariantStrategy] = useState<'balanced' | 'hook' | 'emotion' | 'retention' | 'visual'>('balanced');
+  const deepHandoffIntentKey = 'voicebox.videoInspiration.deepHandoff.v1';
 
   const mutations = useVideoInspirationMutations((jobId) => setSelectedJobId(jobId));
 
@@ -699,6 +798,8 @@ export function VideoInspiration() {
   const cancelPendingForCurrent =
     mutations.cancel.isPending && mutations.cancel.variables === currentJobId;
   const retryPendingForCurrent = mutations.retry.isPending && mutations.retry.variables === currentJobId;
+  const deepResearchPendingForCurrent =
+    mutations.deepResearch.isPending && mutations.deepResearch.variables === currentJobId;
   const currentJobMutationPending =
     analyzePendingForCurrent ||
     rewritePendingForCurrent ||
@@ -709,9 +810,13 @@ export function VideoInspiration() {
     createHandoffPendingForCurrent ||
     createProjectPendingForCurrent ||
     cancelPendingForCurrent ||
-    retryPendingForCurrent;
+    retryPendingForCurrent ||
+    deepResearchPendingForCurrent;
   const currentJobActive = isJobActive(currentJob);
   const currentJobLocked = currentJobActive || currentJobMutationPending;
+  const variantPipeline = variantPipelineFromAnalysis(currentJob?.analysis_json);
+  const candidates = Array.isArray(variantPipeline.candidates) ? variantPipeline.candidates : [];
+  const finalVersions = Array.isArray(variantPipeline.synthesis?.versions) ? variantPipeline.synthesis.versions : [];
   const currentJobActionError = mutationError(
     mutations.analyze.variables?.jobId === currentJobId ? mutations.analyze.error : null,
     mutations.saveTranscript.variables?.jobId === currentJobId
@@ -814,7 +919,8 @@ export function VideoInspiration() {
     !!currentJob && (isCurrentJobStale || ['failed', 'cancelled'].includes(currentJob.status));
   const canAnalyze = !!currentJob && !currentJobLocked && !currentJobRetryable;
   const canRewrite = !!currentJob?.analysis_json && !currentJobLocked;
-  const canHandoff = !!currentJob?.rewritten_script?.trim() && !currentJobLocked;
+  const canHandoff = (!!currentJob?.rewritten_script?.trim() || !!currentJob?.analysis_package_json) && !currentJobLocked;
+  const canDeepHandoff = !!currentJob && !currentJobLocked && !isCurrentJobStale;
   const canCreateStructuredHandoff =
     !!currentJob?.rewritten_script?.trim() &&
     !!currentJob?.analysis_package_json &&
@@ -863,10 +969,10 @@ export function VideoInspiration() {
     });
   };
 
-  const handleOpenAIVideoDraft = () => {
+  const handleOpenAIVideoDraft = useCallback(() => {
     setLocalError(null);
-    if (!currentJob?.rewritten_script?.trim()) {
-      setLocalError('Cần có kịch bản tối ưu trước khi đưa sang form AI Video.');
+    if (!currentJob?.analysis_package_json && !currentJob?.rewritten_script?.trim()) {
+      setLocalError('Cần có kết quả phân tích hoặc kịch bản trước khi đưa sang form AI Video.');
       return;
     }
     try {
@@ -880,7 +986,58 @@ export function VideoInspiration() {
         `Chưa đưa được dữ liệu sang AI Video: ${getErrorMessage(error)}. Hãy thử lưu kịch bản rồi bấm lại.`,
       );
     }
+  }, [currentJob]);
+
+  const handleDeepResearchHandoff = () => {
+    if (!currentJob || !canDeepHandoff) return;
+    setLocalError(null);
+    if (currentJob.analysis_package_json && currentJob.analysis_mode === 'high_quality') {
+      handleOpenAIVideoDraft();
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(
+        deepHandoffIntentKey,
+        JSON.stringify({
+          jobId: currentJob.id,
+          action: 'deep_research_handoff',
+          requestedAt: new Date().toISOString(),
+          previousAnalysisRevision: currentJob.analysis_package_path ?? null,
+        }),
+      );
+    } catch {
+      // Best effort; the active job still remains observable through polling.
+    }
+    mutations.deepResearch.mutate(currentJob.id);
   };
+
+  useEffect(() => {
+    if (!currentJob || (!currentJob.is_stale && !['failed', 'cancelled'].includes(currentJob.status))) return;
+    try {
+      const raw = window.sessionStorage.getItem(deepHandoffIntentKey);
+      if (!raw) return;
+      const intent = JSON.parse(raw) as { jobId?: string };
+      if (intent.jobId === currentJob.id) {
+        window.sessionStorage.removeItem(deepHandoffIntentKey);
+      }
+    } catch {
+      window.sessionStorage.removeItem(deepHandoffIntentKey);
+    }
+  }, [currentJob]);
+
+  useEffect(() => {
+    if (!currentJob || currentJob.status !== 'analyzed' || currentJob.analysis_mode !== 'high_quality') return;
+    try {
+      const raw = window.sessionStorage.getItem(deepHandoffIntentKey);
+      if (!raw) return;
+      const intent = JSON.parse(raw) as { jobId?: string };
+      if (intent.jobId !== currentJob.id) return;
+      window.sessionStorage.removeItem(deepHandoffIntentKey);
+      handleOpenAIVideoDraft();
+    } catch (error) {
+      setLocalError(getErrorMessage(error));
+    }
+  }, [currentJob, handleOpenAIVideoDraft]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-5">
@@ -1212,6 +1369,19 @@ export function VideoInspiration() {
                   </Button>
                   <Button
                     type="button"
+                    variant="secondary"
+                    disabled={!canDeepHandoff || deepResearchPendingForCurrent}
+                    onClick={handleDeepResearchHandoff}
+                  >
+                    {deepResearchPendingForCurrent ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4" />
+                    )}
+                    Nghiên cứu sâu → Cấu hình Video AI
+                  </Button>
+                  <Button
+                    type="button"
                     variant="outline"
                     disabled={!canRewrite}
                     onClick={() =>
@@ -1236,6 +1406,113 @@ export function VideoInspiration() {
                   </Button>
                 </div>
               </div>
+            </section>
+
+            <section className="rounded-lg border border-border/80 bg-card/65 p-5">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold">Tạo và chấm điểm nhiều phiên bản</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Tạo 2–3 hướng trong một batch, chọn bản cần chấm điểm rồi tổng hợp một hoặc nhiều bản tối ưu.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={variantCount}
+                    disabled={!currentJob || currentJobLocked || mutations.generateVariants.isPending}
+                    onChange={(event) => setVariantCount(Number(event.target.value) as 2 | 3)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value={2}>2 phiên bản</option>
+                    <option value={3}>3 phiên bản</option>
+                  </select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!currentJob?.analysis_json || currentJobLocked || mutations.generateVariants.isPending}
+                    onClick={() => currentJob && mutations.generateVariants.mutate({ jobId: currentJob.id, candidateCount: variantCount })}
+                  >
+                    {mutations.generateVariants.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    Tạo nhiều bản nháp
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!candidates.length || currentJobLocked || mutations.scoreVariants.isPending}
+                    onClick={() => currentJob && mutations.scoreVariants.mutate({ jobId: currentJob.id, variantIds: selectedVariantIds.length ? selectedVariantIds : candidates.map((item) => String(item.variant_id)) })}
+                  >
+                    {mutations.scoreVariants.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Chấm điểm {selectedVariantIds.length ? 'bản đã chọn' : 'tất cả'}
+                  </Button>
+                </div>
+              </div>
+              {candidates.length ? (
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {candidates.map((candidate, index) => {
+                    const id = String(candidate.variant_id || `candidate-${index + 1}`);
+                    const checked = selectedVariantIds.includes(id);
+                    return (
+                      <label key={id} className="flex gap-3 rounded-lg border border-border/75 bg-background/60 p-4">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={currentJobLocked}
+                          onChange={(event) => setSelectedVariantIds((current) => event.target.checked ? [...new Set([...current, id])] : current.filter((value) => value !== id))}
+                          className="mt-1 h-4 w-4"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm font-semibold">{candidate.title || `Bản nháp ${index + 1}`}</span>
+                          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{candidate.big_idea || candidate.hook_3_5s || 'Chưa có mô tả ngắn.'}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {variantPipeline.scoring?.reviews?.length ? (
+                <div className="mt-4 rounded-lg border border-border/75 bg-background/60 p-4">
+                  <p className="text-sm font-semibold">Kết quả chấm điểm</p>
+                  <div className="mt-2 grid gap-2 text-sm">
+                    {variantPipeline.scoring.reviews.map((review, index) => (
+                      <div key={`${review.candidate_index}-${index}`} className="flex items-center justify-between gap-3">
+                        <span>Bản {Number(review.candidate_index) + 1}</span>
+                        <span className="font-semibold">{review.score}/10</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select value={variantStrategy} onChange={(event) => setVariantStrategy(event.target.value as typeof variantStrategy)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+                      <option value="balanced">Cân bằng</option>
+                      <option value="hook">Ưu tiên hook</option>
+                      <option value="emotion">Ưu tiên cảm xúc</option>
+                      <option value="retention">Ưu tiên retention</option>
+                      <option value="visual">Ưu tiên hình ảnh</option>
+                    </select>
+                    <select value={finalVersionCount} onChange={(event) => setFinalVersionCount(Number(event.target.value) as 1 | 2 | 3)} className="h-10 rounded-md border border-input bg-background px-3 text-sm">
+                      <option value={1}>1 bản cuối</option>
+                      <option value={2}>2 bản cuối</option>
+                      <option value={3}>3 bản cuối</option>
+                    </select>
+                    <Button type="button" disabled={currentJobLocked || mutations.synthesizeVariants.isPending} onClick={() => currentJob && mutations.synthesizeVariants.mutate({ jobId: currentJob.id, variantIds: selectedVariantIds.length ? selectedVariantIds : (variantPipeline.scoring?.variant_ids ?? []), finalVersionCount, strategy: variantStrategy })}>
+                      {mutations.synthesizeVariants.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      Tổng hợp bản tối ưu
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {finalVersions.length ? (
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {finalVersions.map((version) => (
+                    <div key={version.variant_id} className="rounded-lg border border-border/75 bg-background/60 p-4">
+                      <p className="text-sm font-semibold">{version.variant_id}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Nguồn: {(version.source_basis || []).join(', ')}</p>
+                      <Button type="button" className="mt-3" disabled={currentJobLocked || mutations.selectVariant.isPending} onClick={() => currentJob && mutations.selectVariant.mutate({ jobId: currentJob.id, variantId: version.variant_id })}>
+                        Chọn bản này để handoff
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </section>
 
             <Tabs defaultValue="transcript" className="min-w-0">

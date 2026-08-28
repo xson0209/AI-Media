@@ -47,6 +47,8 @@ $env:VOICEBOX_BACKEND_HOST = "127.0.0.1"
 $env:VOICEBOX_BACKEND_PORT = "17493"
 $env:VOICEBOX_FRONTEND_PORT = "4000"
 $env:VITE_SERVER_URL = "http://127.0.0.1:17493"
+$env:VOICEBOX_FEATURE_AUTOMATION_HUB = "true"
+$env:VOICEBOX_FEATURE_AUTOMATION_HUB_TIKTOK_DIRECT_POST = "false"
 
 $SoxDir = Join-Path $ProjectRoot "tools\sox-14.4.2"
 $SystemPath = [Environment]::GetEnvironmentVariable("Path", "Machine")

@@ -28,6 +28,9 @@ def register_routers(app: FastAPI) -> None:
     from .story_studio import router as story_studio_router
     from .video_inspiration import router as video_inspiration_router
     from .comic_series_analysis import router as comic_series_analysis_router
+    from .product_video import router as product_video_router
+    from .research import router as research_router
+    from .automation_hub import router as automation_hub_router
 
     app.include_router(health_router)
     app.include_router(profiles_router)
@@ -52,3 +55,6 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(story_studio_router)
     app.include_router(video_inspiration_router)
     app.include_router(comic_series_analysis_router)
+    app.include_router(product_video_router)
+    app.include_router(research_router)
+    app.include_router(automation_hub_router)

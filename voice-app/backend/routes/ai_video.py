@@ -7,9 +7,11 @@ import mimetypes
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from .. import models
 from ..database import VideoProject as DBVideoProject, VideoShot as DBVideoShot, get_db
+from ..database import session as database_session
 from ..features.ai_video import (
     auto_runs as video_auto_runs,
     projects as video_projects,
@@ -34,12 +36,23 @@ from ..services import (
     video_provider_sessions,
     video_project_memory,
     video_quality,
+    video_series_characters,
     video_series_memory,
     video_voice,
 )
 from ..utils.http import safe_content_disposition
 
 router = APIRouter(prefix="/ai-video", tags=["ai-video"], route_class=video_errors.AIVideoRoute)
+
+
+async def _run_with_worker_db(callback, *args, **kwargs):
+    """Run blocking AI planning without occupying FastAPI's event loop."""
+
+    worker_db = database_session.SessionLocal()
+    try:
+        return await run_in_threadpool(callback, *args, worker_db, **kwargs)
+    finally:
+        worker_db.close()
 
 
 def _error(status_code: int, message: str, error_code: str, **context) -> HTTPException:
@@ -140,8 +153,9 @@ async def check_ai_planning_provider(
 
 @router.post("/projects/{project_id}/plan", response_model=models.VideoProjectDetailResponse)
 async def generate_video_project_plan(project_id: str, db: Session = Depends(get_db)):
+    del db
     try:
-        project = video_planning.generate_project_plan(project_id, db)
+        project = await _run_with_worker_db(video_planning.generate_project_plan, project_id)
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -690,13 +704,13 @@ async def get_video_project(project_id: str, db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}/memory", response_model=models.VideoProjectMemoryListResponse)
 async def list_video_project_memory(project_id: str, db: Session = Depends(get_db)):
     if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
-        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return video_project_memory.list_project_memory(project_id, db)
 
 @router.get("/projects/{project_id}/target-timeline", response_model=models.VideoProjectTargetTimelineResponse)
 async def list_video_project_target_timeline(project_id: str, db: Session = Depends(get_db)):
     if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
-        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return video_project_memory.list_target_timeline(project_id, db)
 
 @router.post("/projects/{project_id}/context/compile", response_model=models.VideoProjectContextSnapshotResponse)
@@ -717,7 +731,7 @@ async def list_video_project_context_snapshots(
     db: Session = Depends(get_db),
 ):
     if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
-        raise _error(404, "KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n video.", "VIDEO_PROJECT_NOT_FOUND")
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return video_project_memory.list_context_snapshots(project_id, db, limit=limit)
 
 @router.post("/projects/{project_id}/quality/reports", response_model=models.VideoQualityReportResponse)
@@ -932,11 +946,12 @@ async def generate_video_publishing_metadata(
     data: models.VideoPublishingMetadataGenerateRequest | None = None,
     db: Session = Depends(get_db),
 ):
+    del db
     try:
-        metadata = video_publishing_metadata.generate_publishing_metadata(
+        metadata = await _run_with_worker_db(
+            video_publishing_metadata.generate_publishing_metadata,
             project_id,
             data or models.VideoPublishingMetadataGenerateRequest(),
-            db,
         )
     except video_publishing_metadata.VideoPublishingMetadataError as exc:
         raise _error(
@@ -959,6 +974,31 @@ async def generate_video_publishing_metadata(
     if metadata is None:
         raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
     return metadata
+
+@router.get("/projects/{project_id}/character-flow", response_model=models.VideoProjectCharacterFlowResponse)
+async def get_video_project_character_flow(project_id: str, db: Session = Depends(get_db)):
+    flow = video_series_characters.get_character_flow(project_id, db)
+    if flow is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return flow
+
+@router.post(
+    "/projects/{project_id}/character-proposals/{proposal_id}/decision",
+    response_model=models.CharacterProposalDecisionResponse,
+)
+async def decide_video_project_character_proposal(
+    project_id: str,
+    proposal_id: str,
+    data: models.CharacterProposalDecisionRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        result = video_series_characters.decide_character_proposal(project_id, proposal_id, data, db)
+    except video_series_characters.VideoSeriesCharacterFlowError as exc:
+        raise _error(400, str(exc), exc.error_code, exc=exc, project_id=project_id) from exc
+    if result is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return result
 
 @router.post("/projects/{project_id}/auto-runs", response_model=models.VideoAutoRunResponse)
 async def start_video_auto_run(
@@ -1154,8 +1194,13 @@ async def get_video_project_debug(project_id: str, db: Session = Depends(get_db)
 async def develop_video_story(
     project_id: str, data: models.VideoStoryDevelopRequest | None = None, db: Session = Depends(get_db)
 ):
+    del db
     try:
-        project = video_phase2.develop_story(project_id, db, force=bool(data.force if data else False))
+        project = await _run_with_worker_db(
+            video_phase2.develop_story,
+            project_id,
+            force=bool(data.force if data else False),
+        )
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -1184,8 +1229,9 @@ async def approve_video_story(project_id: str, data: models.VideoStoryApprovalRe
 
 @router.post("/projects/{project_id}/shots", response_model=list[models.VideoShotResponse])
 async def generate_video_shots(project_id: str, db: Session = Depends(get_db)):
+    del db
     try:
-        shots = video_phase2.generate_shots(project_id, db)
+        shots = await _run_with_worker_db(video_phase2.generate_shots, project_id)
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -1224,8 +1270,9 @@ async def lock_video_shot(
 
 @router.post("/projects/{project_id}/shots/{shot_id}/regenerate", response_model=models.VideoShotResponse)
 async def regenerate_video_shot(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    del db
     try:
-        shot = video_phase2.regenerate_shot(project_id, shot_id, db)
+        shot = await _run_with_worker_db(video_phase2.regenerate_shot, project_id, shot_id)
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -1282,8 +1329,9 @@ async def regenerate_video_scene(
     scene_id: str,
     db: Session = Depends(get_db),
 ):
+    del db
     try:
-        scene = video_planning.regenerate_scene(project_id, scene_id, db)
+        scene = await _run_with_worker_db(video_planning.regenerate_scene, project_id, scene_id)
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -1314,7 +1362,7 @@ async def generate_video_prompt_pack(project_id: str, db: Session = Depends(get_
     project_detail = video_projects.get_project(project_id, db)
     if project_detail is not None and project_detail.phase == "phase2":
         try:
-            pack = video_phase2.generate_video_prompt_pack(project_id, db)
+            pack = await _run_with_worker_db(video_phase2.generate_video_prompt_pack, project_id)
         except ai_planning.AIPlanningError as exc:
             raise _error(
                 _planning_error_status(exc),
@@ -1337,7 +1385,7 @@ async def generate_video_prompt_pack(project_id: str, db: Session = Depends(get_
             raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
         return pack
     try:
-        pack = video_planning.generate_prompt_pack(project_id, db)
+        pack = await _run_with_worker_db(video_planning.generate_prompt_pack, project_id)
     except ai_planning.AIPlanningError as exc:
         raise _error(
             _planning_error_status(exc),
@@ -1429,6 +1477,7 @@ async def upload_shot_clip(
     project_id: str,
     shot_id: str,
     file: UploadFile = File(...),
+    provider: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
     try:
@@ -1438,6 +1487,7 @@ async def upload_shot_clip(
             filename=file.filename or "clip.mp4",
             content_type=file.content_type,
             data=await file.read(),
+            provider=provider,
             db=db,
         )
     except video_rendering.VideoRenderError as exc:
@@ -1721,15 +1771,18 @@ async def download_video_subtitle(project_id: str, db: Session = Depends(get_db)
 async def get_video_render_readiness(
     project_id: str,
     resolution: str = Query("auto", pattern="^(auto|720p|1080p)$"),
-    fps: int = Query(30, ge=12, le=60),
+    fps: int = Query(60, ge=12, le=60),
     fit_mode: str = Query("crop", pattern="^(crop|pad)$"),
     duration_mode: str = Query("freeze", pattern="^(freeze|trim_only)$"),
-    subtitle_mode: str = Query("burn_in", pattern="^(burn_in|sidecar|none)$"),
-    mute_clip_audio: bool = Query(True),
+    subtitle_mode: str = Query("none", pattern="^(burn_in|sidecar|none)$"),
+    mute_clip_audio: bool = Query(False),
+    clip_audio_mode: str | None = Query(None, pattern="^(drop|bed|clip_only)$"),
     enhanced_render: bool = Query(False),
     enhanced_audio: bool = Query(True),
     ai_review: bool = Query(True),
-    max_fix_attempts: int = Query(1, ge=0, le=2),
+    max_fix_attempts: int = Query(0, ge=0, le=2),
+    watermark_cleanup: bool = Query(True),
+    watermark_backend: str = Query("cv2", pattern="^(cv2|migan)$"),
     db: Session = Depends(get_db),
 ):
     settings = models.VideoRenderSettings(
@@ -1739,10 +1792,13 @@ async def get_video_render_readiness(
         duration_mode=duration_mode,
         subtitle_mode=subtitle_mode,
         mute_clip_audio=mute_clip_audio,
+        clip_audio_mode=clip_audio_mode,
         enhanced_render=enhanced_render,
         enhanced_audio=enhanced_audio,
         ai_review=ai_review,
         max_fix_attempts=max_fix_attempts,
+        watermark_cleanup=watermark_cleanup,
+        watermark_backend=watermark_backend,
     )
     readiness = video_rendering.get_render_readiness(project_id, db, settings)
     if readiness is None:

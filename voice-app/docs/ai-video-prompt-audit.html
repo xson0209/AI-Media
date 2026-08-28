@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audit 502/timeout và luồng prompt AI Video</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5d687d;
+      --line: #dbe2ec;
+      --panel: #ffffff;
+      --wash: #f5f7fb;
+      --blue: #2457d6;
+      --blue-wash: #edf3ff;
+      --amber: #9a5b00;
+      --amber-wash: #fff6e2;
+      --red: #a52d36;
+      --red-wash: #fff0f1;
+      --green: #1d7249;
+      --green-wash: #edf9f1;
+      --purple: #6638a8;
+      --purple-wash: #f4efff;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.62 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px 22px 80px; }
+    header.hero { background: #1f3b82; color: white; padding: 38px 42px; border-radius: 24px; border: 1px solid #3154a0; }
+    h1 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 46px); line-height: 1.12; letter-spacing: -.03em; }
+    h2 { margin: 42px 0 13px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 27px; line-height: 1.25; }
+    h3 { margin: 28px 0 8px; font-size: 20px; line-height: 1.3; }
+    h4 { margin: 18px 0 4px; font-size: 16px; }
+    p { margin: 8px 0 13px; }
+    .lede { max-width: 870px; font-size: 18px; color: #edf3ff; }
+    .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+    .pill { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 10px; font-size: 13px; font-weight: 650; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); }
+    nav.toc { margin: 22px 0; padding: 18px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+    nav.toc strong { display: block; margin-bottom: 6px; }
+    nav.toc a { color: var(--blue); margin-right: 18px; text-decoration: none; }
+    nav.toc a:hover { text-decoration: underline; }
+    section, .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; }
+    section { margin-top: 22px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+    .stat { padding: 18px; border-radius: 14px; border: 1px solid var(--line); background: #fbfcff; }
+    .stat .num { display: block; font-size: 31px; font-weight: 760; line-height: 1; margin-bottom: 8px; }
+    .stat small { color: var(--muted); }
+    .callout { margin: 16px 0; padding: 15px 18px; border-left: 5px solid var(--blue); background: var(--blue-wash); border-radius: 9px; }
+    .callout.warning { border-color: var(--amber); background: var(--amber-wash); }
+    .callout.danger { border-color: var(--red); background: var(--red-wash); }
+    .callout.success { border-color: var(--green); background: var(--green-wash); }
+    .callout.purple { border-color: var(--purple); background: var(--purple-wash); }
+    .tag { display: inline-block; border-radius: 6px; padding: 2px 7px; margin-right: 5px; font-size: 12px; font-weight: 750; letter-spacing: .02em; }
+    .confirmed { color: var(--green); background: var(--green-wash); }
+    .inferred { color: var(--purple); background: var(--purple-wash); }
+    .gap { color: var(--amber); background: var(--amber-wash); }
+    table { width: 100%; border-collapse: collapse; margin: 13px 0 7px; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 10px 11px; border-bottom: 1px solid var(--line); }
+    th { background: #f0f4fa; font-size: 13px; }
+    tr:last-child td { border-bottom: 0; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    code { color: #213a77; background: #eef2f8; border-radius: 4px; padding: 1px 5px; font-size: .91em; }
+    pre { overflow-x: auto; margin: 10px 0 15px; padding: 15px 17px; background: #101828; color: #edf3ff; border-radius: 10px; font-size: 13px; line-height: 1.55; }
+    .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 17px 0; }
+    .node { flex: 1 1 145px; min-width: 140px; padding: 13px 14px; border: 1px solid #bbcae8; border-radius: 12px; background: var(--blue-wash); }
+    .node strong { display: block; color: #173a9c; margin-bottom: 3px; }
+    .arrow { align-self: center; color: var(--blue); font-size: 22px; font-weight: 700; }
+    .timeline { border-left: 3px solid #b6c6e9; margin: 19px 0 6px 12px; padding-left: 22px; }
+    .event { position: relative; margin: 0 0 21px; }
+    .event::before { content: ""; position: absolute; width: 11px; height: 11px; border-radius: 50%; left: -30px; top: 8px; background: var(--blue); border: 3px solid var(--wash); }
+    .event time { color: var(--muted); font-size: 13px; }
+    ul, ol { padding-left: 23px; }
+    li { margin: 5px 0; }
+    .file { color: var(--blue); font-family: ui-monospace, monospace; font-size: 13px; word-break: break-word; }
+    details { border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; margin: 9px 0; background: #fbfcff; }
+    summary { cursor: pointer; font-weight: 700; }
+    .matrix td:first-child { font-weight: 650; white-space: nowrap; }
+    footer { margin-top: 30px; color: var(--muted); font-size: 13px; text-align: center; }
+    @media (max-width: 650px) { main { padding: 14px 12px 50px; } header.hero { padding: 26px 23px; border-radius: 17px; } section, .card { padding: 17px; } .arrow { display: none; } th, td { padding: 8px 7px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <h1>Audit 502/timeout và luồng prompt AI Video</h1>
+    <p class="lede">Bản deep dive dựa trên code hiện tại, audit log trong <code>data/voicebox.db</code> và các OpenSpec change đang mở. Mục tiêu là trả lời hai câu hỏi: lỗi 502 có thực sự là timeout không, và prompt đi qua hệ thống như thế nào từ UI tới Codex rồi tới Flow/Veo?</p>
+    <div class="meta"><span class="pill">Ngày kiểm tra: 26/08/2026</span><span class="pill">Log local tới khoảng 25/08/2026</span><span class="pill">Read-only — chưa chạy prompt thật</span></div>
+  </header>
+
+  <nav class="toc" aria-label="Mục lục">
+    <strong>Đi nhanh tới</strong>
+    <a href="#scope">Phạm vi</a><a href="#answer">Kết luận 502</a><a href="#flow">Summary flow</a><a href="#detail">Luồng chi tiết</a><a href="#retry">Retry &amp; fallback</a><a href="#veo">Prompt Flow/Veo</a><a href="#files">File map</a><a href="#gaps">Gaps &amp; next actions</a>
+  </nav>
+
+  <section id="scope">
+    <h2>1. Phạm vi và cách đọc báo cáo</h2>
+    <p><span class="tag confirmed">CONFIRMED</span> Đã lần theo các entry point AI Video ở frontend, route FastAPI, service dựng prompt, wrapper gọi Codex CLI, các event audit trong SQLite và nhánh gửi prompt sang Google Flow/Veo.</p>
+    <p><span class="tag confirmed">CONFIRMED</span> Không có raw prompt lớn trong request từ frontend. Frontend chỉ gửi <code>project_id</code>, cờ <code>force</code> (story) hoặc body rỗng; prompt được dựng phía backend từ dữ liệu project đã lưu.</p>
+    <p><span class="tag inferred">INFERRED</span> Các con số bên dưới là số dòng audit event, không phải số request duy nhất: một request có thể ghi start, retry, failure và pool release.</p>
+    <p><span class="tag gap">NOT VERIFIED</span> Chưa có production reverse-proxy trace tương ứng với từng request_id; vì vậy báo cáo phân loại được lỗi ở backend/provider nhưng không khẳng định mọi lớp proxy ngoài ứng dụng.</p>
+  </section>
+
+  <section id="answer">
+    <h2>2. Trả lời ngắn: 502 có phải timeout không?</h2>
+    <div class="callout danger"><strong>Kết luận:</strong> Có nhiều timeout thật, nhưng <strong>HTTP 502 hiện đang là wrapper chung cho nhiều loại lỗi AI planning</strong>. Không được dùng status 502 để suy ra timeout nếu chưa xem <code>error_code</code>, <code>duration_ms</code> và chi tiết provider.</div>
+    <div class="grid">
+      <div class="stat"><span class="num">80</span><small><code>CODEX_EXEC_TIMEOUT</code><br>audit event rows</small></div>
+      <div class="stat"><span class="num">25</span><small><code>CODEX_PROVIDER_TEMPORARY_UNAVAILABLE</code><br>provider tạm unavailable</small></div>
+      <div class="stat"><span class="num">8</span><small><code>CODEX_EXEC_NONZERO</code><br>Codex exit non-zero</small></div>
+      <div class="stat"><span class="num">33</span><small>mapping lỗi shot/order/field<br>(12 + 10 + 6 + 5 fallback)</small></div>
+    </div>
+    <p>Các số liệu là query read-only trên bảng audit trong <code>data/voicebox.db</code>; thời điểm dữ liệu quan sát được tới khoảng 25/08/2026.</p>
+    <table>
+      <thead><tr><th>error_code / nhóm lỗi</th><th>Ý nghĩa vận hành</th><th>Có thể trả HTTP 502?</th></tr></thead>
+      <tbody>
+        <tr><td><code>CODEX_EXEC_TIMEOUT</code></td><td>Codex process vượt <code>timeout_seconds = 600</code>. Có event khoảng 600 giây và có event khoảng 1.200 giây khi đi qua thêm fallback.</td><td>Có</td></tr>
+        <tr><td><code>CODEX_PROVIDER_TEMPORARY_UNAVAILABLE</code></td><td>Provider trả tín hiệu high demand / HTTP 500, 502, 503 hoặc 529; đây là lỗi tạm thời của provider, không phải deadline local.</td><td>Có</td></tr>
+        <tr><td><code>CODEX_EXEC_NONZERO</code></td><td>CLI kết thúc với mã khác 0; nguyên nhân có thể là schema, process hoặc provider.</td><td>Có</td></tr>
+        <tr><td>Mapping/schema/JSON</td><td>Structured output bị từ chối, JSON parse/validate thất bại, shot count/order/required field không khớp.</td><td>Có</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warning"><strong>Cách chẩn đoán đúng một request:</strong> dùng tổ hợp <code>request_id</code> + <code>step_name</code> + <code>error_code</code> + <code>duration_ms</code> + <code>prompt_chars</code>/<code>batch_prompt_chars</code> + <code>provider_detail</code>. Frontend hiện chỉ hiển thị <code>message</code>, làm mất phần lớn tín hiệu này.</div>
+  </section>
+
+  <section>
+    <h2>3. Các timeout đã quan sát trong audit log</h2>
+    <div class="timeline">
+      <div class="event"><time>Shot breakdown · khoảng 1.200.536 ms (~20 phút)</time><p><code>prompt_chars ≈ 91.945</code>, <code>CODEX_EXEC_TIMEOUT</code>. Thời lượng gấp đôi ngưỡng 600 giây cho thấy có thêm profile/config fallback sau lần chạy chính.</p></div>
+      <div class="event"><time>Shot breakdown · khoảng 600.252 ms (~10 phút)</time><p><code>prompt_chars ≈ 131.771</code>, <code>CODEX_EXEC_TIMEOUT</code>. Đây là timeout local điển hình ở một prompt rất lớn.</p></div>
+      <div class="event"><time>Video prompt generation · khoảng 600.499 ms (~10 phút)</time><p><code>batch_prompt_chars ≈ 67.550</code>, <code>CODEX_EXEC_TIMEOUT</code>. Batch prompt pack bị giới hạn bởi deadline trước khi có output hoàn chỉnh.</p></div>
+      <div class="event"><time>Video prompt generation · một measurement khác</time><p><code>prompt_chars ≈ 78.063</code>, output/stderr khoảng <code>202.193</code> ký tự, <code>output_file_exists = false</code>, elapsed khoảng <code>600.496 ms</code>. Output JSON nested quá lớn là rủi ro riêng bên cạnh input.</p></div>
+    </div>
+    <p><span class="tag inferred">INFERENCE</span> Prompt dài làm tăng thời gian, nhưng không thể quy mọi timeout chỉ cho input length: output/schema validation, provider queue và số lần retry cũng tiêu deadline.</p>
+  </section>
+
+  <section id="flow">
+    <h2>4. Summary flow — prompt đi qua đâu?</h2>
+    <div class="flow" aria-label="Luồng tổng quát">
+      <div class="node"><strong>UI</strong>Story / Shots / Prompt pack action</div><div class="arrow">→</div>
+      <div class="node"><strong>API client</strong><code>client.ts</code> gửi project id, gần như không gửi prompt text</div><div class="arrow">→</div>
+      <div class="node"><strong>FastAPI route</strong><code>ai_video.py</code> + threadpool</div><div class="arrow">→</div>
+      <div class="node"><strong>Video phase 2</strong>Dựng context, prompt và output schema từ DB</div><div class="arrow">→</div>
+      <div class="node"><strong>Codex wrapper</strong><code>codex exec</code>, prompt qua stdin</div><div class="arrow">→</div>
+      <div class="node"><strong>Normalize/validate</strong>Parse JSON → Pydantic → persist audit/DB</div>
+    </div>
+    <div class="flow" aria-label="Luồng tới Flow Veo">
+      <div class="node"><strong>DB prompt</strong><code>DBVideoShotPrompt.prompt</code></div><div class="arrow">→</div>
+      <div class="node"><strong>Sanitize/compact</strong>loại cue hậu kỳ, giới hạn khoảng 5.200 ký tự</div><div class="arrow">→</div>
+      <div class="node"><strong>Chrome CDP</strong><code>Input.insertText</code> vào Google Flow</div><div class="arrow">→</div>
+      <div class="node"><strong>Verify + submit</strong>đọc lại text/hash rồi gửi Flow/Veo</div>
+    </div>
+  </section>
+
+  <section id="detail">
+    <h2>5. Luồng chi tiết theo từng bước</h2>
+    <h3>5.1 Frontend → API</h3>
+    <table>
+      <thead><tr><th>Hành động</th><th>Request</th><th>Điểm neo</th><th>Dữ liệu prompt</th></tr></thead>
+      <tbody>
+        <tr><td>Generate story</td><td><code>POST /ai-video/projects/{project_id}/story</code><br><code>{ force: false }</code></td><td class="file">app/src/lib/api/client.ts:2124-2128<br>backend/routes/ai_video.py:1193-1219</td><td>Không gửi raw prompt; backend đọc project/source/context.</td></tr>
+        <tr><td>Break down shots</td><td><code>POST /ai-video/projects/{project_id}/shots</code></td><td class="file">app/src/lib/api/client.ts:2138-2142<br>backend/routes/ai_video.py:1230-1250</td><td>Không gửi raw prompt.</td></tr>
+        <tr><td>Generate prompt pack</td><td><code>POST /ai-video/projects/{project_id}/prompts</code></td><td class="file">app/src/lib/api/client.ts:2216-2225<br>backend/routes/ai_video.py:1360-1404</td><td>Không gửi raw prompt; prompt dựng theo shot đã lưu.</td></tr>
+      </tbody>
+    </table>
+    <p><span class="tag confirmed">CONFIRMED</span> Vì payload nhỏ nhưng backend phải ghép rất nhiều context, việc thấy 502 ở UI không có nghĩa browser đã gửi một request body 100K ký tự; kích thước lớn phát sinh bên trong worker.</p>
+
+    <h3>5.2 Story prompt</h3>
+    <p class="file">backend/services/video_phase2.py:2608-2651, 2699-2722, 2838-2869</p>
+    <p>Backend ghép title, topic, source blocks, ngôn ngữ, mục đích video, dialogue mode, narration density, CTA, duration, aspect ratio, visual style, series context và continuity context. Prompt yêu cầu output có cấu trúc <code>StoryDevelopmentPlan</code>, bao gồm:</p>
+    <ul><li>story strategy và continuity bible;</li><li>detailed script;</li><li>retention plan và sound design plan;</li><li>scenes cùng character/episode context.</li></ul>
+    <p>Đây là lần gọi lập kế hoạch nội dung; output chưa phải prompt gửi thẳng cho Veo.</p>
+
+    <h3>5.3 Shot breakdown prompt</h3>
+    <p class="file">backend/services/video_phase2.py:3176-3283</p>
+    <p>Input gồm toàn bộ project context, character instructions, story strategy, continuity bible, retention map, sound design plan, detailed script và các scene đã duyệt. Output mỗi shot chứa nhiều trường lồng nhau: order, duration, narration, action, camera, composition, subject/environment motion, transition, retention, open loop, visual surprise, speech cues, transition pack, sound design và micro scenes.</p>
+    <div class="callout purple"><strong>Nút thắt chính:</strong> project quan sát được có duration khoảng <code>168s</code>, <code>21</code> prompt segments, mỗi segment <code>8s</code>, <code>4</code> micro-scenes/segment. Một call phải sinh 21 object lớn và nhiều JSON lồng nhau; đây là workload lớn hơn một prompt text thông thường.</div>
+
+    <h3>5.4 Video prompt pack prompt</h3>
+    <p class="file">backend/services/video_phase2.py:3669-3676, 3710-3806, 3812-3930</p>
+    <p>Mỗi dòng shot được serialize với segment/shot order, timeline, prompt clip duration, usable duration, <code>micro_scenes_json</code>, narration, <code>speech_cues_json</code>, primary action, camera, transition, retention JSON, transition pack JSON và sound design JSON.</p>
+    <p><code>VIDEO_PROMPT_BATCH_SIZE = 5</code>, nên 21 shot được chia thành <code>1–5</code>, <code>6–10</code>, <code>11–15</code>, <code>16–20</code>, <code>21</code>. Context/instruction lớn bị lặp lại trong từng batch.</p>
+    <table>
+      <thead><tr><th>Measurement</th><th>Kích thước</th><th>Thời lượng / kết quả</th></tr></thead>
+      <tbody><tr><td>Batch thành công</td><td><code>batch_prompt_chars ≈ 44.979</code><br><code>output_chars ≈ 18.155</code></td><td>~126 giây</td></tr><tr><td>Batch nặng</td><td><code>batch_prompt_chars ≈ 61.086</code><br><code>output_chars ≈ 50.861</code></td><td>~275 giây</td></tr><tr><td>Batch timeout</td><td><code>batch_prompt_chars ≈ 67.550</code></td><td>~600 giây, <code>CODEX_EXEC_TIMEOUT</code></td></tr></tbody>
+    </table>
+
+    <h3>5.5 Codex CLI boundary</h3>
+    <p class="file">backend/services/ai_planning.py:739-811, 824-848</p>
+    <pre>codex exec
+  --skip-git-repo-check
+  --ephemeral
+  --output-last-message &lt;temporary-file&gt;
+  --model &lt;model&gt;
+  --config model_reasoning_effort="&lt;effort&gt;"
+  --output-schema &lt;schema-file&gt;
+  -</pre>
+    <p>Prompt được truyền qua <strong>stdin</strong>; schema được truyền bằng file tạm. Wrapper đọc output file/CLI output, parse JSON, normalize rồi validate. Cấu hình đang đọc từ <code>ai_planning_settings</code>:</p>
+    <table><thead><tr><th>Setting</th><th>Giá trị hiện tại trong DB</th><th>Default thấy trong code</th></tr></thead><tbody><tr><td>provider</td><td><code>codex-cli</code></td><td>—</td></tr><tr><td>model</td><td><code>gpt-5.6-luna</code></td><td><code>gpt-5.6-sol</code></td></tr><tr><td>reasoning effort</td><td><code>xhigh</code></td><td><code>ultra</code></td></tr><tr><td>timeout</td><td><code>600s</code></td><td><code>600s</code></td></tr></tbody></table>
+
+    <h3>5.6 Parse, validate, persist và audit</h3>
+    <p>Output phải qua parse JSON, normalize/mapping và Pydantic validation trước khi trở thành story, shot hoặc prompt pack trong DB. Những lỗi mapping quan sát được gồm count mismatch (12 event), required field missing (10), order mismatch (6) và fallback applied (5). Audit event giữ các trường giúp điều tra: <code>request_id</code>, <code>step_name</code>, duration, prompt/batch chars, output chars, error code và provider detail.</p>
+  </section>
+
+  <section id="retry">
+    <h2>6. Vì sao một lỗi có thể kéo dài thành 502?</h2>
+    <p>Đây là các tầng retry/fallback đang cùng nằm trên đường gọi:</p>
+    <table class="matrix"><thead><tr><th>Tầng</th><th>Behavior hiện tại</th><th>Tác động</th><th>Điểm neo</th></tr></thead><tbody>
+      <tr><td>Structured output</td><td>Gọi với <code>--output-schema</code>; nếu provider từ chối, retry inline JSON schema.</td><td>Thêm một lần CLI gần như đầy đủ.</td><td class="file">ai_planning.py:921-1058</td></tr>
+      <tr><td>Model/config fallback</td><td>Sau profile chính fail, có thể chạy user-connected config.</td><td>Timeout 600s có thể thành khoảng 1.200s.</td><td class="file">ai_planning.py:1149-1195</td></tr>
+      <tr><td>Timeout classification</td><td><code>CODEX_EXEC_TIMEOUT</code> hiện được xem là retryable (<code>return True</code>).</td><td>Timeout vẫn kích hoạt fallback; ngược với hướng OpenSpec muốn.</td><td class="file">ai_planning.py:337-350</td></tr>
+      <tr><td>Structured planning</td><td><code>video_phase2._run_structured_codex()</code> có nhiều attempts mặc định.</td><td>Một bước story/shot có thể lặp toàn bộ call.</td><td class="file">video_phase2.py:2733-2827</td></tr>
+      <tr><td>Prompt batch</td><td><code>VIDEO_PROMPT_BATCH_MAX_ATTEMPTS = 2</code>.</td><td>Mỗi batch nặng có thể chạy lần thứ hai.</td><td class="file">video_phase2.py:3838-3929</td></tr>
+    </tbody></table>
+    <div class="callout warning"><strong>Hệ quả:</strong> một logical operation có thể đi theo chuỗi <code>schema call → inline schema retry → model fallback → batch retry</code>. Vì vậy duration của request không còn bằng một timeout đơn lẻ.</div>
+  </section>
+
+  <section id="veo">
+    <h2>7. Prompt cuối gửi sang Google Flow/Veo</h2>
+    <p class="file">backend/services/video_clip_generation.py:275-302, 930-1010<br>backend/services/video_veo_chrome.py:807-937</p>
+    <p><span class="tag confirmed">CONFIRMED</span> Prompt đã lưu trong <code>DBVideoShotPrompt.prompt</code> không được đẩy nguyên văn sang provider video. Nó qua một pipeline riêng:</p>
+    <ol><li>Lấy prompt shot từ DB.</li><li>Strip provider-unfriendly cues và chỉ dẫn hậu kỳ không nên gửi provider.</li><li>Compact prompt.</li><li>Giới hạn bởi <code>FLOW_PROVIDER_PROMPT_MAX_CHARS = 5200</code>.</li><li>Thêm native speech block nếu dùng Veo native Vietnamese speech; nếu không thì thêm narration context.</li><li>Dùng Chrome CDP <code>Input.insertText({"text": prompt})</code> vào Flow.</li><li>Đọc lại text trong Flow, so sánh compact text/hash rồi mới submit.</li></ol>
+    <div class="callout success"><strong>Điểm cần nhớ:</strong> prompt 40–130K ký tự là prompt nội bộ gửi Codex để lập kế hoạch. Prompt thực sự đi vào ô nhập Flow/Veo là prompt đã sanitize/compact, tối đa xấp xỉ 5.200 ký tự (cộng block thoại/ngữ cảnh theo nhánh).</div>
+  </section>
+
+  <section>
+    <h2>8. Nhánh Product Video — không nên gộp chung</h2>
+    <p><span class="tag confirmed">CONFIRMED</span> <code>POST /product-video/projects/{id}/shots</code> có gọi Codex tại <span class="file">backend/services/product_video.py:865-893, 926-960</span>. Nhưng <code>POST /product-video/projects/{id}/prompts</code> chủ yếu dựng prompt deterministic từ shot đã lưu, không gọi Codex lần nữa (<span class="file">product_video.py:1125-1191, 1194-1241</span>).</p>
+    <p>Nếu endpoint Product Video trả 502, cần xem <code>ProductVideoRenderBridgeError</code> và audit của nhánh đó; không mặc định kết luận là Codex timeout của AI Video Phase 2.</p>
+  </section>
+
+  <section id="files">
+    <h2>9. Relevant file map</h2>
+    <table><thead><tr><th>Lớp</th><th>File</th><th>Vai trò</th></tr></thead><tbody>
+      <tr><td>Frontend transport</td><td class="file">app/src/lib/api/client.ts</td><td>Gọi story/shots/prompts; hiện chỉ surface message khi lỗi.</td></tr>
+      <tr><td>API routes</td><td class="file">backend/routes/ai_video.py</td><td>Nhận request, chạy service/threadpool, map lỗi sang HTTP.</td></tr>
+      <tr><td>Prompt orchestration</td><td class="file">backend/services/video_phase2.py</td><td>Dựng context, story/shot/prompt-pack prompt, batch và retry.</td></tr>
+      <tr><td>Codex integration</td><td class="file">backend/services/ai_planning.py</td><td>Command, stdin, schema file, timeout, provider/model fallback, audit.</td></tr>
+      <tr><td>Error taxonomy</td><td class="file">backend/services/video_errors.py</td><td>Định nghĩa/ánh xạ error code và HTTP response.</td></tr>
+      <tr><td>Flow/Veo bridge</td><td class="file">backend/services/video_clip_generation.py<br>backend/services/video_veo_chrome.py</td><td>Sanitize/compact prompt, CDP insertText, verify và submit.</td></tr>
+      <tr><td>Persistence</td><td class="file">data/voicebox.db<br>backend/database/models.py</td><td>Settings, video prompts và audit event.</td></tr>
+      <tr><td>Specifications</td><td class="file">openspec/changes/ngay-24-08-toi-uu-timeout-ai-planning/</td><td>Đề xuất tối ưu timeout, batch và resume; hiện 0/61 tasks.</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="gaps">
+    <h2>10. OpenSpec và các điểm còn hở</h2>
+    <p>Ba change liên quan hiện đang <code>in-progress</code>:</p>
+    <ul><li><code>ngay-24-08-toi-uu-timeout-ai-planning</code> — 0/61 tasks.</li><li><code>22-08-fix-ai-video-phase2-schema-fallback-voice</code> — 25/55 tasks.</li><li><code>ngay-23-08-luong-product-video-sinh-prompt</code> — 56/57 tasks.</li></ul>
+    <div class="callout danger"><strong>Mâu thuẫn cần xử lý trước khi apply:</strong> change schema-fallback yêu cầu không persist partial prompt pack production và chỉ publish sau khi toàn bộ batch pass; change timeout/resume lại yêu cầu commit từng batch và resume phần còn thiếu. Thiết kế an toàn là staging/progress state riêng, sau đó atomic publish; không ghi trực tiếp batch dở dang vào bảng production.</div>
+    <p>Một task timeout có tham chiếu symbol <code>_safe_json_output</code> nhưng symbol này không tìm thấy trong <code>backend/services/ai_planning.py</code>; artifact có khả năng stale và cần reconcile trước khi triển khai.</p>
+    <h3>Khoảng trống observability</h3>
+    <ul><li>Backend trả <code>error_code</code> và <code>request_id</code> (kèm header <code>X-Request-ID</code>), nhưng frontend client chỉ lấy <code>message</code>.</li><li>UI không hiển thị step/batch/provider detail nên người vận hành dễ gọi chung là “502 timeout”.</li><li>Chưa có production correlation trace giữa reverse proxy 502 và audit request_id trong phạm vi local audit này.</li></ul>
+  </section>
+
+  <section>
+    <h2>11. Phân loại độ tin cậy</h2>
+    <table><thead><tr><th>Mức</th><th>Các kết luận</th></tr></thead><tbody>
+      <tr><td><span class="tag confirmed">CONFIRMED</span></td><td>Endpoint/payload, nơi dựng từng loại prompt, command Codex, timeout DB, batch size 5, giới hạn Flow 5.200 ký tự, error counts và các event duration nêu trên.</td></tr>
+      <tr><td><span class="tag inferred">INFERRED</span></td><td>Prompt lớn và output nested góp phần làm chậm; 1.200 giây nhiều khả năng do fallback; event rows không tương đương request count.</td></tr>
+      <tr><td><span class="tag gap">NOT FOUND / EXTERNAL</span></td><td>Không có bằng chứng local đủ để quy mọi 502 cho một reverse proxy cụ thể hoặc đo chính xác latency provider bên ngoài cho từng request.</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>12. Next actions được đề xuất</h2>
+    <ol><li>Cập nhật OpenSpec timeout: loại timeout khỏi model/config fallback; giới hạn reasoning effort cho bước cơ học; đo rồi giảm batch (hiện 5) nếu cần.</li><li>Thiết kế staging/progress + atomic publish để dung hòa resume từng batch với yêu cầu không có partial production prompt pack.</li><li>Giữ <code>error_code</code>, <code>request_id</code>, step/batch index và provider detail trong frontend error state.</li><li>Thêm dashboard/query nhóm theo request duy nhất, không chỉ đếm event rows.</li><li>Reconcile các task stale như <code>_safe_json_output</code>, sau đó mới cân nhắc <code>$openspec-apply</code>.</li></ol>
+    <p>Đề xuất an toàn nếu bắt đầu thay đổi: <code>$openspec-update-change ngay-24-08-toi-uu-timeout-ai-planning</code> để sửa spec/design/tasks, rồi mới apply và verify.</p>
+  </section>
+
+  <footer>Generated from a read-only repository and SQLite audit inspection. No application code was changed by this audit.</footer>
+</main>
+</body>
+</html>

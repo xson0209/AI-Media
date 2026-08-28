@@ -1,0 +1,400 @@
+- generic [ref=f2e3]:
+  - generic [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - img "Voicebox" [ref=f2e7]
+      - generic [ref=f2e8]:
+        - link "Tạo giọng" [ref=f2e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=f2e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=f2e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=f2e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=f2e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=f2e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=f2e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=f2e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Phân tích truyện tranh" [ref=f2e43] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=f2e48] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=f2e51] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=f2e55] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f2e59]: v0.5.0
+    - main [ref=f2e61]:
+      - generic [ref=f2e64]:
+        - generic [ref=f2e65]:
+          - generic [ref=f2e67]:
+            - generic [ref=f2e68]:
+              - generic [ref=f2e76]:
+                - heading "Dự án câu lệnh video" [level=1] [ref=f2e77]
+                - paragraph [ref=f2e78]: Nhập tiếng Việt, AI phát triển kịch bản, chia video thành các đoạn câu lệnh theo cấu hình và giữ mạch liền nhau giữa các phân đoạn.
+              - generic [ref=f2e79]:
+                - generic [ref=f2e80]:
+                  - generic [ref=f2e81]: Tên dự án
+                  - textbox "Tên dự án Có thể để trống, hệ thống sẽ lấy từ ý tưởng chính." [ref=f2e82]:
+                    - /placeholder: "Ví dụ: Cú trở lại ở World Cup"
+                  - generic [ref=f2e83]: Có thể để trống, hệ thống sẽ lấy từ ý tưởng chính.
+                - generic [ref=f2e84]:
+                  - generic [ref=f2e85]: Hồ sơ giọng
+                  - 'combobox "Hồ sơ giọng Đang chọn: Chưa chọn giọng" [ref=f2e86]':
+                    - option "Chọn sau" [selected]
+                  - generic [ref=f2e87]: "Đang chọn: Chưa chọn giọng"
+              - generic [ref=f2e88]:
+                - generic [ref=f2e89]:
+                  - generic [ref=f2e90]: Ý tưởng chính
+                  - textbox "Ý tưởng chính Nêu video muốn làm bằng tiếng Việt. Đây là nguồn bắt buộc." [ref=f2e91]
+                  - generic [ref=f2e92]: Nêu video muốn làm bằng tiếng Việt. Đây là nguồn bắt buộc.
+                - generic [ref=f2e93]:
+                  - generic [ref=f2e94]: Kịch bản thô
+                  - textbox "Kịch bản thô Dán kịch bản, đoạn thoại hoặc ghi chú dài nếu đã có." [ref=f2e95]
+                  - generic [ref=f2e96]: Dán kịch bản, đoạn thoại hoặc ghi chú dài nếu đã có.
+                - generic [ref=f2e97]:
+                  - generic [ref=f2e98]: Nhân vật và bối cảnh
+                  - 'textbox "Nhân vật và bối cảnh Ghi chi tiết cần giữ nhất quán: nhân vật, trang phục, đạo cụ, địa điểm." [ref=f2e99]'
+                  - generic [ref=f2e100]: "Ghi chi tiết cần giữ nhất quán: nhân vật, trang phục, đạo cụ, địa điểm."
+                - generic [ref=f2e101]:
+                  - generic [ref=f2e102]: Phong cách video
+                  - 'textbox "Phong cách video Ví dụ: cinematic, documentary, fast cuts, warm light, realistic." [ref=f2e103]'
+                  - generic [ref=f2e104]: "Ví dụ: cinematic, documentary, fast cuts, warm light, realistic."
+                - generic [ref=f2e105]:
+                  - generic [ref=f2e106]: Bắt buộc phải có
+                  - textbox "Bắt buộc phải có Các ý không được bỏ khi AI phát triển lại nội dung." [ref=f2e107]
+                  - generic [ref=f2e108]: Các ý không được bỏ khi AI phát triển lại nội dung.
+                - generic [ref=f2e109]:
+                  - generic [ref=f2e110]: Cần tránh
+                  - textbox "Cần tránh Những chi tiết, giọng văn hoặc hình ảnh không muốn xuất hiện." [ref=f2e111]
+                  - generic [ref=f2e112]: Những chi tiết, giọng văn hoặc hình ảnh không muốn xuất hiện.
+                - generic [ref=f2e113]:
+                  - generic [ref=f2e114]: Phong cách hình ảnh
+                  - 'textbox "Phong cách hình ảnh Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation." [ref=f2e115]': cinematic realistic video, natural light, consistent character details, fast editorial pacing
+                  - generic [ref=f2e116]: "Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation."
+            - generic [ref=f2e118]:
+              - paragraph [ref=f2e119]: Thiết lập video mới
+              - generic [ref=f2e120]:
+                - generic [ref=f2e121]:
+                  - generic [ref=f2e122]: Mục đích video
+                  - combobox "Mục đích video Ảnh hưởng tới ngôn ngữ gợi ý, giọng, kiểu thoại, lời kể, phụ đề và phong cách kịch bản." [ref=f2e123]:
+                    - option "Thị trường Việt Nam"
+                    - option "Short quốc tế / tiếng Anh" [selected]
+                    - option "Giải thích / giáo dục"
+                    - option "Quảng cáo / bán hàng"
+                    - option "Bản theo ngôn ngữ khác"
+                    - option "Tùy chỉnh"
+                  - generic [ref=f2e124]: Ảnh hưởng tới ngôn ngữ gợi ý, giọng, kiểu thoại, lời kể, phụ đề và phong cách kịch bản.
+                - generic [ref=f2e125]:
+                  - generic [ref=f2e126]:
+                    - generic [ref=f2e127]: Short quốc tế / tiếng Anh
+                    - generic [ref=f2e128]: gợi ý Tiếng Anh
+                  - paragraph [ref=f2e129]: Tối ưu cho short quốc tế bằng tiếng Anh, hook nhanh.
+                  - generic [ref=f2e130]:
+                    - generic [ref=f2e131]: "Giọng: chưa chọn hồ sơ giọng."
+                    - generic [ref=f2e132]: "Thoại: thuyết minh · dày thoại"
+                    - generic [ref=f2e133]: "Phụ đề: Phụ đề tiếng Anh khớp giọng đọc."
+                    - generic [ref=f2e134]: "CTA: nhẹ nhàng"
+                    - generic [ref=f2e135]: "Sắc thái: Câu ngắn, quốc tế, dễ hiểu trong vài giây đầu."
+                - generic [ref=f2e136]:
+                  - generic [ref=f2e137]: Ngôn ngữ video
+                  - combobox "Ngôn ngữ video Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video." [ref=f2e138]:
+                    - option "Tiếng Ả Rập"
+                    - option "Tiếng Đan Mạch"
+                    - option "Tiếng Đức"
+                    - option "Tiếng Hy Lạp"
+                    - option "Tiếng Anh" [selected]
+                    - option "Tiếng Tây Ban Nha"
+                    - option "Tiếng Phần Lan"
+                    - option "Tiếng Pháp"
+                    - option "Tiếng Do Thái"
+                    - option "Tiếng Hindi"
+                    - option "Tiếng Ý"
+                    - option "Tiếng Nhật"
+                    - option "Tiếng Hàn"
+                    - option "Tiếng Mã Lai"
+                    - option "Tiếng Hà Lan"
+                    - option "Tiếng Na Uy"
+                    - option "Tiếng Ba Lan"
+                    - option "Tiếng Bồ Đào Nha"
+                    - option "Tiếng Nga"
+                    - option "Tiếng Thụy Điển"
+                    - option "Tiếng Swahili"
+                    - option "Tiếng Thổ Nhĩ Kỳ"
+                    - option "Tiếng Việt"
+                    - option "Tiếng Trung"
+                  - generic [ref=f2e139]: Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video.
+                - generic [ref=f2e140]:
+                  - generic [ref=f2e141]:
+                    - generic [ref=f2e142]: Mode thoại
+                    - combobox "Mode thoại" [ref=f2e143]:
+                      - option "Thuyết minh" [selected]
+                      - option "Nhân vật nói"
+                      - option "Kết hợp"
+                  - generic [ref=f2e144]:
+                    - generic [ref=f2e145]: Mật độ thoại
+                    - combobox "Mật độ thoại" [ref=f2e146]:
+                      - option "Ít thoại"
+                      - option "Vừa phải"
+                      - option "Dày thoại" [selected]
+                  - generic [ref=f2e147]:
+                    - generic [ref=f2e148]: CTA
+                    - combobox "CTA" [ref=f2e149]:
+                      - option "Không"
+                      - option "Nhẹ nhàng" [selected]
+                      - option "Trực tiếp"
+                      - option "Khẩn cấp"
+                - generic [ref=f2e150]:
+                  - generic [ref=f2e151]:
+                    - generic [ref=f2e152]: Cách chạy
+                    - generic [ref=f2e153]: Tự chạy sau khi tạo
+                  - generic [ref=f2e154]:
+                    - button "Dựng nhanh" [pressed] [ref=f2e155]
+                    - button "Thủ công" [ref=f2e157]
+                - generic [ref=f2e159]:
+                  - generic [ref=f2e160]:
+                    - generic [ref=f2e161]: Mức tự động
+                    - generic [ref=f2e162]: Tự chạy hết
+                  - generic [ref=f2e163]:
+                    - button "Duyệt từng chặng Dừng ở kịch bản và câu lệnh" [ref=f2e164]:
+                      - generic [ref=f2e165]:
+                        - generic [ref=f2e166]: Duyệt từng chặng
+                        - generic [ref=f2e167]: Dừng ở kịch bản và câu lệnh
+                    - button "Tự chạy hết Tự duyệt bước giữa" [pressed] [ref=f2e169]:
+                      - generic [ref=f2e170]:
+                        - generic [ref=f2e171]: Tự chạy hết
+                        - generic [ref=f2e172]: Tự duyệt bước giữa
+                - generic [ref=f2e174]:
+                  - generic [ref=f2e175]:
+                    - generic [ref=f2e176]: Đầu ra tự chạy
+                    - generic [ref=f2e177]: Giọng + phụ đề khớp thời gian
+                  - generic [ref=f2e178]:
+                    - button "Tạo MP4 bằng Veo Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4" [ref=f2e179]:
+                      - generic [ref=f2e185]:
+                        - generic [ref=f2e186]: Tạo MP4 bằng Veo
+                        - generic [ref=f2e187]: Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4
+                    - button "Tạo giọng + phụ đề Câu lệnh, giọng và SRT theo mốc âm thanh" [pressed] [ref=f2e189]:
+                      - generic [ref=f2e194]:
+                        - generic [ref=f2e195]: Tạo giọng + phụ đề
+                        - generic [ref=f2e196]: Câu lệnh, giọng và SRT theo mốc âm thanh
+                    - button "Chỉ câu lệnh video Bỏ qua giọng/SRT để tải ảnh ngay" [ref=f2e198]:
+                      - generic [ref=f2e202]:
+                        - generic [ref=f2e203]: Chỉ câu lệnh video
+                        - generic [ref=f2e204]: Bỏ qua giọng/SRT để tải ảnh ngay
+                - generic [ref=f2e206]:
+                  - generic [ref=f2e207]:
+                    - generic [ref=f2e208]: Số câu lệnh
+                    - spinbutton "Số câu lệnh" [ref=f2e209]: "6"
+                  - generic [ref=f2e210]:
+                    - generic [ref=f2e211]: Giây/câu lệnh
+                    - spinbutton "Giây/câu lệnh" [ref=f2e212]: "10"
+                  - generic [ref=f2e213]:
+                    - generic [ref=f2e214]: Cảnh nhỏ
+                    - spinbutton "Cảnh nhỏ" [ref=f2e215]: "3"
+                - generic [ref=f2e217]:
+                  - generic [ref=f2e218]: Tỷ lệ
+                  - combobox "Tỷ lệ" [ref=f2e219]:
+                    - option "9:16 ( dọc )" [selected]
+                    - option "16:9 ( ngang )"
+                    - option "1:1"
+                - generic [ref=f2e220]:
+                  - generic [ref=f2e221]:
+                    - generic [ref=f2e222]: Phân đoạn câu lệnh
+                    - generic [ref=f2e223]: 6 câu lệnh
+                  - generic [ref=f2e224]: 6 câu lệnh × 10s = 60s; 6 x 3 = 18 cảnh nhỏ. Mỗi cảnh nhỏ khoảng 3.3s.
+                - generic [ref=f2e229]:
+                  - paragraph [ref=f2e230]: Đang kiểm tra Codex CLI.
+                  - paragraph [ref=f2e231]: "Cấu hình sẽ dùng: gpt-5.6-sol · ultra"
+                  - paragraph [ref=f2e232]: "Mã yêu cầu: Chưa có mã yêu cầu."
+                  - link "Đổi cấu hình trong Cài đặt" [ref=f2e233] [cursor=pointer]:
+                    - /url: /settings/ai-planning
+                - button "Tạo và dựng nhanh" [disabled]
+          - generic [ref=f2e234]:
+            - generic [ref=f2e235]:
+              - generic [ref=f2e241]:
+                - heading "Truyện, nhất quán và kịch bản" [level=2] [ref=f2e242]
+                - paragraph [ref=f2e243]: Phải duyệt phần này trước khi tạo phân cảnh
+              - generic [ref=f2e244]:
+                - button "AI phát triển kịch bản" [disabled]
+                - button "Viết lại" [disabled]
+                - button "Duyệt kịch bản" [disabled]
+            - generic [ref=f2e245]: Chưa có dự án. Nhập nguồn nội dung rồi bấm Tạo dự án phase 2.
+          - generic [ref=f2e247]:
+            - generic [ref=f2e248]:
+              - generic [ref=f2e254]:
+                - heading "Phân đoạn câu lệnh" [level=2] [ref=f2e255]
+                - paragraph [ref=f2e256]: 0 phân đoạn đã lưu · mỗi câu lệnh ~10s, gồm 3 cảnh nhỏ
+              - button "Tạo bản phân đoạn" [disabled]
+            - generic [ref=f2e257]: Chưa có phân đoạn. Hãy duyệt kịch bản rồi tạo bản phân đoạn.
+          - generic [ref=f2e259]:
+            - generic [ref=f2e260]:
+              - generic [ref=f2e266]:
+                - heading "Câu lệnh video" [level=2] [ref=f2e267]
+                - paragraph [ref=f2e268]: Câu lệnh gốc để sao chép, kèm bản giải thích tiếng Việt để đọc hiểu
+              - generic [ref=f2e269]:
+                - button "Mở popup câu lệnh" [disabled]
+                - button "Sao chép toàn bộ câu lệnh" [disabled]
+                - button "Tạo câu lệnh video" [disabled]
+            - generic [ref=f2e270]: Chưa có phân đoạn để tạo câu lệnh video.
+          - generic [ref=f2e272]:
+            - generic [ref=f2e273]:
+              - generic [ref=f2e275]:
+                - heading "Nội dung đăng video" [level=2] [ref=f2e278]
+                - generic [ref=f2e279]: Chưa có nội dung đăng
+              - generic [ref=f2e280]:
+                - button "Tạo nội dung đăng video" [disabled]
+            - tablist "Nền tảng đăng video" [ref=f2e281]:
+              - tab "YouTube" [selected] [ref=f2e282]
+              - tab "TikTok" [ref=f2e283]
+              - tab "Facebook" [ref=f2e284]
+            - generic [ref=f2e285]:
+              - generic [ref=f2e286]:
+                - generic [ref=f2e287]:
+                  - paragraph [ref=f2e289]: Tiêu đề video
+                  - button "Copy Tiêu đề video" [disabled]
+                - textbox [ref=f2e290]
+              - generic [ref=f2e291]:
+                - generic [ref=f2e292]:
+                  - paragraph [ref=f2e294]: Mô tả
+                  - button "Copy Mô tả" [disabled]
+                - textbox [ref=f2e295]
+              - generic [ref=f2e296]:
+                - generic [ref=f2e297]:
+                  - paragraph [ref=f2e299]: Hashtag
+                  - button "Copy Hashtag" [disabled]
+                - textbox [ref=f2e300]
+              - generic [ref=f2e301]:
+                - generic [ref=f2e302]:
+                  - paragraph [ref=f2e304]: Prompt tạo ảnh thumbnail
+                  - button "Copy Prompt tạo ảnh thumbnail" [disabled]
+                - textbox [ref=f2e305]
+          - generic [ref=f2e306]:
+            - generic [ref=f2e314]:
+              - heading "Giọng và phụ đề" [level=2] [ref=f2e315]
+              - paragraph [ref=f2e316]: "Giọng hiện tại: Chưa chọn giọng"
+            - generic [ref=f2e317]:
+              - generic [ref=f2e318]:
+                - generic [ref=f2e320]:
+                  - paragraph [ref=f2e321]: Hồ sơ giọng cho dự án này
+                  - paragraph [ref=f2e322]: Chưa chọn giọng
+                  - paragraph [ref=f2e323]: Chưa chọn giọng nên chưa thể bấm Tạo giọng.
+                - generic [ref=f2e325]:
+                  - generic [ref=f2e326]: Hồ sơ giọng
+                  - combobox "Hồ sơ giọng Có thể chọn ở đây hoặc ở phần thiết lập phía trên." [ref=f2e327]:
+                    - option "Chưa chọn giọng" [selected]
+                  - generic [ref=f2e328]: Có thể chọn ở đây hoặc ở phần thiết lập phía trên.
+              - generic [ref=f2e329]: Sau khi AI phát triển kịch bản, cảnh có lời kể theo ngôn ngữ video sẽ xuất hiện ở đây để tạo giọng.
+              - generic [ref=f2e330]:
+                - button "Tạo phụ đề .srt" [disabled]
+                - button "Tải .srt" [disabled]
+        - complementary [ref=f2e331]:
+          - generic [ref=f2e332]:
+            - generic [ref=f2e333]:
+              - paragraph [ref=f2e334]: Dự án
+              - paragraph [ref=f2e335]: Trợ lý Video AI
+            - button "Thu gọn bảng dự án" [ref=f2e336]
+          - generic [ref=f2e339]:
+            - paragraph [ref=f2e340]: Tải máy
+            - paragraph [ref=f2e341]: Đang đo CPU, RAM, GPU và nhiệt độ
+          - generic [ref=f2e363]:
+            - paragraph [ref=f2e365]: Dự án gần đây
+            - generic [ref=f2e366]: Chưa có dự án nào.
+          - generic [ref=f2e368]:
+            - generic [ref=f2e376]:
+              - heading "Tải nguyên liệu" [level=2] [ref=f2e377]
+              - paragraph [ref=f2e378]: Checklist trước khi xuất ZIP
+            - generic [ref=f2e379]: Chọn hoặc tạo dự án để xem checklist.
+          - generic [ref=f2e381]:
+            - generic [ref=f2e390]:
+              - heading "Veo3 bằng Chrome" [level=2] [ref=f2e391]
+              - paragraph [ref=f2e392]: Đăng nhập một lần, dùng lại hồ sơ Chrome riêng
+            - generic [ref=f2e393]:
+              - generic [ref=f2e394]: Chọn hoặc tạo dự án giai đoạn 2 để tạo clip bằng Veo.
+              - generic [ref=f2e399]:
+                - paragraph [ref=f2e400]: Chưa cấu hình phiên Veo3/Chrome.
+                - paragraph [ref=f2e401]: Veo3 Flow · chưa đọc được gợi ý tài khoản · Chưa có định danh tài khoản.
+                - paragraph [ref=f2e402]: "Xác minh gần nhất: chưa xác minh"
+              - button "Đăng nhập Google kết nối Veo3" [ref=f2e404]
+              - generic [ref=f2e411]:
+                - paragraph [ref=f2e412]: Dự án Flow đang dùng
+                - paragraph [ref=f2e413]: Chưa có liên kết dự án Flow.
+                - paragraph [ref=f2e414]: "Mô hình Flow: chưa đọc được"
+              - generic [ref=f2e415]:
+                - generic [ref=f2e416]: Tạo clip tự động
+                - paragraph [ref=f2e420]: Gửi từng câu lệnh sang Veo, tải clip về đúng phân đoạn rồi nhập vào dự án.
+                - generic [ref=f2e421]:
+                  - generic [ref=f2e422]:
+                    - checkbox "Tạo lại clip đã có Tắt mục này để bỏ qua phân đoạn đã có clip Veo và tránh tốn hạn mức không cần thiết." [ref=f2e423]
+                    - generic [ref=f2e424]:
+                      - generic [ref=f2e425]: Tạo lại clip đã có
+                      - generic [ref=f2e426]: Tắt mục này để bỏ qua phân đoạn đã có clip Veo và tránh tốn hạn mức không cần thiết.
+                  - generic [ref=f2e427]:
+                    - checkbox "Tự dựng MP4 sau khi đủ clip Bật để hệ thống tự chuyển sang dựng MP4 khi mọi phân đoạn đã có clip, giọng đọc và phụ đề hợp lệ." [checked] [ref=f2e428]
+                    - generic [ref=f2e429]:
+                      - generic [ref=f2e430]: Tự dựng MP4 sau khi đủ clip
+                      - generic [ref=f2e431]: Bật để hệ thống tự chuyển sang dựng MP4 khi mọi phân đoạn đã có clip, giọng đọc và phụ đề hợp lệ.
+                  - generic [ref=f2e432]:
+                    - checkbox "Cho phép Codex sửa lỗi kỹ thuật Chỉ áp dụng cho lỗi chọn nút/tải xuống/liên kết dữ liệu trong app. Đăng nhập, hạn mức, thanh toán và chính sách vẫn dừng để bạn xử lý." [ref=f2e433]
+                    - generic [ref=f2e434]:
+                      - generic [ref=f2e435]: Cho phép Codex sửa lỗi kỹ thuật
+                      - generic [ref=f2e436]: Chỉ áp dụng cho lỗi chọn nút/tải xuống/liên kết dữ liệu trong app. Đăng nhập, hạn mức, thanh toán và chính sách vẫn dừng để bạn xử lý.
+                  - generic [ref=f2e437]:
+                    - generic [ref=f2e438]: Chính sách hạn mức
+                    - combobox "Chính sách hạn mức" [ref=f2e439]:
+                      - option "Phê duyệt, không hỏi lại" [selected]
+                      - option "Phê duyệt thủ công từng lần"
+                  - generic [ref=f2e440]:
+                    - generic [ref=f2e441]: Giới hạn hạn mức mỗi tác vụ
+                    - textbox "Giới hạn hạn mức mỗi tác vụ" [ref=f2e442]:
+                      - /placeholder: Để trống nếu không giới hạn
+                - paragraph [ref=f2e443]: Mặc định Flow sẽ dùng “Phê duyệt, không hỏi lại” trong tác vụ do bạn khởi chạy, nhưng vẫn dừng nếu vượt giới hạn hạn mức hoặc cần xác minh tài khoản.
+                - button "Tạo clip bằng Veo" [disabled]
+              - generic [ref=f2e444]: Chưa có phân đoạn để tạo clip.
+          - generic [ref=f2e446]:
+            - generic [ref=f2e452]:
+              - heading "Dựng nhanh MP4" [level=2] [ref=f2e453]
+              - paragraph [ref=f2e454]: Ghép clip, giọng đọc và phụ đề theo thời lượng thật
+            - generic [ref=f2e455]: Chọn hoặc tạo dự án để dựng nhanh MP4.
+          - generic [ref=f2e456]:
+            - generic [ref=f2e469]:
+              - heading "Gỡ lỗi cục bộ" [level=2] [ref=f2e470]
+              - paragraph [ref=f2e471]: Dùng khi cần gửi lỗi để sửa
+            - group [ref=f2e472]:
+              - generic "Mở thông tin kỹ thuật" [ref=f2e473] [cursor=pointer]
+          - generic [ref=f2e474]:
+            - generic [ref=f2e480]:
+              - heading "Sổ tay series" [level=2] [ref=f2e481]
+              - paragraph [ref=f2e482]: Tuỳ chọn cho video dài tập
+            - generic [ref=f2e483]:
+              - generic [ref=f2e485]:
+                - generic [ref=f2e486]:
+                  - paragraph [ref=f2e487]: Chưa chọn series
+                  - paragraph [ref=f2e488]: Mở popup để xem đủ Bible, số tập, nhân vật, provider binding và chọn đúng series.
+                - generic [ref=f2e489]:
+                  - button "Chọn series" [ref=f2e490]
+                  - button "Tạo series" [ref=f2e491]
+              - textbox "Tên series" [ref=f2e492]
+              - combobox [ref=f2e494]:
+                - option "Series truyện ảnh"
+                - option "Series video" [selected]
+                - option "Series truyện + video"
+              - textbox "Nhân vật cố định" [ref=f2e495]
+              - textbox "Bối cảnh/world" [ref=f2e496]
+              - textbox "Style hình ảnh" [ref=f2e497]
+              - textbox "Quy tắc nhất quán" [ref=f2e498]
+              - textbox "Điều cần tránh" [ref=f2e499]
+              - textbox "Tóm tắt tập trước" [ref=f2e500]
+              - generic [ref=f2e501]:
+                - button "Lưu series" [disabled]
+                - button "Series mới" [ref=f2e502]
+              - generic [ref=f2e504]:
+                - generic [ref=f2e505]:
+                  - paragraph [ref=f2e506]: Tạo tập mới
+                  - paragraph [ref=f2e507]: Điền thông tin tập trong popup trước khi tạo project.
+                - button "Tạo tập mới" [ref=f2e508]
+  - region "Notifications (F8)":
+    - list

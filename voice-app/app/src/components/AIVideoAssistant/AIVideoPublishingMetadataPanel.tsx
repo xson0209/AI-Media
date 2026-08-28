@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Copy, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertCircle, Check, Copy, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import type {
@@ -6,12 +6,47 @@ import type {
   VideoPublishingPlatform,
 } from '@/lib/api/types';
 import { cn } from '@/lib/utils/cn';
+import { usePlatform } from '@/platform/PlatformContext';
 
 const PLATFORM_TABS: Array<{ key: VideoPublishingPlatform; label: string }> = [
   { key: 'youtube', label: 'YouTube' },
   { key: 'tiktok', label: 'TikTok' },
   { key: 'facebook', label: 'Facebook' },
 ];
+
+const FIELD_LABELS = {
+  title: 'Tiêu đề video',
+  description: 'Mô tả',
+  hashtags: 'Hashtag',
+  thumbnail_prompt: 'Prompt tạo ảnh thumbnail',
+} as const;
+
+/** Gộp toàn bộ nội dung đăng của cả 3 nền tảng thành một khối text phẳng để copy hoặc xuất .txt. */
+function allPlatformsText(metadata: VideoPublishingMetadataResponse | null | undefined): string {
+  if (!metadata?.platforms) return '';
+  const blocks: string[] = [];
+  for (const tab of PLATFORM_TABS) {
+    const content = metadata.platforms[tab.key];
+    if (!content) continue;
+    const lines = [
+      `===== ${tab.label.toUpperCase()} =====`,
+      '',
+      `${FIELD_LABELS.title}:`,
+      content.title?.trim() || '(chưa có)',
+      '',
+      `${FIELD_LABELS.description}:`,
+      content.description?.trim() || '(chưa có)',
+      '',
+      `${FIELD_LABELS.hashtags}:`,
+      (content.hashtags ?? []).join(' ').trim() || '(chưa có)',
+      '',
+      `${FIELD_LABELS.thumbnail_prompt}:`,
+      content.thumbnail_prompt?.trim() || '(chưa có)',
+    ];
+    blocks.push(lines.join('\n'));
+  }
+  return blocks.join('\n\n');
+}
 
 function statusText(metadata: VideoPublishingMetadataResponse | null | undefined): string {
   if (!metadata || metadata.status === 'missing') return 'Chưa có nội dung đăng';
@@ -107,6 +142,11 @@ interface AIVideoPublishingMetadataPanelProps {
   isLoading: boolean;
   isGenerating: boolean;
   disabled: boolean;
+  /** Lý do nút tạo đang bị chặn, hiển thị để người dùng biết cần làm gì trước. */
+  disabledReason?: string | null;
+  /** Cảnh báo chất lượng: vẫn tạo được, chỉ nhắc nội dung có thể chưa tối ưu. */
+  warning?: string | null;
+  projectTitle?: string | null;
   onGenerateAll: () => void;
   onGeneratePlatform: (platform: VideoPublishingPlatform) => void;
 }
@@ -116,12 +156,17 @@ export function AIVideoPublishingMetadataPanel({
   isLoading,
   isGenerating,
   disabled,
+  disabledReason,
+  warning,
+  projectTitle,
   onGenerateAll,
   onGeneratePlatform,
 }: AIVideoPublishingMetadataPanelProps) {
+  const platformBridge = usePlatform();
   const [activePlatform, setActivePlatform] = useState<VideoPublishingPlatform>('youtube');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [exportState, setExportState] = useState<'idle' | 'done' | 'failed'>('idle');
 
   const platform = metadata?.platforms?.[activePlatform];
   const fields = useMemo(
@@ -156,6 +201,8 @@ export function AIVideoPublishingMetadataPanel({
 
   const hasAnyPlatform = PLATFORM_TABS.some((tab) => metadata?.platforms?.[tab.key]);
   const canGenerate = !disabled && !isGenerating;
+  const combinedText = useMemo(() => allPlatformsText(metadata), [metadata]);
+  const hasCombinedText = !!combinedText.trim();
 
   const handleCopy = async (fieldKey: string, value: string) => {
     try {
@@ -166,6 +213,27 @@ export function AIVideoPublishingMetadataPanel({
     } catch {
       setFailedKey(fieldKey);
       setCopiedKey(null);
+    }
+  };
+
+  const handleExportTxt = async () => {
+    const slug = (projectTitle ?? 'noi-dung-dang-video')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
+    const filename = `${slug || 'noi-dung-dang-video'}-noi-dung-dang.txt`;
+    try {
+      await platformBridge.filesystem.saveFile(
+        filename,
+        new Blob([combinedText], { type: 'text/plain;charset=utf-8' }),
+        [{ name: 'Nội dung đăng video', extensions: ['txt'] }],
+      );
+      setExportState('done');
+      window.setTimeout(() => setExportState((current) => (current === 'done' ? 'idle' : current)), 1800);
+    } catch {
+      setExportState('failed');
     }
   };
 
@@ -208,12 +276,24 @@ export function AIVideoPublishingMetadataPanel({
               {metadata.failure_reason}
             </p>
           ) : null}
+          {disabled && disabledReason ? (
+            <p className="mt-2 flex items-start gap-2 text-sm text-muted-foreground">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              {disabledReason}
+            </p>
+          ) : warning ? (
+            <p className="mt-2 flex items-start gap-2 text-sm text-muted-foreground">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              {warning}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             variant={hasAnyPlatform ? 'outline' : 'default'}
             disabled={!canGenerate}
+            title={disabled && disabledReason ? disabledReason : undefined}
             onClick={onGenerateAll}
           >
             {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -224,6 +304,7 @@ export function AIVideoPublishingMetadataPanel({
               type="button"
               variant="outline"
               disabled={!canGenerate}
+              title={disabled && disabledReason ? disabledReason : undefined}
               onClick={() => onGeneratePlatform(activePlatform)}
             >
               <RefreshCw className="h-4 w-4" />
@@ -232,6 +313,40 @@ export function AIVideoPublishingMetadataPanel({
           ) : null}
         </div>
       </div>
+
+      {hasCombinedText ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-background/50 p-3">
+          <p className="mr-auto text-xs text-muted-foreground">
+            Lấy toàn bộ nội dung đăng của cả 3 nền tảng trong một lần.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => handleCopy('all-platforms', combinedText)}
+          >
+            {copiedKey === 'all-platforms' ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+            Copy tất cả
+          </Button>
+          <Button type="button" variant="outline" onClick={() => void handleExportTxt()}>
+            {exportState === 'done' ? (
+              <Check className="h-4 w-4" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            Xuất .txt
+          </Button>
+          {failedKey === 'all-platforms' ? (
+            <p className="w-full text-xs text-destructive">Không thể copy tự động.</p>
+          ) : null}
+          {exportState === 'failed' ? (
+            <p className="w-full text-xs text-destructive">Không xuất được file .txt.</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="Nền tảng đăng video">
         {PLATFORM_TABS.map((tab) => (

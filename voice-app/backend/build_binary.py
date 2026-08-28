@@ -75,6 +75,16 @@ def build_server(cuda=False):
         ]
     )
 
+    # The isolated watermark runtime uses an external Python interpreter, so
+    # the worker must remain a real source file that interpreter can execute.
+    data_separator = ";" if platform.system() == "Windows" else ":"
+    args.extend(
+        [
+            "--add-data",
+            f"workers/video_watermark_worker.py{data_separator}backend/workers",
+        ]
+    )
+
     # Add local qwen_tts path if specified (for editable installs)
     qwen_tts_path = os.getenv("QWEN_TTS_PATH")
     if qwen_tts_path and Path(qwen_tts_path).exists():

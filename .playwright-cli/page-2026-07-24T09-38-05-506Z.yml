@@ -1,0 +1,1236 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Phân tích truyện tranh" [ref=e33] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e38] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Dự án prompt video" [ref=e41] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Mô hình" [ref=e47] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e51] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e55]: v0.5.0
+    - main [ref=e57]:
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - generic [ref=e64]:
+            - generic [ref=e72]:
+              - heading "Dự án câu lệnh video" [level=1] [ref=e73]
+              - paragraph [ref=e74]: Nhập tiếng Việt, AI phát triển kịch bản, chia video thành các đoạn câu lệnh theo cấu hình và giữ mạch liền nhau giữa các phân đoạn.
+            - generic [ref=e75]:
+              - generic [ref=e76]:
+                - generic [ref=e77]: Tên dự án
+                - textbox "Tên dự án Có thể để trống, hệ thống sẽ lấy từ ý tưởng chính." [ref=e78]:
+                  - /placeholder: "Ví dụ: Cú trở lại ở World Cup"
+                - generic [ref=e79]: Có thể để trống, hệ thống sẽ lấy từ ý tưởng chính.
+              - generic [ref=e80]:
+                - generic [ref=e81]: Hồ sơ giọng
+                - 'combobox "Hồ sơ giọng Đang chọn: Thoai 1 Vietnamese" [ref=e743]':
+                  - option "Chọn sau"
+                  - option "Thoai3 English - Tham Hiem"
+                  - option "Thoai 1 Vietnamese" [selected]
+                  - option "Thoai2 English"
+                  - option "trim smoke restart"
+                  - option "trim smoke"
+                  - option "Sơn dev test"
+                - generic [ref=e83]: "Đang chọn: Thoai 1 Vietnamese"
+            - generic [ref=e84]:
+              - generic [ref=e85]:
+                - generic [ref=e86]: Ý tưởng chính
+                - textbox "Ý tưởng chính Nêu video muốn làm bằng tiếng Việt. Đây là nguồn bắt buộc." [ref=e87]
+                - generic [ref=e88]: Nêu video muốn làm bằng tiếng Việt. Đây là nguồn bắt buộc.
+              - generic [ref=e89]:
+                - generic [ref=e90]: Kịch bản thô
+                - textbox "Kịch bản thô Dán kịch bản, đoạn thoại hoặc ghi chú dài nếu đã có." [ref=e91]
+                - generic [ref=e92]: Dán kịch bản, đoạn thoại hoặc ghi chú dài nếu đã có.
+              - generic [ref=e93]:
+                - generic [ref=e94]: Nhân vật và bối cảnh
+                - 'textbox "Nhân vật và bối cảnh Ghi chi tiết cần giữ nhất quán: nhân vật, trang phục, đạo cụ, địa điểm." [ref=e95]'
+                - generic [ref=e96]: "Ghi chi tiết cần giữ nhất quán: nhân vật, trang phục, đạo cụ, địa điểm."
+              - generic [ref=e97]:
+                - generic [ref=e98]: Phong cách video
+                - 'textbox "Phong cách video Ví dụ: cinematic, documentary, fast cuts, warm light, realistic." [ref=e99]'
+                - generic [ref=e100]: "Ví dụ: cinematic, documentary, fast cuts, warm light, realistic."
+              - generic [ref=e101]:
+                - generic [ref=e102]: Bắt buộc phải có
+                - textbox "Bắt buộc phải có Các ý không được bỏ khi AI phát triển lại nội dung." [ref=e103]
+                - generic [ref=e104]: Các ý không được bỏ khi AI phát triển lại nội dung.
+              - generic [ref=e105]:
+                - generic [ref=e106]: Cần tránh
+                - textbox "Cần tránh Những chi tiết, giọng văn hoặc hình ảnh không muốn xuất hiện." [ref=e107]
+                - generic [ref=e108]: Những chi tiết, giọng văn hoặc hình ảnh không muốn xuất hiện.
+              - generic [ref=e109]:
+                - generic [ref=e110]: Phong cách hình ảnh
+                - 'textbox "Phong cách hình ảnh Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation." [ref=e111]': cinematic realistic video, natural light, consistent character details, fast editorial pacing
+                - generic [ref=e112]: "Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation."
+          - generic [ref=e745]:
+            - generic [ref=e746]:
+              - paragraph [ref=e747]: Dự án đang chọn
+              - paragraph [ref=e748]: Người Que - Tập 01
+              - paragraph [ref=e749]: Người Que · Tập 01 · Tập 01 · Cấu hình đoạn câu lệnh trực tiếp
+            - generic [ref=e750]:
+              - generic [ref=e751]:
+                - generic [ref=e752]: 6 phân đoạn đã lưu
+                - generic [ref=e753]: 6 câu lệnh cấu hình
+                - generic [ref=e754]: 10s/câu lệnh
+                - generic [ref=e755]: 3 cảnh nhỏ/câu lệnh
+                - generic [ref=e756]: 18 cảnh nhỏ
+              - generic [ref=e757]:
+                - button "Đổi tên" [ref=e758]
+                - button "Xoá dữ liệu đã tạo" [ref=e759]
+                - button "Xóa dự án" [ref=e760]
+          - generic [ref=e761]:
+            - generic [ref=e762]:
+              - generic [ref=e768]:
+                - heading "Bộ nhớ dự án" [level=2] [ref=e769]
+                - paragraph [ref=e770]: 0 thẻ · 0 beat đích
+              - generic [ref=e771]:
+                - button "Truyện" [ref=e772]
+                - button "Shot" [ref=e773]
+                - button "Câu lệnh" [ref=e774]
+                - button "Giọng đọc" [ref=e775]
+                - button "Phụ đề" [ref=e776]
+            - generic [ref=e777]:
+              - generic [ref=e778]:
+                - heading "Thẻ nhớ đã duyệt" [level=3] [ref=e780]
+                - generic [ref=e781]: Chưa có bộ nhớ dự án. Dự án tạo từ bước chuyển tiếp Video Inspiration sẽ tự sinh thẻ nhớ đã duyệt.
+              - generic [ref=e782]:
+                - heading "Dòng thời gian đích" [level=3] [ref=e784]
+                - generic [ref=e785]: Chưa có dòng thời gian đích. Bản chuyển tiếp hợp lệ sẽ tái cấu trúc beat theo cấu hình dự án thay vì sao chép dòng thời gian nguồn.
+          - generic [ref=e786]:
+            - generic [ref=e787]:
+              - generic [ref=e794]:
+                - heading "Báo cáo chất lượng" [level=2] [ref=e795]
+                - paragraph [ref=e796]: Chưa kiểm tra
+              - button "Chạy kiểm tra" [ref=e798]
+            - generic [ref=e799]: Chưa có báo cáo. Bấm Chạy kiểm tra để đánh giá gói phân tích, chuyển tiếp, bộ nhớ dự án, bản nháp, kịch bản, phân đoạn, câu lệnh, giọng đọc, phụ đề và nhất quán toàn luồng trước khi dựng hoặc đóng gói.
+          - generic [ref=e800]:
+            - generic [ref=e808]:
+              - heading "Nguồn nội dung" [level=2] [ref=e809]
+              - paragraph [ref=e810]: 1 đoạn đang lưu
+            - generic [ref=e812]:
+              - generic [ref=e813]:
+                - paragraph [ref=e814]: "#1 · idea"
+                - paragraph [ref=e815]: Tập 1. Căn nhà tồi tàn
+              - button "Xoá đoạn" [ref=e816]
+          - generic [ref=e817]:
+            - generic [ref=e818]:
+              - generic [ref=e824]:
+                - heading "Tự động tạo nguyên liệu" [level=2] [ref=e825]
+                - paragraph [ref=e826]: Câu lệnh video, nội dung đăng, giọng đọc và phụ đề .srt
+              - generic [ref=e827]: Đã xong
+            - generic [ref=e828]:
+              - generic [ref=e829]:
+                - generic [ref=e830]:
+                  - button "Duyệt từng chặng Dừng ở kịch bản và câu lệnh" [ref=e831]:
+                    - generic [ref=e832]: Duyệt từng chặng
+                    - generic [ref=e833]: Dừng ở kịch bản và câu lệnh
+                  - button "Tự chạy hết Tự duyệt bước giữa" [pressed] [ref=e834]:
+                    - generic [ref=e835]: Tự chạy hết
+                    - generic [ref=e836]: Tự duyệt bước giữa
+                - generic [ref=e837]:
+                  - button "Tạo MP4 bằng Veo Tạo câu lệnh, nội dung đăng, Veo, giọng/SRT và dựng MP4." [ref=e838]:
+                    - generic:
+                      - generic: Tạo MP4 bằng Veo
+                      - generic: Tạo câu lệnh, nội dung đăng, Veo, giọng/SRT và dựng MP4.
+                  - button "Tạo giọng + phụ đề Tạo câu lệnh, nội dung đăng, giọng và .srt chia mốc theo âm thanh." [pressed] [ref=e844]:
+                    - generic:
+                      - generic: Tạo giọng + phụ đề
+                      - generic: Tạo câu lệnh, nội dung đăng, giọng và .srt chia mốc theo âm thanh.
+                  - button "Bộ đăng video Tạo câu lệnh, tiêu đề, mô tả, hashtag và câu lệnh thumbnail." [ref=e849]:
+                    - generic:
+                      - generic: Bộ đăng video
+                      - generic: Tạo câu lệnh, tiêu đề, mô tả, hashtag và câu lệnh thumbnail.
+                  - button "Chỉ câu lệnh video Bỏ qua giọng/SRT để tải ảnh ngay" [ref=e852]:
+                    - generic:
+                      - generic: Chỉ câu lệnh video
+                      - generic: Bỏ qua giọng/SRT để tải ảnh ngay
+              - button "Auto chạy" [ref=e857]
+            - generic [ref=e858]:
+              - generic [ref=e859]:
+                - generic [ref=e860]:
+                  - generic [ref=e861]:
+                    - generic [ref=e862]:
+                      - generic [ref=e863]: Đã xong
+                      - generic [ref=e864]: Câu lệnh + giọng đọc + SRT
+                      - generic [ref=e865]: Duyệt từng chặng
+                    - paragraph [ref=e866]: Nguyên liệu lõi đã sẵn sàng
+                    - paragraph [ref=e867]: Câu lệnh 0/6, giọng 4/6, cần tạo lại phụ đề.
+                    - paragraph [ref=e868]: Bạn có thể kiểm tra câu lệnh, nghe giọng, tải phụ đề hoặc qua bảng dựng MP4.
+                  - generic [ref=e870]:
+                    - generic [ref=e871]:
+                      - generic [ref=e872]: Tiến độ
+                      - generic [ref=e873]: 100%
+                    - progressbar "Tiến độ tự chạy" [ref=e874]
+                - generic [ref=e876]:
+                  - generic [ref=e877]:
+                    - paragraph [ref=e882]: Viết nền câu chuyện
+                    - paragraph [ref=e883]: Ý tưởng, tính nhất quán và kịch bản chi tiết.
+                  - generic [ref=e884]:
+                    - generic [ref=e885]: 6 phân đoạn
+                    - paragraph [ref=e890]: Chia thành phân đoạn
+                    - paragraph [ref=e891]: Mỗi đoạn có hành động, camera, lời kể và nhịp dựng.
+                  - generic [ref=e892]:
+                    - generic [ref=e893]: 0/6
+                    - paragraph [ref=e898]: Tạo câu lệnh video
+                    - paragraph [ref=e899]: Câu lệnh gốc để sao chép sang công cụ tạo video.
+                  - generic [ref=e900]:
+                    - paragraph [ref=e904]: Nội dung đăng
+                    - paragraph [ref=e905]: Tiêu đề, mô tả, hashtag và câu lệnh thumbnail cho YouTube, TikTok, Facebook.
+                  - generic [ref=e906]:
+                    - generic [ref=e907]: 4/6
+                    - paragraph [ref=e912]: Tạo giọng đọc
+                    - paragraph [ref=e913]: Giọng đọc cho các phân đoạn có lời kể.
+                  - generic [ref=e914]:
+                    - generic [ref=e915]: Cần tạo lại phụ đề
+                    - paragraph [ref=e920]: Tạo phụ đề
+                    - paragraph [ref=e921]: File .srt theo giọng đọc đã tạo.
+              - generic [ref=e922]: Nguyên liệu lõi và bộ nội dung đăng đã sẵn sàng. Dựng MP4 vẫn dùng bảng dựng riêng.
+          - generic [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e120]:
+                - heading "Truyện, nhất quán và kịch bản" [level=2] [ref=e121]
+                - paragraph [ref=e122]: Phải duyệt phần này trước khi tạo phân cảnh
+              - generic [ref=e123]:
+                - button "AI phát triển kịch bản" [ref=e923]
+                - button "Viết lại" [ref=e924]
+                - button "Duyệt kịch bản" [ref=e925]
+            - generic [ref=e926]:
+              - generic [ref=e927]:
+                - paragraph [ref=e928]: Chiến lược kịch bản
+                - paragraph [ref=e929]: Bản tiếng Việt để duyệt; nếu video cuối là Tiếng Việt, phần sản xuất vẫn theo ngôn ngữ video.
+                - generic [ref=e930]: "Bản tiếng Việt: Tập mở đầu dùng cấu trúc short quốc tế: hook cực nhanh bằng hình ảnh căn nhà gần sập giữa mưa, sau đó đặt câu hỏi: tại sao Nam lại chọn bước vào nơi này? Xung đột chính là Nam cần một mái nhà nhưng căn nhà quá tồi tàn, nguy hiểm và có vẻ đang che giấu điều gì đó. Emotional arc đi từ hài hước, sợ hãi, thất vọng sang kiên trì và hy vọng. Mỗi segment có một phát hiện mới: cửa bung, mái dột, sàn gãy, ảnh cũ, hộp bí mật, rồi ánh đèn ấm đầu tiên. Payoff cuối là Nam không có một căn nhà hoàn hảo, nhưng có một nơi để bắt đầu. Câu kết mềm mở ra tập sau bằng dấu hiệu bí ẩn trong hộp gỗ. Bản tiếng Anh dùng cho video: Episode 1 opens with a fast global-short hook: a nearly collapsing house in the rain, and Nam stepping toward it anyway. The core conflict is simple and visual: Nam needs shelter, but the house is broken, unsafe, and hiding a secret. The emotional arc moves from humor and fear to frustration, persistence, and quiet hope. Each segment reveals a new problem or clue: the broken door, leaking roof, weak floor, old photo, hidden box, and finally the first warm light inside the house. The payoff is not a perfect home, but a beginning. The soft ending invites the next episode through a small mystery hidden under the floorboards."
+              - generic [ref=e931]:
+                - paragraph [ref=e932]: Ghi chú nhất quán
+                - paragraph [ref=e933]: Bản tiếng Việt giúp kiểm tra nhân vật, bối cảnh, phong cách và tính nhất quán.
+                - generic [ref=e934]: "Bản tiếng Việt: Giữ Nam là nhân vật duy nhất nổi bật trong tập: cơ thể người que màu xám than #6A6A6A, đầu tròn lớn hơn bình thường 15%, mắt trắng lớn biểu cảm, không tóc, không mũi, không tai, miệng là nét cong đơn giản, có vết nứt trắng nhỏ bên trái đầu. Trang phục xuyên suốt: hoodie xanh navy, quần short đen, sneaker trắng, khăn quàng vàng; sau khi vào nhà có thể dính bụi, nước mưa và vết bẩn nhưng không được đổi thiết kế. Căn nhà là nhà gỗ/cũ ở rìa thị trấn, mái dột, tường nứt, sàn ọp ẹp, cửa lệch bản lề, đồ vật phủ bụi nhưng có tỷ lệ thật. Phong cách hình ảnh là cinematic 3D animation chất lượng cao, ánh sáng tự nhiên, volumetric rain/fog/dust, camera luôn có chuyển động mượt như dolly, handheld, orbit, crane. Không có chữ trên màn hình, không logo, không watermark. Tập kết thúc trong cùng căn nhà, sau khi Nam tạo được một góc nhỏ có ánh sáng ấm và tìm thấy hộp gỗ bí ẩn. Bản tiếng Anh dùng cho video: Keep Nam as the single recognizable main character: charcoal gray stick-figure body #6A6A6A, round head 15% larger than normal, large expressive white eyes, no hair, no nose, no ears, a simple curved mouth, and a small white crack on the left side of his head. His outfit stays consistent: navy hoodie, black shorts, white sneakers, and a yellow scarf. After entering the house, he may become wet, dusty, and dirty, but his design must not change. The house is an old wooden home on the edge of town with a leaking roof, cracked walls, creaking floors, a crooked door, and realistic dusty objects. The visual style is high-quality cinematic 3D animation with natural light, volumetric rain, fog, dust, and smooth moving camera language: dolly, handheld, orbit, crane. No on-screen text, no logo, no watermark. The episode ends in the same house after Nam creates one warm corner of safety and discovers a mysterious wooden box."
+              - generic [ref=e935]:
+                - paragraph [ref=e936]: Kịch bản chi tiết
+                - paragraph [ref=e937]: Bản đọc duyệt bằng tiếng Việt, kèm nội dung sản xuất theo Tiếng Việt nếu khác.
+                - generic [ref=e938]: "Bản tiếng Việt: Segment 1 mở bằng căn nhà tồi tàn trong mưa, cửa đập mạnh, Nam đứng bên ngoài vừa sợ vừa tò mò. Voiceover tiếng Anh đặt hook: “Most people would run from this house. Nam walked closer.” Segment 2 Nam bước vào, bị cửa kẹt làm giật mình, rồi thấy nước mưa nhỏ xuống khắp nơi. Segment 3 cậu cố sửa tạm mái dột nhưng sàn gỗ lún xuống, tạo một khoảnh khắc hài hước và nguy hiểm. Segment 4 Nam gần như bỏ cuộc khi thấy căn nhà quá hỏng, nhưng một bức ảnh cũ khiến cậu nhận ra từng có người yêu quý nơi này. Segment 5 cậu dọn bụi, kê lại bàn, vá tạm lỗ hổng và phát hiện một hộp gỗ giấu dưới tấm ván. Segment 6 Nam thắp ánh đèn đầu tiên trong nhà, mỉm cười mệt mỏi, rồi nghe tiếng động nhỏ từ chiếc hộp. Tập kết bằng cảm giác hy vọng xen bí ẩn, mở đường cho tập tiếp theo. Bản tiếng Anh dùng cho video: Segment 1 opens on a ruined house in the rain. The door slams in the wind as Nam stands outside, scared but curious. The English voiceover hooks the viewer: “Most people would run from this house. Nam walked closer.” In Segment 2, Nam steps inside, gets startled by the stuck door, and notices rain leaking everywhere. In Segment 3, he tries a quick roof repair, but the wooden floor sinks under him, turning danger into a small comedic beat. In Segment 4, Nam almost gives up, until an old photograph suggests this broken house once mattered to someone. In Segment 5, he clears dust, fixes one corner, and discovers a hidden wooden box under a loose floorboard. In Segment 6, Nam lights the first warm lamp, smiles through exhaustion, and hears a tiny sound from the box. The episode ends with hope and mystery, setting up the next chapter."
+              - generic [ref=e939]:
+                - generic [ref=e940]:
+                  - generic [ref=e941]:
+                    - paragraph [ref=e942]: Retention và âm thanh
+                    - paragraph [ref=e943]: Bản tiếng Việt để kiểm tra nhịp giữ chân, pattern interrupt và sound design trước khi tạo phân đoạn.
+                  - generic [ref=e944]: chưa có creative direction đầy đủ
+                - generic [ref=e945]:
+                  - generic [ref=e946]:
+                    - paragraph [ref=e947]: Bản đồ giữ chân
+                    - paragraph [ref=e948]: Bản đồ giữ chân đang được giữ trong câu lệnh gốc tiếng Anh. UI chỉ hiển thị bản tiếng Việt để duyệt.
+                    - paragraph [ref=e949]: "Mồi câu: Đọc bản tóm tắt tiếng Việt phía trên."
+                    - paragraph [ref=e950]: "Câu hỏi giữ tò mò: Đọc bản tóm tắt tiếng Việt phía trên."
+                    - paragraph [ref=e951]: "Payoff: Đọc bản tóm tắt tiếng Việt phía trên."
+                  - generic [ref=e952]:
+                    - paragraph [ref=e953]: Thiết kế âm thanh
+                    - paragraph [ref=e954]: Sound design đang được giữ trong câu lệnh gốc tiếng Anh. UI chỉ hiển thị bản tiếng Việt để duyệt.
+                    - paragraph [ref=e955]: "Nhạc: Đọc bản tóm tắt tiếng Việt phía trên."
+                    - paragraph [ref=e956]: "Năng lượng: Đọc bản tóm tắt tiếng Việt phía trên."
+                    - paragraph [ref=e957]: "Mix: Đọc bản tóm tắt tiếng Việt phía trên."
+          - generic [ref=e126]:
+            - generic [ref=e127]:
+              - generic [ref=e133]:
+                - heading "Phân đoạn câu lệnh" [level=2] [ref=e134]
+                - paragraph [ref=e135]: 6 phân đoạn đã lưu / 6 câu lệnh cấu hình · mỗi câu lệnh ~10s, gồm 3 cảnh nhỏ
+              - button "Tạo bản phân đoạn" [disabled]
+            - generic [ref=e136]:
+              - generic [ref=e959]:
+                - generic [ref=e960]:
+                  - generic [ref=e961]:
+                    - paragraph [ref=e962]: Phân đoạn 01
+                    - generic [ref=e963]: câu lệnh 10s
+                    - generic [ref=e964]: 0-10s timeline
+                    - generic [ref=e965]: 3 cảnh nhỏ
+                    - generic [ref=e966]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e967]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e968]: "Segment 1 of 6 - Hook. 0-3.3s: camera dolly-in xuyên qua mưa tới căn nhà gỗ gần sập, cửa bật mở trên tiếng sấm. 3.3-6.7s: Nam bước vào tiền cảnh, ôm khăn quàng vàng, mắt trắng mở cực lớn. 6.7-10s: Nam gãi đầu bối rối rồi tiến một bước về phía hiên. Voiceover tiếng Anh nói rằng người khác sẽ chạy khỏi căn nhà này, nhưng Nam lại tiến gần hơn. Mood căng thẳng, có chút hài, giữ đúng Nam người que xám than, hoodie navy, quần short đen, sneaker trắng, khăn vàng và vết nứt trắng bên trái đầu."
+                  - generic [ref=e969]:
+                    - generic [ref=e970]:
+                      - generic [ref=e971]: "0-3.3s:"
+                      - text: Camera dolly-in xuyên qua mưa dày tới căn nhà gỗ tồi tàn, cửa lệch bản lề bật mở đúng nhịp sấm.
+                      - generic [ref=e972]: · Low-angle dolly-in with slight handheld vibration on lightning.
+                    - generic [ref=e973]:
+                      - generic [ref=e974]: "3.3-6.7s:"
+                      - text: Nam bước vào khung hình, người run nhẹ, ôm khăn quàng vàng đang bay mạnh và nhìn căn nhà bằng đôi mắt trắng cực lớn.
+                      - generic [ref=e975]: · Medium full-body tracking from front-left, rain streaks crossing lens.
+                    - generic [ref=e976]:
+                      - generic [ref=e977]: "6.7-10s:"
+                      - text: Nam nuốt sợ, gãi đầu bối rối rồi bước một bước lên hiên nhà, tạo điểm cắt nối sang bên trong.
+                      - generic [ref=e978]: · Slow push-in toward his face, then tilt down to the stepping sneaker.
+                  - paragraph [ref=e979]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e980]: Most people would run from this house. The roof was broken, the door was angry, and the storm sounded alive. But Nam stepped closer anyway.
+                  - paragraph [ref=e981]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e982]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e983]:
+                  - button "Khóa" [ref=e984]
+                  - button "Tạo lại" [ref=e985]
+              - generic [ref=e987]:
+                - generic [ref=e988]:
+                  - generic [ref=e989]:
+                    - paragraph [ref=e990]: Phân đoạn 02
+                    - generic [ref=e991]: câu lệnh 10s
+                    - generic [ref=e992]: 10-20s timeline
+                    - generic [ref=e993]: 3 cảnh nhỏ
+                    - generic [ref=e994]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e995]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e996]: "Segment 2 of 6 - Build-up. 0-3.3s: Nam đẩy cửa bước vào, camera handheld theo sát từ phía sau. 3.3-6.7s: cửa đóng sầm làm cậu nhảy dựng, ôm đầu, mắt mở to. 6.7-10s: cậu phát hiện nhà dột như mưa trong nhà, đặt xô cũ dưới một dòng nước rồi né thêm hai dòng khác. Voiceover tiếng Anh mô tả căn nhà không hề trống rỗng mà kêu cót két, nhỏ nước và rên rỉ như đang phàn nàn. Mood hỗn loạn duyên dáng, nối tiếp trực tiếp từ ngưỡng cửa segment trước."
+                  - generic [ref=e997]:
+                    - generic [ref=e998]:
+                      - generic [ref=e999]: "0-3.3s:"
+                      - text: Nam đẩy cánh cửa lệch bản lề và bước vào nội thất tối, camera handheld nhẹ theo sau qua ngưỡng cửa.
+                      - generic [ref=e1000]: · Over-the-shoulder handheld push through the doorway.
+                    - generic [ref=e1001]:
+                      - generic [ref=e1002]: "3.3-6.7s:"
+                      - text: Cửa đóng sầm phía sau, Nam giật bắn, ôm đầu, mắt trắng mở to và miệng cong như cố không hét.
+                      - generic [ref=e1003]: · Quick snap-pan from door to Nam's face, then slight push-in reaction.
+                    - generic [ref=e1004]:
+                      - generic [ref=e1005]: "6.7-10s:"
+                      - text: Nam nhìn quanh thấy nước dột khắp nơi, đặt xô cũ dưới một dòng nước rồi lách người né thêm hai dòng rơi từ trần.
+                      - generic [ref=e1006]: · Medium-wide tracking shot across the room with foreground drips for depth.
+                  - paragraph [ref=e1007]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e1008]: Inside, the house did not feel empty. It creaked, dripped, and groaned like it was complaining. Nam said nothing, but his eyes said everything.
+                  - paragraph [ref=e1009]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e1010]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e1011]:
+                  - button "Khóa" [ref=e1012]
+                  - button "Tạo lại" [ref=e1013]
+              - generic [ref=e1015]:
+                - generic [ref=e1016]:
+                  - generic [ref=e1017]:
+                    - paragraph [ref=e1018]: Phân đoạn 03
+                    - generic [ref=e1019]: câu lệnh 10s
+                    - generic [ref=e1020]: 20-30s timeline
+                    - generic [ref=e1021]: 3 cảnh nhỏ
+                    - generic [ref=e1022]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e1023]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e1024]: "Segment 3 of 6 - Obstacle. 0-3.3s: Nam kéo một tấm ván cũ và giơ lên như ý tưởng vá mái rất thông minh. 3.3-6.7s: cậu trèo lên ghế ọp ẹp, với tay lên trần trong cú orbit nhẹ. 6.7-10s: sàn gỗ gãy, một chân tụt xuống, cậu quơ tay rồi kéo sneaker trắng ra khỏi lỗ. Voiceover tiếng Anh nói Nam có kế hoạch sửa chỗ dột trước, nhưng căn nhà có kế hoạch khác và sàn cố nuốt giày cậu. Mood hồi hộp, hài hình thể, vẫn giữ nguy hiểm vừa đủ."
+                  - generic [ref=e1025]:
+                    - generic [ref=e1026]:
+                      - generic [ref=e1027]: "0-3.3s:"
+                      - text: Nam kéo tấm ván cũ qua sàn, giơ lên như tìm ra giải pháp vá mái đầu tiên.
+                      - generic [ref=e1028]: · Low tracking shot following the plank scrape, then tilt up to Nam's face.
+                    - generic [ref=e1029]:
+                      - generic [ref=e1030]: "3.3-6.7s:"
+                      - text: Nam trèo lên ghế cũ, khăn vàng vướng nhẹ rồi tuột ra, tay dài với lên lỗ dột trong trần.
+                      - generic [ref=e1031]: · Slow orbit around chair and Nam, maintaining full-body silhouette in 9:16.
+                    - generic [ref=e1032]:
+                      - generic [ref=e1033]: "6.7-10s:"
+                      - text: Tấm sàn bên dưới gãy rắc, chân Nam tụt xuống, cậu quơ tay giữ thăng bằng rồi kéo sneaker trắng ra khỏi lỗ.
+                      - generic [ref=e1034]: · Sudden downward camera dip with the collapse, then quick close push on his shocked eyes.
+                  - paragraph [ref=e1035]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e1036]: "Nam had one brilliant plan: fix the leak first. The house had another plan. One wrong step, and the floor tried to swallow his shoe."
+                  - paragraph [ref=e1037]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e1038]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e1039]:
+                  - button "Khóa" [ref=e1040]
+                  - button "Tạo lại" [ref=e1041]
+              - generic [ref=e1043]:
+                - generic [ref=e1044]:
+                  - generic [ref=e1045]:
+                    - paragraph [ref=e1046]: Phân đoạn 04
+                    - generic [ref=e1047]: câu lệnh 10s
+                    - generic [ref=e1048]: 30-40s timeline
+                    - generic [ref=e1049]: 3 cảnh nhỏ
+                    - generic [ref=e1050]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e1051]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e1052]: "Segment 4 of 6 - Emotional turn. 0-3.3s: Nam ngồi xuống cạnh tường nứt, ôm đầu gối, gần như bỏ cuộc. 3.3-6.7s: khuỷu tay chạm mảng gỗ, một bức ảnh cũ phủ bụi trượt ra. 6.7-10s: Nam phủi bụi, nhìn thấy căn nhà từng ấm áp, mắt dịu lại. Voiceover tiếng Anh nói Nam suýt bỏ cuộc, rồi phát hiện dấu hiệu rằng nơi đổ nát này từng được yêu thương. Mood chậm hơn, nhân văn, tạo lý do cảm xúc để cậu tiếp tục."
+                  - generic [ref=e1053]:
+                    - generic [ref=e1054]:
+                      - generic [ref=e1055]: "0-3.3s:"
+                      - text: Nam ngồi thấp cạnh bức tường nứt, ôm đầu gối, sneaker trắng đặt sát nhau trên sàn, vẻ mặt mệt và buồn.
+                      - generic [ref=e1056]: · Eye-level medium shot slowly lowering with him to the floor.
+                    - generic [ref=e1057]:
+                      - generic [ref=e1058]: "3.3-6.7s:"
+                      - text: Khuỷu tay Nam chạm mảng gỗ mục, một bức ảnh cũ phủ bụi trượt ra từ khe tường.
+                      - generic [ref=e1059]: · Close lateral slide following the photo across the floor.
+                    - generic [ref=e1060]:
+                      - generic [ref=e1061]: "6.7-10s:"
+                      - text: Nam nhặt ảnh lên, phủi bụi, mắt trắng dịu lại khi nhận ra căn nhà từng có bàn ăn, ánh sáng và sự ấm áp.
+                      - generic [ref=e1062]: · Close-up on photo reflection in Nam's large white eyes, then slow push to his face.
+                  - paragraph [ref=e1063]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e1064]: For a moment, Nam almost gave up. Then something slid out of the wall, covered in dust. This broken place had once been loved.
+                  - paragraph [ref=e1065]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e1066]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e1067]:
+                  - button "Khóa" [ref=e1068]
+                  - button "Tạo lại" [ref=e1069]
+              - generic [ref=e1071]:
+                - generic [ref=e1072]:
+                  - generic [ref=e1073]:
+                    - paragraph [ref=e1074]: Phân đoạn 05
+                    - generic [ref=e1075]: câu lệnh 10s
+                    - generic [ref=e1076]: 40-50s timeline
+                    - generic [ref=e1077]: 3 cảnh nhỏ
+                    - generic [ref=e1078]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e1079]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e1080]: "Segment 5 of 6 - Climax/mystery reveal. 0-3.3s: Nam quét bụi khỏi một góc phòng, quyết định sửa từng phần nhỏ. 3.3-6.7s: cậu dựng bàn, đặt xô dưới chỗ dột, kéo khăn vàng cho ngay rồi tự giơ ngón cái. 6.7-10s: cậu gõ sàn, nghe tiếng rỗng, cạy tấm ván và thấy hộp gỗ nhỏ. Voiceover tiếng Anh nói Nam ngừng cố sửa mọi thứ cùng lúc, sửa một góc trước, rồi căn nhà trao cho cậu một bí mật. Mood chuyển sang chủ động, hy vọng và tò mò."
+                  - generic [ref=e1081]:
+                    - generic [ref=e1082]:
+                      - generic [ref=e1083]: "0-3.3s:"
+                      - text: Nam đứng dậy quyết tâm hơn, dùng chổi cũ quét bụi khỏi một góc phòng thay vì cố sửa cả căn nhà.
+                      - generic [ref=e1084]: · Quick tracking shot moving with the broom sweep across the floor.
+                    - generic [ref=e1085]:
+                      - generic [ref=e1086]: "3.3-6.7s:"
+                      - text: Nam dựng lại chiếc bàn, đặt xô dưới chỗ dột, kéo khăn vàng ngay ngắn rồi giơ ngón cái với chính mình.
+                      - generic [ref=e1087]: · Medium-wide side track with quick push-in on the thumbs-up.
+                    - generic [ref=e1088]:
+                      - generic [ref=e1089]: "6.7-10s:"
+                      - text: Nam quỳ xuống gõ sàn, nghe âm rỗng, cạy tấm ván lỏng và phát hiện một hộp gỗ nhỏ giấu bên dưới.
+                      - generic [ref=e1090]: · Low floor-level close-up, dolly into the shadow under the plank, then reveal Nam's wide eyes.
+                  - paragraph [ref=e1091]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e1092]: So Nam stopped trying to fix everything. He fixed one corner. And when the floor answered with a hollow knock, the house finally gave him a secret.
+                  - paragraph [ref=e1093]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e1094]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e1095]:
+                  - button "Khóa" [ref=e1096]
+                  - button "Tạo lại" [ref=e1097]
+              - generic [ref=e1099]:
+                - generic [ref=e1100]:
+                  - generic [ref=e1101]:
+                    - paragraph [ref=e1102]: Phân đoạn 06
+                    - generic [ref=e1103]: câu lệnh 10s
+                    - generic [ref=e1104]: 50-60s timeline
+                    - generic [ref=e1105]: 3 cảnh nhỏ
+                    - generic [ref=e1106]: "câu lệnh: Cần tạo lại"
+                  - paragraph [ref=e1107]: Bản tiếng Việt để duyệt phân đoạn
+                  - paragraph [ref=e1108]: "Segment 6 of 6 - Payoff và cliffhanger mềm. 0-3.3s: Nam bật chiếc đèn cũ, ánh sáng vàng lan ra góc phòng đã gọn hơn. 3.3-6.7s: cậu ngồi cạnh hộp gỗ chưa mở, tựa lưng vào tường, mỉm cười mệt nhưng nhẹ nhõm. 6.7-10s: căn phòng im lại, hộp gỗ khẽ rung và phát ra âm thanh nhỏ, Nam quay đầu với mắt mở to. Voiceover tiếng Anh nói căn nhà vẫn tồi tàn, nhưng một góc đã ấm, khô và thuộc về Nam; rồi chiếc hộp phát ra tiếng động. Mood hy vọng xen bí ẩn, kết thúc không đột ngột."
+                  - generic [ref=e1109]:
+                    - generic [ref=e1110]:
+                      - generic [ref=e1111]: "0-3.3s:"
+                      - text: Nam bật chiếc đèn cũ trên bàn, ánh sáng vàng ấm lan qua góc phòng đã được dọn gọn hơn.
+                      - generic [ref=e1112]: · Close-up on lamp switch, then slow pull to reveal Nam and the cleaned corner.
+                    - generic [ref=e1113]:
+                      - generic [ref=e1114]: "3.3-6.7s:"
+                      - text: Nam ngồi xuống cạnh hộp gỗ chưa mở, tựa vào tường, mắt trắng dịu lại và mỉm cười mệt mỏi.
+                      - generic [ref=e1115]: · Warm low-angle medium shot, gentle dolly-in toward Nam's face.
+                    - generic [ref=e1116]:
+                      - generic [ref=e1117]: "6.7-10s:"
+                      - text: Không gian im hơn, hộp gỗ khẽ rung và phát ra tiếng động nhỏ; Nam quay đầu nhìn, mắt mở to vì ngạc nhiên.
+                      - generic [ref=e1118]: · Slow push from Nam's face to the box, then hold both in frame for the ending.
+                  - paragraph [ref=e1119]: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                  - paragraph [ref=e1120]: By night, it was still a terrible house. But one corner was warm, dry, and his. Then the little box made a sound.
+                  - paragraph [ref=e1121]: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                  - paragraph [ref=e1122]: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                - generic [ref=e1123]:
+                  - button "Khóa" [ref=e1124]
+                  - button "Tạo lại" [ref=e1125]
+          - generic [ref=e138]:
+            - generic [ref=e139]:
+              - generic [ref=e145]:
+                - heading "Câu lệnh video" [level=2] [ref=e146]
+                - paragraph [ref=e147]: Câu lệnh gốc để sao chép, kèm bản giải thích tiếng Việt để đọc hiểu
+              - generic [ref=e148]:
+                - button "Mở popup câu lệnh" [ref=e1126]
+                - button "Sao chép toàn bộ câu lệnh" [ref=e1127]
+                - button "Tạo câu lệnh video" [ref=e1128]
+            - generic [ref=e149]:
+              - generic [ref=e1129]:
+                - generic [ref=e1130]:
+                  - generic [ref=e1131]:
+                    - paragraph [ref=e1132]: Phân đoạn 01
+                    - paragraph [ref=e1133]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1134]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1135]
+                    - button "Tải câu lệnh" [ref=e1136]
+                - generic [ref=e1137]:
+                  - paragraph [ref=e1138]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1139]: "Segment 1 mở đầu bằng hook mạnh: camera dolly-in xuyên qua mưa tới căn nhà gỗ tồi tàn, cửa tự bật mở theo tiếng sấm. Sau đó Nam xuất hiện với đúng thiết kế người que xám than, hoodie navy, quần short đen, sneaker trắng, khăn vàng và vết nứt trắng bên trái đầu. Cậu sợ nhưng vẫn bước lên hiên. Voiceover và mọi nội dung người xem nghe/đọc đều bằng tiếng Anh. Retention nằm ở câu hỏi vì sao Nam tiến lại gần thay vì bỏ chạy, cùng hình ảnh cửa tự mở và khăn vàng nổi bật giữa cảnh bão. Chuyển cảnh là hard cut theo chuyển động bàn chân qua ngưỡng cửa. Âm thanh gồm mưa lớn, sấm, cửa gỗ đập, bước chân ướt và nhạc căng nhẹ, nhưng voiceover luôn rõ."
+                  - paragraph [ref=e1140]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1141]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1142] [cursor=pointer]
+              - generic [ref=e1143]:
+                - generic [ref=e1144]:
+                  - generic [ref=e1145]:
+                    - paragraph [ref=e1146]: Phân đoạn 02
+                    - paragraph [ref=e1147]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1148]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1149]
+                    - button "Tải câu lệnh" [ref=e1150]
+                - generic [ref=e1151]:
+                  - paragraph [ref=e1152]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1153]: Segment 2 nối trực tiếp từ cảnh Nam bước qua cửa. Camera handheld theo sau cậu vào căn nhà tối, cửa đóng sầm khiến cậu giật bắn rồi căn phòng lộ ra như đang mưa bên trong. Nam đặt xô hứng nước và né các dòng dột, cuối segment nhìn thấy tấm ván lỏng để mở sang ý tưởng sửa nhà. Voiceover tiếng Anh giữ nhịp vừa đủ, không tạo thoại nhân vật. Retention chuyển nỗi sợ thành hài hình thể và cho thấy căn nhà gần như không thể ở được. Chuyển cảnh là action cut khi tay Nam vươn tới tấm ván. Âm thanh gồm cửa đập, nước nhỏ, xô kêu, sneaker rít nhẹ, gỗ cót két và nhạc tò mò căng vừa.
+                  - paragraph [ref=e1154]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1155]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1156] [cursor=pointer]
+              - generic [ref=e1157]:
+                - generic [ref=e1158]:
+                  - generic [ref=e1159]:
+                    - paragraph [ref=e1160]: Phân đoạn 03
+                    - paragraph [ref=e1161]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1162]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1163]
+                    - button "Tải câu lệnh" [ref=e1164]
+                - generic [ref=e1165]:
+                  - paragraph [ref=e1166]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1167]: "Segment 3 là nỗ lực sửa nhà đầu tiên. Nam kéo tấm ván, tưởng đã có kế hoạch vá mái, rồi trèo lên ghế ọp ẹp để với lên trần. Bất ngờ sàn gãy, một chân cậu tụt xuống và cậu phải vùng vẫy kéo sneaker trắng ra. Hố sàn gãy phải được giữ lại cho continuity về sau. Voiceover tiếng Anh kể nhịp hài căng thẳng. Retention đến từ cú đảo chiều: ý tưởng sửa nhà biến thành tai nạn hài nhưng vẫn nguy hiểm. Chuyển cảnh match cut từ cú ngã sang khoảnh khắc Nam ngồi mệt. Âm thanh gồm ván cạ sàn, ghế rung, gỗ gãy, sneaker rít và khoảng lặng ngắn sau tiếng nứt."
+                  - paragraph [ref=e1168]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1169]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1170] [cursor=pointer]
+              - generic [ref=e1171]:
+                - generic [ref=e1172]:
+                  - generic [ref=e1173]:
+                    - paragraph [ref=e1174]: Phân đoạn 04
+                    - paragraph [ref=e1175]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1176]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1177]
+                    - button "Tải câu lệnh" [ref=e1178]
+                - generic [ref=e1179]:
+                  - paragraph [ref=e1180]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1181]: Segment 4 giảm nhịp để tạo cảm xúc. Nam ngồi bên tường nứt, ôm đầu gối như sắp bỏ cuộc. Khi khuỷu tay chạm mảng gỗ mục, một bức ảnh cũ trượt ra trong tia sáng ấm. Cậu phủi bụi, nhìn ảnh và hiểu căn nhà từng có sự ấm áp. Không có chữ đọc được trên ảnh. Voiceover tiếng Anh tạo lý do cảm xúc để Nam tiếp tục. Retention đổi căn nhà từ trò đùa nguy hiểm thành nơi có quá khứ, mở vòng lặp về bí mật bên trong. Chuyển cảnh là gaze cut theo ánh mắt quyết tâm của Nam. Âm thanh hạ thấp mưa, thêm piano nhẹ, tiếng bụi trượt và giấy cọ nhỏ.
+                  - paragraph [ref=e1182]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1183]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1184] [cursor=pointer]
+              - generic [ref=e1185]:
+                - generic [ref=e1186]:
+                  - generic [ref=e1187]:
+                    - paragraph [ref=e1188]: Phân đoạn 05
+                    - paragraph [ref=e1189]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1190]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1191]
+                    - button "Tải câu lệnh" [ref=e1192]
+                - generic [ref=e1193]:
+                  - paragraph [ref=e1194]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1195]: "Segment 5 cho thấy Nam đổi chiến lược: không sửa cả căn nhà mà dọn một góc trước. Cậu quét bụi, dựng bàn, đặt xô dưới chỗ dột, chỉnh khăn vàng và tự giơ ngón cái. Sau đó cậu gõ sàn, nghe âm rỗng, cạy tấm ván và phát hiện hộp gỗ nhỏ vẫn đóng kín. Voiceover tiếng Anh nhấn vào bài học nhỏ: sửa một góc trước. Retention vừa thưởng cho tiến bộ của Nam vừa mở bí ẩn mới: trong hộp có gì. Chuyển cảnh object match cut khi hộp được nhấc lên. Âm thanh dùng nhịp broom, xô, bàn, tiếng gõ rỗng và cue bí ẩn nhỏ, không làm lấn voiceover."
+                  - paragraph [ref=e1196]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1197]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1198] [cursor=pointer]
+              - generic [ref=e1199]:
+                - generic [ref=e1200]:
+                  - generic [ref=e1201]:
+                    - paragraph [ref=e1202]: Phân đoạn 06
+                    - paragraph [ref=e1203]: "Trạng thái câu lệnh: Cần tạo lại"
+                  - generic [ref=e1204]:
+                    - button "Sao chép câu lệnh gốc" [ref=e1205]
+                    - button "Tải câu lệnh" [ref=e1206]
+                - generic [ref=e1207]:
+                  - paragraph [ref=e1208]: Bản giải thích tiếng Việt
+                  - paragraph [ref=e1209]: Segment 6 là payoff và cliffhanger mềm. Nam bật chiếc đèn cũ, ánh sáng vàng lan qua góc phòng đã được dọn, tạo cảm giác an toàn đầu tiên trong căn nhà tồi tàn. Cậu ngồi cạnh hộp gỗ chưa mở, mỉm cười mệt nhưng nhẹ nhõm. Cuối cùng hộp rung nhẹ và phát ra âm thanh nhỏ, khiến Nam quay sang kinh ngạc. Voiceover tiếng Anh khép lại nhu cầu trú ẩn nhưng mở bí ẩn cho tập sau. Retention vừa giải quyết cảm xúc vừa giữ open loop về chiếc hộp. Chuyển cảnh là final hold, không cắt đột ngột. Âm thanh gồm click đèn, hum nhẹ, mưa nhỏ, tiếng hộp gỗ tick và một mystery sting rất nhỏ.
+                  - paragraph [ref=e1210]: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                  - group [ref=e1211]:
+                    - generic "Xem câu lệnh gốc tiếng Anh để sao chép" [ref=e1212] [cursor=pointer]
+          - generic [ref=e151]:
+            - generic [ref=e152]:
+              - generic [ref=e154]:
+                - heading "Nội dung đăng video" [level=2] [ref=e157]
+                - generic [ref=e158]: Chưa có nội dung đăng
+              - button "Tạo nội dung đăng video" [ref=e1213]
+            - tablist "Nền tảng đăng video" [ref=e160]:
+              - tab "YouTube" [selected] [ref=e161]
+              - tab "TikTok" [ref=e162]
+              - tab "Facebook" [ref=e163]
+            - generic [ref=e164]:
+              - generic [ref=e165]:
+                - generic [ref=e166]:
+                  - paragraph [ref=e168]: Tiêu đề video
+                  - button "Copy Tiêu đề video" [disabled]
+                - textbox [ref=e169]
+              - generic [ref=e170]:
+                - generic [ref=e171]:
+                  - paragraph [ref=e173]: Mô tả
+                  - button "Copy Mô tả" [disabled]
+                - textbox [ref=e174]
+              - generic [ref=e175]:
+                - generic [ref=e176]:
+                  - paragraph [ref=e178]: Hashtag
+                  - button "Copy Hashtag" [disabled]
+                - textbox [ref=e179]
+              - generic [ref=e180]:
+                - generic [ref=e181]:
+                  - paragraph [ref=e183]: Prompt tạo ảnh thumbnail
+                  - button "Copy Prompt tạo ảnh thumbnail" [disabled]
+                - textbox [ref=e184]
+          - generic [ref=e185]:
+            - generic [ref=e193]:
+              - heading "Giọng và phụ đề" [level=2] [ref=e194]
+              - paragraph [ref=e195]: "Giọng hiện tại: Thoai 1 Vietnamese"
+            - generic [ref=e196]:
+              - generic [ref=e198]:
+                - generic [ref=e199]:
+                  - paragraph [ref=e200]: Hồ sơ giọng cho dự án này
+                  - paragraph [ref=e201]: Thoai 1 Vietnamese
+                  - paragraph [ref=e202]: "Giọng đọc sẽ tạo âm thanh theo ngôn ngữ video: Tiếng Việt."
+                - button "Đổi giọng" [ref=e1214]
+              - generic [ref=e1215]:
+                - generic [ref=e1216]:
+                  - paragraph [ref=e1217]: Phân đoạn 01
+                  - paragraph [ref=e1218]: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1219]: Most people would run from this house. The roof was broken, the door was angry, and the storm sounded alive. But Nam stepped closer anyway.
+                - generic [ref=e1220]:
+                  - button "Tạo giọng" [ref=e1221]
+                  - button "Nghe thử" [ref=e1222]
+                  - button "Tải âm thanh" [ref=e1223]
+              - generic [ref=e1224]:
+                - generic [ref=e1225]:
+                  - paragraph [ref=e1226]: Phân đoạn 02
+                  - paragraph [ref=e1227]: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1228]: Inside, the house did not feel empty. It creaked, dripped, and groaned like it was complaining. Nam said nothing, but his eyes said everything.
+                - generic [ref=e1229]:
+                  - button "Tạo giọng" [ref=e1230]
+                  - button "Nghe thử" [ref=e1231]
+                  - button "Tải âm thanh" [ref=e1232]
+              - generic [ref=e1233]:
+                - generic [ref=e1234]:
+                  - paragraph [ref=e1235]: Phân đoạn 03
+                  - paragraph [ref=e1236]: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1237]: "Nam had one brilliant plan: fix the leak first. The house had another plan. One wrong step, and the floor tried to swallow his shoe."
+                - generic [ref=e1238]:
+                  - button "Tạo giọng" [ref=e1239]
+                  - button "Nghe thử" [ref=e1240]
+                  - button "Tải âm thanh" [ref=e1241]
+              - generic [ref=e1242]:
+                - generic [ref=e1243]:
+                  - paragraph [ref=e1244]: Phân đoạn 04
+                  - paragraph [ref=e1245]: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1246]: For a moment, Nam almost gave up. Then something slid out of the wall, covered in dust. This broken place had once been loved.
+                - generic [ref=e1247]:
+                  - button "Tạo giọng" [ref=e1248]
+                  - button "Nghe thử" [ref=e1249]
+                  - button "Tải âm thanh" [ref=e1250]
+              - generic [ref=e1251]:
+                - generic [ref=e1252]:
+                  - paragraph [ref=e1253]: Phân đoạn 05
+                  - paragraph [ref=e1254]: "giọng: Cần tạo lại · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1255]: So Nam stopped trying to fix everything. He fixed one corner. And when the floor answered with a hollow knock, the house finally gave him a secret.
+                - generic [ref=e1256]:
+                  - button "Tạo giọng" [ref=e1257]
+                  - button "Nghe thử" [disabled]
+                  - button "Tải âm thanh" [disabled]
+              - generic [ref=e1258]:
+                - generic [ref=e1259]:
+                  - paragraph [ref=e1260]: Phân đoạn 06
+                  - paragraph [ref=e1261]: "giọng: Cần tạo lại · phụ đề: Cần tạo lại phụ đề"
+                  - paragraph [ref=e1262]: By night, it was still a terrible house. But one corner was warm, dry, and his. Then the little box made a sound.
+                - generic [ref=e1263]:
+                  - button "Tạo giọng" [ref=e1264]
+                  - button "Nghe thử" [disabled]
+                  - button "Tải âm thanh" [disabled]
+              - generic [ref=e209]:
+                - button "Tạo phụ đề .srt" [ref=e1265]
+                - button "Tải .srt" [disabled]
+        - complementary [ref=e210]:
+          - generic [ref=e211]:
+            - paragraph [ref=e212]: Thiết lập video mới
+            - generic [ref=e213]:
+              - generic [ref=e214]:
+                - generic [ref=e215]: Mục đích video
+                - combobox "Mục đích video Ảnh hưởng tới ngôn ngữ gợi ý, giọng, kiểu thoại, lời kể, phụ đề và phong cách kịch bản." [ref=e216]:
+                  - option "Thị trường Việt Nam" [selected]
+                  - option "Short quốc tế / tiếng Anh"
+                  - option "Giải thích / giáo dục"
+                  - option "Quảng cáo / bán hàng"
+                  - option "Bản theo ngôn ngữ khác"
+                  - option "Tùy chỉnh"
+                - generic [ref=e217]: Ảnh hưởng tới ngôn ngữ gợi ý, giọng, kiểu thoại, lời kể, phụ đề và phong cách kịch bản.
+              - generic [ref=e218]:
+                - generic [ref=e219]:
+                  - generic [ref=e220]: Thị trường Việt Nam
+                  - generic [ref=e221]: gợi ý Tiếng Việt
+                - paragraph [ref=e222]: Tối ưu cho audience Việt Nam, lời kể tự nhiên và dễ nghe.
+                - generic [ref=e223]:
+                  - generic [ref=e224]: "Giọng: hồ sơ hiện tại phù hợp với lựa chọn đang hiển thị."
+                  - generic [ref=e225]: "Thoại: thuyết minh · vừa phải"
+                  - generic [ref=e226]: "Phụ đề: Phụ đề tiếng Việt khớp giọng đọc."
+                  - generic [ref=e227]: "CTA: nhẹ nhàng"
+                  - generic [ref=e228]: "Sắc thái: Đời thường, rõ ý, tránh cảm giác dịch máy."
+              - generic [ref=e229]:
+                - generic [ref=e230]: Ngôn ngữ video
+                - combobox "Ngôn ngữ video Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video." [ref=e231]:
+                  - option "Tiếng Ả Rập"
+                  - option "Tiếng Đan Mạch"
+                  - option "Tiếng Đức"
+                  - option "Tiếng Hy Lạp"
+                  - option "Tiếng Anh"
+                  - option "Tiếng Tây Ban Nha"
+                  - option "Tiếng Phần Lan"
+                  - option "Tiếng Pháp"
+                  - option "Tiếng Do Thái"
+                  - option "Tiếng Hindi"
+                  - option "Tiếng Ý"
+                  - option "Tiếng Nhật"
+                  - option "Tiếng Hàn"
+                  - option "Tiếng Mã Lai"
+                  - option "Tiếng Hà Lan"
+                  - option "Tiếng Na Uy"
+                  - option "Tiếng Ba Lan"
+                  - option "Tiếng Bồ Đào Nha"
+                  - option "Tiếng Nga"
+                  - option "Tiếng Thụy Điển"
+                  - option "Tiếng Swahili"
+                  - option "Tiếng Thổ Nhĩ Kỳ"
+                  - option "Tiếng Việt" [selected]
+                  - option "Tiếng Trung"
+                - generic [ref=e232]: Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video.
+              - generic [ref=e233]:
+                - generic [ref=e234]:
+                  - generic [ref=e235]: Mode thoại
+                  - combobox "Mode thoại" [ref=e236]:
+                    - option "Thuyết minh" [selected]
+                    - option "Nhân vật nói"
+                    - option "Kết hợp"
+                - generic [ref=e237]:
+                  - generic [ref=e238]: Mật độ thoại
+                  - combobox "Mật độ thoại" [ref=e239]:
+                    - option "Ít thoại"
+                    - option "Vừa phải" [selected]
+                    - option "Dày thoại"
+                - generic [ref=e240]:
+                  - generic [ref=e241]: CTA
+                  - combobox "CTA" [ref=e242]:
+                    - option "Không"
+                    - option "Nhẹ nhàng" [selected]
+                    - option "Trực tiếp"
+                    - option "Khẩn cấp"
+              - generic [ref=e243]:
+                - generic [ref=e244]:
+                  - generic [ref=e245]: Cách chạy
+                  - generic [ref=e246]: Tự chạy sau khi tạo
+                - generic [ref=e247]:
+                  - button "Dựng nhanh" [pressed] [ref=e248]
+                  - button "Thủ công" [ref=e250]
+              - generic [ref=e252]:
+                - generic [ref=e253]:
+                  - generic [ref=e254]: Mức tự động
+                  - generic [ref=e255]: Tự chạy hết
+                - generic [ref=e256]:
+                  - button "Duyệt từng chặng Dừng ở kịch bản và câu lệnh" [ref=e257]:
+                    - generic [ref=e258]:
+                      - generic [ref=e259]: Duyệt từng chặng
+                      - generic [ref=e260]: Dừng ở kịch bản và câu lệnh
+                  - button "Tự chạy hết Tự duyệt bước giữa" [pressed] [ref=e262]:
+                    - generic [ref=e263]:
+                      - generic [ref=e264]: Tự chạy hết
+                      - generic [ref=e265]: Tự duyệt bước giữa
+              - generic [ref=e267]:
+                - generic [ref=e268]:
+                  - generic [ref=e269]: Đầu ra tự chạy
+                  - generic [ref=e270]: Giọng + phụ đề khớp thời gian
+                - generic [ref=e271]:
+                  - button "Tạo MP4 bằng Veo Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4" [ref=e272]:
+                    - generic [ref=e278]:
+                      - generic [ref=e279]: Tạo MP4 bằng Veo
+                      - generic [ref=e280]: Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4
+                  - button "Tạo giọng + phụ đề Câu lệnh, giọng và SRT theo mốc âm thanh" [pressed] [ref=e282]:
+                    - generic [ref=e287]:
+                      - generic [ref=e288]: Tạo giọng + phụ đề
+                      - generic [ref=e289]: Câu lệnh, giọng và SRT theo mốc âm thanh
+                  - button "Chỉ câu lệnh video Bỏ qua giọng/SRT để tải ảnh ngay" [ref=e291]:
+                    - generic [ref=e295]:
+                      - generic [ref=e296]: Chỉ câu lệnh video
+                      - generic [ref=e297]: Bỏ qua giọng/SRT để tải ảnh ngay
+              - generic [ref=e299]:
+                - generic [ref=e300]:
+                  - generic [ref=e301]: Số câu lệnh
+                  - spinbutton "Số câu lệnh" [ref=e302]: "6"
+                - generic [ref=e303]:
+                  - generic [ref=e304]: Giây/câu lệnh
+                  - spinbutton "Giây/câu lệnh" [ref=e305]: "10"
+                - generic [ref=e306]:
+                  - generic [ref=e307]: Cảnh nhỏ
+                  - spinbutton "Cảnh nhỏ" [ref=e308]: "3"
+              - generic [ref=e310]:
+                - generic [ref=e311]: Tỷ lệ
+                - combobox "Tỷ lệ" [ref=e312]:
+                  - option "9:16 ( dọc )" [selected]
+                  - option "16:9 ( ngang )"
+                  - option "1:1"
+              - generic [ref=e313]:
+                - generic [ref=e314]:
+                  - generic [ref=e315]: Phân đoạn câu lệnh
+                  - generic [ref=e316]: 6 câu lệnh
+                - generic [ref=e317]: 6 câu lệnh × 10s = 60s; 6 x 3 = 18 cảnh nhỏ. Mỗi cảnh nhỏ khoảng 3.3s.
+              - generic [ref=e322]:
+                - paragraph [ref=e323]: Codex CLI đã sẵn sàng để tạo kịch bản và prompt.
+                - paragraph [ref=e324]: "Cấu hình sẽ dùng: gpt-5.6-sol · low"
+                - paragraph [ref=e325]: "Mã yêu cầu: 57ce4966-058e-4a68-81f7-56267988d426"
+                - link "Đổi cấu hình trong Cài đặt" [ref=e326] [cursor=pointer]:
+                  - /url: /settings/ai-planning
+              - button "Tạo và dựng nhanh" [disabled]
+        - complementary [ref=e327]:
+          - generic [ref=e328]:
+            - generic [ref=e329]:
+              - paragraph [ref=e330]: Dự án
+              - paragraph [ref=e331]: Trợ lý Video AI
+            - button "Thu gọn bảng dự án" [ref=e332]
+          - generic [ref=e333]:
+            - generic [ref=e335]:
+              - paragraph [ref=e336]: Tải máy
+              - paragraph [ref=e337]: Cập nhật 16:38:05
+            - generic [ref=e341]:
+              - generic [ref=e502]:
+                - generic [ref=e503]:
+                  - generic [ref=e504]: CPU
+                  - generic [ref=e509]: 37%
+                - paragraph [ref=e512]: 16 core logic
+              - generic [ref=e513]:
+                - generic [ref=e514]:
+                  - generic [ref=e515]: RAM
+                  - generic [ref=e519]: 79%
+                - paragraph [ref=e522]: 12.2 / 15.4 GB
+              - generic [ref=e523]:
+                - generic [ref=e524]:
+                  - generic [ref=e525]: GPU
+                  - generic [ref=e530]: 0%
+                - paragraph [ref=e532]: 0.0 / 4.0 GB
+              - generic [ref=e533]:
+                - generic [ref=e534]:
+                  - generic [ref=e535]: Nhiệt
+                  - generic [ref=e539]: 51°C
+                - paragraph [ref=e542]: NVIDIA GPU temperature
+          - generic [ref=e359]:
+            - paragraph [ref=e361]: Dự án gần đây
+            - generic [ref=e543]:
+              - generic [ref=e544]: Hàng đợi giọng đọc toàn ứng dụng
+              - generic [ref=e550]: 0/1 đang tạo · 0 chờ
+            - generic [ref=e362]:
+              - generic [ref=e551]:
+                - generic [ref=e552]:
+                  - generic [ref=e553]: I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga
+                  - generic [ref=e554]: 1 tập
+                - generic [ref=e556]:
+                  - button "Tập 02 · Chapter 2 - Tia Trở Về Tuổi Thơ 5 mục · Đã có câu lệnh" [ref=e557]:
+                    - generic [ref=e558]: Tập 02 · Chapter 2 - Tia Trở Về Tuổi Thơ
+                    - generic [ref=e559]: 5 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e561]
+                - button "Tạo tập mới" [ref=e566]
+              - generic [ref=e567]:
+                - generic [ref=e568]:
+                  - generic [ref=e569]: Người Que
+                  - generic [ref=e570]: 1 tập
+                - generic [ref=e572]:
+                  - button "Tập 01 · Tập 01 6 mục · Đã có câu lệnh" [active] [ref=e573]:
+                    - generic [ref=e574]: Tập 01 · Tập 01
+                    - generic [ref=e575]: 6 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e577]
+                - button "Tạo tập mới" [ref=e582]
+              - generic [ref=e583]:
+                - generic [ref=e584]:
+                  - generic [ref=e585]: Codex E2E Story Video 20260713-101559
+                  - generic [ref=e586]: 1 tập
+                - generic [ref=e588]:
+                  - button "Tập 01 · The Red Ticket Under Platform 9 15 mục · Đã có câu lệnh" [ref=e589]:
+                    - generic [ref=e590]: Tập 01 · The Red Ticket Under Platform 9
+                    - generic [ref=e591]: 15 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e593]
+                - button "Tạo tập mới" [ref=e598]
+              - generic [ref=e599]:
+                - paragraph [ref=e600]: Dự án lẻ
+                - generic [ref=e602]:
+                  - 'button "FTU Smart Campus: 4 bước tạo sự kiện và gửi Admin phê duyệt 6 mục · Đã có câu lệnh" [ref=e603]':
+                    - generic [ref=e604]: "FTU Smart Campus: 4 bước tạo sự kiện và gửi Admin phê duyệt"
+                    - generic [ref=e605]: 6 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e607]
+                - generic [ref=e613]:
+                  - button "Thang máy dừng ở tầng 13 Lỗi · Chờ giọng Chạy tự động đã dừng" [ref=e614]:
+                    - generic [ref=e615]: Thang máy dừng ở tầng 13
+                    - generic [ref=e616]: Lỗi · Chờ giọng
+                    - generic [ref=e619]: Chạy tự động đã dừng
+                  - button "Mở menu dự án" [ref=e621]
+                - generic [ref=e627]:
+                  - button "Cú ngã không phải nơi ở 3 mục · Đã có câu lệnh" [ref=e628]:
+                    - generic [ref=e629]: Cú ngã không phải nơi ở
+                    - generic [ref=e630]: 3 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e632]
+                - generic [ref=e638]:
+                  - button "Cú ngã không phải nơi ở 3 mục · Đã có câu lệnh" [ref=e639]:
+                    - generic [ref=e640]: Cú ngã không phải nơi ở
+                    - generic [ref=e641]: 3 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e643]
+                - generic [ref=e649]:
+                  - button "Một chữ “KHÔNG” đủ để lộ sự tôn trọng 0 mục · Bản nháp" [ref=e650]:
+                    - generic [ref=e651]: Một chữ “KHÔNG” đủ để lộ sự tôn trọng
+                    - generic [ref=e652]: 0 mục · Bản nháp
+                  - button "Mở menu dự án" [ref=e654]
+                - generic [ref=e660]:
+                  - button "HCE Group - 2 minute company intro video 12 mục · Đã có câu lệnh" [ref=e661]:
+                    - generic [ref=e662]: HCE Group - 2 minute company intro video
+                    - generic [ref=e663]: 12 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e665]
+                - generic [ref=e671]:
+                  - button "Đăng ký giữ chỗ sự kiện FTU trên 1Hub trong 5 bước 6 mục · Đã có câu lệnh" [ref=e672]:
+                    - generic [ref=e673]: Đăng ký giữ chỗ sự kiện FTU trên 1Hub trong 5 bước
+                    - generic [ref=e674]: 6 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e676]
+                - generic [ref=e682]:
+                  - button "1Hub FTU - Hướng Dẫn Đăng Ký Sự Kiện 9 mục · Đã có kịch bản" [ref=e683]:
+                    - generic [ref=e684]: 1Hub FTU - Hướng Dẫn Đăng Ký Sự Kiện
+                    - generic [ref=e685]: 9 mục · Đã có kịch bản
+                  - button "Mở menu dự án" [ref=e687]
+                - generic [ref=e693]:
+                  - button "Người Que Thám Hiểm Thế Giới Bí Ẩn 6 mục · Đã có câu lệnh" [ref=e694]:
+                    - generic [ref=e695]: Người Que Thám Hiểm Thế Giới Bí Ẩn
+                    - generic [ref=e696]: 6 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e698]
+                - generic [ref=e704]:
+                  - button "HCE Group - Video giới thiệu công ty 2 phút 12 mục · Đã có câu lệnh" [ref=e705]:
+                    - generic [ref=e706]: HCE Group - Video giới thiệu công ty 2 phút
+                    - generic [ref=e707]: 12 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e709]
+                - generic [ref=e715]:
+                  - button "Người Que Nhặt Được Chiếc Điều Khiển Thời Gian 3 mục · Đã có câu lệnh" [ref=e716]:
+                    - generic [ref=e717]: Người Que Nhặt Được Chiếc Điều Khiển Thời Gian
+                    - generic [ref=e718]: 3 mục · Đã có câu lệnh
+                  - button "Mở menu dự án" [ref=e720]
+          - generic [ref=e364]:
+            - generic [ref=e372]:
+              - heading "Tải nguyên liệu" [level=2] [ref=e373]
+              - paragraph [ref=e374]: Checklist trước khi xuất ZIP
+            - generic [ref=e375]:
+              - generic [ref=e1269]:
+                - paragraph [ref=e1270]: Chưa đủ điều kiện tạo ZIP.
+                - list [ref=e1271]:
+                  - listitem [ref=e1272]: "Thiếu prompt video đạt chất lượng: Shot 01, Shot 02, Shot 03, Shot 04, Shot 05, Shot 06"
+                  - listitem [ref=e1273]: "Thiếu giọng đọc: Shot 05, Shot 06"
+                  - listitem [ref=e1274]: Chưa có file phụ đề .srt hoàn tất.
+              - button "Tạo ZIP nguyên liệu" [disabled]
+              - button "Tải tất cả" [disabled]
+          - generic [ref=e377]:
+            - generic [ref=e386]:
+              - heading "Veo3 bằng Chrome" [level=2] [ref=e387]
+              - paragraph [ref=e388]: Đăng nhập một lần, dùng lại hồ sơ Chrome riêng
+            - generic [ref=e389]:
+              - generic [ref=e395]:
+                - paragraph [ref=e396]: "Đang dùng: Stalenguyen"
+                - paragraph [ref=e397]: veo3_flow · chưa đọc được gợi ý tài khoản · Tài khoản đã được xác nhận.
+                - paragraph [ref=e398]: "Xác minh gần nhất: 09:18 12/7/26"
+              - generic [ref=e399]:
+                - button "Kiểm tra phiên" [ref=e728]
+                - button "Đổi tài khoản" [ref=e729]
+              - generic [ref=e731]:
+                - generic [ref=e732]:
+                  - generic [ref=e733]: Nhãn kết nối
+                  - textbox "Nhãn kết nối" [disabled] [ref=e734]:
+                    - /placeholder: Veo3 - Gmail chính
+                    - text: Stalenguyen
+                - generic [ref=e735]:
+                  - button "Sửa nhãn" [ref=e736]
+                  - button "Đã xác nhận" [disabled]
+              - generic [ref=e407]:
+                - paragraph [ref=e408]: Dự án Flow đang dùng
+                - paragraph [ref=e409]: Chưa có liên kết dự án Flow.
+                - paragraph [ref=e410]: "Mô hình Flow: chưa đọc được"
+              - generic [ref=e411]:
+                - generic [ref=e412]: Tạo clip tự động
+                - paragraph [ref=e416]: Gửi từng câu lệnh sang Veo, tải clip về đúng phân đoạn rồi nhập vào dự án.
+                - generic [ref=e417]:
+                  - generic [ref=e418]:
+                    - checkbox "Tạo lại clip đã có Tắt mục này để bỏ qua phân đoạn đã có clip Veo và tránh tốn hạn mức không cần thiết." [ref=e419]
+                    - generic [ref=e420]:
+                      - generic [ref=e421]: Tạo lại clip đã có
+                      - generic [ref=e422]: Tắt mục này để bỏ qua phân đoạn đã có clip Veo và tránh tốn hạn mức không cần thiết.
+                  - generic [ref=e423]:
+                    - checkbox "Tự dựng MP4 sau khi đủ clip Bật để hệ thống tự chuyển sang dựng MP4 khi mọi phân đoạn đã có clip, giọng đọc và phụ đề hợp lệ." [checked] [ref=e424]
+                    - generic [ref=e425]:
+                      - generic [ref=e426]: Tự dựng MP4 sau khi đủ clip
+                      - generic [ref=e427]: Bật để hệ thống tự chuyển sang dựng MP4 khi mọi phân đoạn đã có clip, giọng đọc và phụ đề hợp lệ.
+                  - generic [ref=e428]:
+                    - checkbox "Cho phép Codex sửa lỗi kỹ thuật Chỉ áp dụng cho lỗi chọn nút/tải xuống/liên kết dữ liệu trong app. Đăng nhập, hạn mức, thanh toán và chính sách vẫn dừng để bạn xử lý." [ref=e429]
+                    - generic [ref=e430]:
+                      - generic [ref=e431]: Cho phép Codex sửa lỗi kỹ thuật
+                      - generic [ref=e432]: Chỉ áp dụng cho lỗi chọn nút/tải xuống/liên kết dữ liệu trong app. Đăng nhập, hạn mức, thanh toán và chính sách vẫn dừng để bạn xử lý.
+                  - generic [ref=e433]:
+                    - generic [ref=e434]: Chính sách hạn mức
+                    - combobox "Chính sách hạn mức" [ref=e435]:
+                      - option "Phê duyệt, không hỏi lại" [selected]
+                      - option "Phê duyệt thủ công từng lần"
+                  - generic [ref=e436]:
+                    - generic [ref=e437]: Giới hạn hạn mức mỗi tác vụ
+                    - textbox "Giới hạn hạn mức mỗi tác vụ" [ref=e438]:
+                      - /placeholder: Để trống nếu không giới hạn
+                - paragraph [ref=e439]: Mặc định Flow sẽ dùng “Phê duyệt, không hỏi lại” trong tác vụ do bạn khởi chạy, nhưng vẫn dừng nếu vượt giới hạn hạn mức hoặc cần xác minh tài khoản.
+                - generic [ref=e1275]: Thiếu câu lệnh video đã hoàn tất cho 6 phân đoạn. Hãy tạo câu lệnh video trước khi chạy Veo.
+                - button "Tạo clip bằng Veo" [disabled]
+              - generic [ref=e440]:
+                - generic [ref=e1278]:
+                  - generic [ref=e1279]:
+                    - paragraph [ref=e1280]: Phân đoạn 01
+                    - generic [ref=e1281]: thiếu câu lệnh
+                  - paragraph [ref=e1282]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                - generic [ref=e1285]:
+                  - generic [ref=e1286]:
+                    - paragraph [ref=e1287]: Phân đoạn 02
+                    - generic [ref=e1288]: thiếu câu lệnh
+                  - paragraph [ref=e1289]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                - generic [ref=e1292]:
+                  - generic [ref=e1293]:
+                    - paragraph [ref=e1294]: Phân đoạn 03
+                    - generic [ref=e1295]: thiếu câu lệnh
+                  - paragraph [ref=e1296]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                - generic [ref=e1299]:
+                  - generic [ref=e1300]:
+                    - paragraph [ref=e1301]: Phân đoạn 04
+                    - generic [ref=e1302]: thiếu câu lệnh
+                  - paragraph [ref=e1303]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                - generic [ref=e1306]:
+                  - generic [ref=e1307]:
+                    - paragraph [ref=e1308]: Phân đoạn 05
+                    - generic [ref=e1309]: thiếu câu lệnh
+                  - paragraph [ref=e1310]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                - generic [ref=e1313]:
+                  - generic [ref=e1314]:
+                    - paragraph [ref=e1315]: Phân đoạn 06
+                    - generic [ref=e1316]: thiếu câu lệnh
+                  - paragraph [ref=e1317]: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+          - generic [ref=e442]:
+            - generic [ref=e448]:
+              - heading "Dựng nhanh MP4" [level=2] [ref=e449]
+              - paragraph [ref=e450]: Ghép clip, giọng đọc và phụ đề theo thời lượng thật
+            - generic [ref=e451]:
+              - generic [ref=e1318]:
+                - generic [ref=e1319]:
+                  - generic [ref=e1320]:
+                    - paragraph [ref=e1321]: Phân đoạn 01
+                    - generic [ref=e1322]: thiếu clip video
+                  - generic [ref=e1323]:
+                    - generic [ref=e1324]:
+                      - paragraph [ref=e1325]: Thời lượng
+                      - paragraph [ref=e1326]: 8.40s
+                    - generic [ref=e1327]:
+                      - paragraph [ref=e1328]: Clip video
+                      - paragraph [ref=e1329]: chưa rõ
+                  - generic [ref=e1330]: Cần clip video
+                  - generic [ref=e1332]:
+                    - generic [ref=e1333]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1334] [cursor=pointer]:
+                      - generic [ref=e1338]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1339]
+                    - paragraph [ref=e1340]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=e1341]:
+                  - generic [ref=e1342]:
+                    - paragraph [ref=e1343]: Phân đoạn 02
+                    - generic [ref=e1344]: thiếu clip video
+                  - generic [ref=e1345]:
+                    - generic [ref=e1346]:
+                      - paragraph [ref=e1347]: Thời lượng
+                      - paragraph [ref=e1348]: 8.08s
+                    - generic [ref=e1349]:
+                      - paragraph [ref=e1350]: Clip video
+                      - paragraph [ref=e1351]: chưa rõ
+                  - generic [ref=e1352]: Cần clip video
+                  - generic [ref=e1354]:
+                    - generic [ref=e1355]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1356] [cursor=pointer]:
+                      - generic [ref=e1360]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1361]
+                    - paragraph [ref=e1362]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=e1363]:
+                  - generic [ref=e1364]:
+                    - paragraph [ref=e1365]: Phân đoạn 03
+                    - generic [ref=e1366]: thiếu clip video
+                  - generic [ref=e1367]:
+                    - generic [ref=e1368]:
+                      - paragraph [ref=e1369]: Thời lượng
+                      - paragraph [ref=e1370]: 7.04s
+                    - generic [ref=e1371]:
+                      - paragraph [ref=e1372]: Clip video
+                      - paragraph [ref=e1373]: chưa rõ
+                  - generic [ref=e1374]: Cần clip video
+                  - generic [ref=e1376]:
+                    - generic [ref=e1377]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1378] [cursor=pointer]:
+                      - generic [ref=e1382]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1383]
+                    - paragraph [ref=e1384]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=e1385]:
+                  - generic [ref=e1386]:
+                    - paragraph [ref=e1387]: Phân đoạn 04
+                    - generic [ref=e1388]: thiếu clip video
+                  - generic [ref=e1389]:
+                    - generic [ref=e1390]:
+                      - paragraph [ref=e1391]: Thời lượng
+                      - paragraph [ref=e1392]: 8.48s
+                    - generic [ref=e1393]:
+                      - paragraph [ref=e1394]: Clip video
+                      - paragraph [ref=e1395]: chưa rõ
+                  - generic [ref=e1396]: Cần clip video
+                  - generic [ref=e1398]:
+                    - generic [ref=e1399]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1400] [cursor=pointer]:
+                      - generic [ref=e1404]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1405]
+                    - paragraph [ref=e1406]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=e1407]:
+                  - generic [ref=e1408]:
+                    - paragraph [ref=e1409]: Phân đoạn 05
+                    - generic [ref=e1410]: thiếu clip video
+                  - generic [ref=e1411]:
+                    - generic [ref=e1412]:
+                      - paragraph [ref=e1413]: Thời lượng
+                      - paragraph [ref=e1414]: 8.56s
+                    - generic [ref=e1415]:
+                      - paragraph [ref=e1416]: Clip video
+                      - paragraph [ref=e1417]: chưa rõ
+                  - generic [ref=e1418]:
+                    - generic [ref=e1419]: Cần clip video
+                    - generic [ref=e1420]: Cần giọng đọc
+                  - generic [ref=e1421]:
+                    - generic [ref=e1422]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1423] [cursor=pointer]:
+                      - generic [ref=e1427]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1428]
+                    - paragraph [ref=e1429]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=e1430]:
+                  - generic [ref=e1431]:
+                    - paragraph [ref=e1432]: Phân đoạn 06
+                    - generic [ref=e1433]: thiếu clip video
+                  - generic [ref=e1434]:
+                    - generic [ref=e1435]:
+                      - paragraph [ref=e1436]: Thời lượng
+                      - paragraph [ref=e1437]: 8.00s
+                    - generic [ref=e1438]:
+                      - paragraph [ref=e1439]: Clip video
+                      - paragraph [ref=e1440]: chưa rõ
+                  - generic [ref=e1441]:
+                    - generic [ref=e1442]: Cần clip video
+                    - generic [ref=e1443]: Cần giọng đọc
+                  - generic [ref=e1444]:
+                    - generic [ref=e1445]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=e1446] [cursor=pointer]:
+                      - generic [ref=e1450]: Chọn clip video
+                      - button "Chọn clip video" [ref=e1451]
+                    - paragraph [ref=e1452]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+              - generic [ref=e1453]:
+                - generic [ref=e1454]: Thiết lập dựng
+                - generic [ref=e1458]:
+                  - generic [ref=e1459]:
+                    - generic [ref=e1460]: Độ phân giải
+                    - combobox "Độ phân giải Có thể đổi trước khi bấm Dựng MP4." [ref=e1461]:
+                      - option "Theo tỷ lệ dự án" [selected]
+                      - option "720p"
+                      - option "1080p"
+                    - generic [ref=e1462]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=e1463]:
+                    - generic [ref=e1464]: Số khung/giây (FPS)
+                    - combobox "Số khung/giây (FPS) Có thể đổi trước khi bấm Dựng MP4." [ref=e1465]:
+                      - option "24"
+                      - option "30" [selected]
+                      - option "60"
+                    - generic [ref=e1466]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=e1467]:
+                    - generic [ref=e1468]: Khung hình
+                    - combobox "Khung hình Có thể đổi trước khi bấm Dựng MP4." [ref=e1469]:
+                      - option "Cắt vừa khung" [selected]
+                      - option "Giữ toàn ảnh"
+                    - generic [ref=e1470]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=e1471]:
+                    - generic [ref=e1472]: Phụ đề
+                    - combobox "Phụ đề Có thể đổi trước khi bấm Dựng MP4." [ref=e1473]:
+                      - option "Nhúng phụ đề vào video" [selected]
+                      - option "SRT rời"
+                      - option "Không phụ đề"
+                    - generic [ref=e1474]: Có thể đổi trước khi bấm Dựng MP4.
+                - paragraph [ref=e1475]: Nhúng phụ đề dùng file .srt đã chia mốc theo giọng đọc và dựng chữ karaoke màu vàng theo từng từ. Nếu thời gian lệch, tạo lại phụ đề sau khi giọng đọc đã hoàn tất.
+              - generic [ref=e1476]:
+                - generic [ref=e1477]: Hiệu ứng giữ chân
+                - generic [ref=e1480]:
+                  - generic [ref=e1481]:
+                    - generic [ref=e1482]: Chuyển cảnh/hiệu ứng âm thanh
+                    - checkbox "Chuyển cảnh/hiệu ứng âm thanh" [checked] [ref=e1483]
+                  - generic [ref=e1484]:
+                    - generic [ref=e1485]: Trộn hiệu ứng/nhạc nền thật
+                    - checkbox "Trộn hiệu ứng/nhạc nền thật" [checked] [ref=e1486]
+                  - generic [ref=e1487]:
+                    - generic [ref=e1488]: Đánh giá AI
+                    - checkbox "Đánh giá AI" [checked] [ref=e1489]
+                - generic [ref=e1490]:
+                  - generic [ref=e1491]:
+                    - generic [ref=e1492]: Số vòng tự sửa
+                    - combobox "Số vòng tự sửa Có thể đổi trước khi bấm Dựng MP4." [ref=e1493]:
+                      - option "0"
+                      - option "1" [selected]
+                      - option "2"
+                    - generic [ref=e1494]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=e1495] [cursor=pointer]:
+                    - generic [ref=e1499]: Thêm hiệu ứng/nhạc nền
+                    - button "Thêm hiệu ứng/nhạc nền" [ref=e1500]
+                - paragraph [ref=e1501]: Chưa có hiệu ứng/nhạc nền. Gợi ý như tiếng kính vỡ sẽ được ghi dự phòng nếu chưa tải tài nguyên thật.
+              - generic [ref=e1506]:
+                - paragraph [ref=e1507]: Chưa đủ điều kiện dựng MP4.
+                - list [ref=e1508]:
+                  - listitem [ref=e1509]: Thiếu video clip cho một số shot.
+                  - listitem [ref=e1510]: Thiếu giọng đọc hoàn tất cho một số shot có narration.
+                  - listitem [ref=e1511]: Chưa có phụ đề hoàn tất để burn vào video.
+                - list [ref=e1512]:
+                  - listitem [ref=e1513]: Enhanced audio bật nhưng project chưa có asset SFX/BGM thật; report sẽ ghi fallback rõ ràng cho các cue thiếu asset.
+              - generic [ref=e1514]:
+                - button "Dựng MP4" [disabled]
+                - button "Tải MP4" [disabled]
+                - button "Tải đánh giá AI" [disabled]
+                - button "Tải bảng dòng thời gian" [disabled]
+          - generic [ref=e452]:
+            - generic [ref=e465]:
+              - heading "Gỡ lỗi cục bộ" [level=2] [ref=e466]
+              - paragraph [ref=e467]: Dùng khi cần gửi lỗi để sửa
+            - group [ref=e468]:
+              - generic "Mở thông tin kỹ thuật" [ref=e469] [cursor=pointer]
+          - generic [ref=e470]:
+            - generic [ref=e476]:
+              - heading "Sổ tay series" [level=2] [ref=e477]
+              - paragraph [ref=e478]: Tuỳ chọn cho video dài tập
+            - generic [ref=e479]:
+              - combobox [ref=e480]:
+                - option "Tạo series mới" [selected]
+                - option "Test Coffeemanga Matriarch Chapter 1 · Series truyện ảnh"
+                - option "I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga · Series truyện ảnh"
+                - option "I’ll Be The Matriarch In This Life · Series truyện + video"
+                - option "Coffee Mâng · Series truyện + video"
+                - option "I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga · Series truyện ảnh"
+                - option "I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga · Series truyện ảnh"
+                - option "Codex E2E Story Video 20260713-101559 · Series truyện + video"
+                - option "Codex E2E Story Video 20260713-100102 · Series truyện + video"
+                - option "Người Que · Series video"
+              - textbox "Tên series" [ref=e481]
+              - combobox [ref=e483]:
+                - option "Series truyện ảnh"
+                - option "Series video" [selected]
+                - option "Series truyện + video"
+              - textbox "Nhân vật cố định" [ref=e484]
+              - textbox "Bối cảnh/world" [ref=e485]
+              - textbox "Style hình ảnh" [ref=e486]
+              - textbox "Quy tắc nhất quán" [ref=e487]
+              - textbox "Điều cần tránh" [ref=e488]
+              - textbox "Tóm tắt tập trước" [ref=e489]
+              - generic [ref=e490]:
+                - button "Lưu series" [disabled]
+                - button "Series mới" [ref=e491]
+                - button "Cập nhật tóm tắt" [ref=e1515]
+              - generic [ref=e493]:
+                - generic [ref=e494]:
+                  - paragraph [ref=e495]: Tạo tập mới
+                  - paragraph [ref=e496]: Điền thông tin tập trong popup trước khi tạo project.
+                - button "Tạo tập mới" [ref=e497]
+  - region "Notifications (F8)":
+    - list

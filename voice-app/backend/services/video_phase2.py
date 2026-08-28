@@ -38,6 +38,8 @@ from . import (
     video_purpose as video_purpose_service,
     video_rendering,
     video_series_memory,
+    video_series_characters,
+    video_speech,
     video_state,
     video_storage,
 )
@@ -45,10 +47,12 @@ from .video_planning import VideoPlanningValidationError, _load_json_object
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
+VIDEO_PROMPT_BATCH_SIZE = 5
+VIDEO_PROMPT_BATCH_MAX_ATTEMPTS = 2
 PHASE2_DEFAULT_CODEX_TIMEOUT_SECONDS = 600
 PHASE2_MAX_CODEX_TIMEOUT_SECONDS = 600
-VIDEO_PROMPT_SEGMENT_SECONDS = 10
-DEFAULT_MICRO_SCENES_PER_PROMPT = 3
+VIDEO_PROMPT_SEGMENT_SECONDS = 8
+DEFAULT_MICRO_SCENES_PER_PROMPT = 4
 NARRATION_MIN_WORDS_PER_SECOND = 2.1
 NARRATION_TARGET_WORDS_PER_SECOND = 2.7
 NARRATION_MAX_WORDS_PER_SECOND = 3.4
@@ -237,6 +241,37 @@ class ProjectSoundDesignPlan(SoundDesignPlan):
         description="Vietnamese review text for the UI only. Do not copy this into generation prompts.",
     )
 
+class CharacterReferencePlan(BaseModel):
+    """Structured character reference used by strict provider schemas."""
+    name: str = Field(default="", max_length=160)
+    character_profile_id: str | None = Field(default=None, max_length=160)
+    guest_id: str | None = Field(default=None, max_length=160)
+    role: str = Field(default="", max_length=400)
+    appearance: str = Field(default="", max_length=4000)
+    position: str = Field(default="", max_length=1000)
+    action: str = Field(default="", max_length=4000)
+    expression: str = Field(default="", max_length=2000)
+    interaction: str = Field(default="", max_length=4000)
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert nested Pydantic models to values accepted by JSON/JSON columns."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+class PromptQualityCheckPlan(BaseModel):
+    """Fixed contract for prompt QA; values remain JSON compatible."""
+    passed: bool = False
+    missing_fields: list[str] = Field(default_factory=list, max_length=80)
+    warnings: list[str] = Field(default_factory=list, max_length=80)
+    score: float | None = Field(default=None, ge=0, le=1)
+    notes: str = Field(default="", max_length=6000)
+
 
 SEGMENT_CAMERA_VARIATION_PROFILES = (
     {
@@ -291,6 +326,7 @@ class StoryScenePlan(BaseModel):
     setting_and_lighting: str = Field(..., min_length=1, max_length=4000)
     detailed_mood: str = Field(..., min_length=1, max_length=4000)
     target_duration_seconds: int | None = Field(default=None, ge=1, le=3600)
+    related_characters: list[CharacterReferencePlan] = Field(default_factory=list, max_length=30)
 
 class StoryDevelopmentPlan(BaseModel):
     video_purpose: str | None = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
@@ -306,6 +342,9 @@ class StoryDevelopmentPlan(BaseModel):
     detailed_script: str = Field(default="", max_length=80000)
     retention_plan: RetentionDirectionPlan = Field(default_factory=RetentionDirectionPlan)
     sound_design_plan: ProjectSoundDesignPlan = Field(default_factory=ProjectSoundDesignPlan)
+    episode_cast: list[models.EpisodeCastMember] = Field(default_factory=list, max_length=50)
+    episode_only_guests: list[models.EpisodeOnlyGuest] = Field(default_factory=list, max_length=50)
+    new_character_proposals: list[models.NewCharacterProposal] = Field(default_factory=list, max_length=50)
     scenes: list[StoryScenePlan] = Field(default_factory=list, min_length=1, max_length=120)
 
 class MicroScenePlan(BaseModel):
@@ -316,6 +355,7 @@ class MicroScenePlan(BaseModel):
     visual_action: str = Field(default="", max_length=4000)
     camera_note: str = Field(default="", max_length=4000)
     continuity_note: str = Field(default="", max_length=4000)
+    visible_characters: list[CharacterReferencePlan] = Field(default_factory=list, max_length=20)
 
 class ShotPlan(BaseModel):
     scene_order: int = Field(..., ge=1)
@@ -346,6 +386,8 @@ class ShotPlan(BaseModel):
     open_loop: str = Field(default="", max_length=4000)
     visual_surprise: str = Field(default="", max_length=4000)
     cut_reason: str = Field(default="", max_length=4000)
+    visible_characters: list[CharacterReferencePlan] = Field(default_factory=list, max_length=30)
+    speech_cues: list[models.VideoShotSpeechCue] = Field(default_factory=list, max_length=20)
     transition_pack: TransitionPackPlan = Field(default_factory=TransitionPackPlan)
     sound_design: SoundDesignPlan = Field(default_factory=SoundDesignPlan)
     micro_scenes: list[MicroScenePlan] = Field(default_factory=list, max_length=20)
@@ -383,7 +425,7 @@ class VideoPromptPlan(BaseModel):
     retention_notes: str = Field(..., min_length=1, max_length=6000)
     transition_notes: str = Field(..., min_length=1, max_length=6000)
     sound_design_notes: str = Field(..., min_length=1, max_length=6000)
-    quality_check: dict = Field(default_factory=dict)
+    quality_check: PromptQualityCheckPlan = Field(default_factory=PromptQualityCheckPlan)
 
 class VideoPromptPackPlan(BaseModel):
     video_purpose: str | None = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
@@ -513,10 +555,17 @@ def _normalize_story_scene_payload(scene) -> dict:
     ):
         if field in normalized:
             normalized[field] = _planning_value_to_text(normalized[field])
+    related = _first_present(normalized, "related_characters", "characters", "scene_characters")
+    if isinstance(related, list):
+        normalized["related_characters"] = [item if isinstance(item, dict) else {"name": _planning_value_to_text(item)} for item in related]
     return normalized
 
 def _story_scene_visual_description(scene: StoryScenePlan) -> str:
     lines = [scene.vietnamese_description.strip()]
+    if scene.related_characters:
+        lines.append(
+            f"Related characters: {json.dumps(_json_safe(scene.related_characters), ensure_ascii=False)}",
+        )
     details = [
         ("Character appearance", scene.character_appearance),
         ("Wardrobe and sandals", scene.wardrobe_and_sandals),
@@ -561,6 +610,16 @@ def _normalize_story_development_payload(payload: dict) -> dict:
         has_narration=True,
         fallback=_planning_value_to_text(_first_present(normalized, "story_strategy_vi", "story_strategy")),
     )
+    for target, aliases in {
+        "episode_cast": ("episode_cast", "cast", "selected_characters"),
+        "episode_only_guests": ("episode_only_guests", "episode_guests", "guest_characters"),
+        "new_character_proposals": ("new_character_proposals", "character_proposals", "proposed_characters"),
+    }.items():
+        value = _first_present(normalized, *aliases)
+        if isinstance(value, list):
+            normalized[target] = [item if isinstance(item, dict) else {"name": _planning_value_to_text(item)} for item in value]
+        else:
+            normalized[target] = []
     scenes = normalized.get("scenes")
     if isinstance(scenes, list):
         normalized["scenes"] = [_normalize_story_scene_payload(scene) for scene in scenes]
@@ -1134,6 +1193,7 @@ def _normalize_micro_scene_payload(item, *, index: int) -> dict:
             "visual_action": text,
             "camera_note": "",
             "continuity_note": "",
+            "visible_characters": [],
         }
     description = _planning_value_to_text(
         _first_present(item, "description_vi", "vietnamese_description", "segment_description_vi", "description", "summary", "beat")
@@ -1141,6 +1201,7 @@ def _normalize_micro_scene_payload(item, *, index: int) -> dict:
     visual_action = _planning_value_to_text(
         _first_present(item, "visual_action", "action", "primary_action", "subject_action", "subject_motion", "visual")
     ) or description
+    visible = _first_present(item, "visible_characters", "characters", "foreground_characters")
     return {
         "order": int(_number_or_default(_first_present(item, "order", "index", "scene_order", "beat_order", "micro_scene_order"), index) or index),
         "start_seconds": float(_number_or_default(_first_present(item, "start_seconds", "start", "from_seconds", "from"), 0) or 0),
@@ -1149,6 +1210,10 @@ def _normalize_micro_scene_payload(item, *, index: int) -> dict:
         "visual_action": visual_action,
         "camera_note": _planning_value_to_text(_first_present(item, "camera_note", "camera", "camera_motion", "camera_movement")),
         "continuity_note": _planning_value_to_text(_first_present(item, "continuity_note", "continuity", "continuity_notes")),
+        "visible_characters": [
+            value if isinstance(value, dict) else {"name": _planning_value_to_text(value)}
+            for value in (visible if isinstance(visible, list) else [])
+        ],
     }
 
 def _parse_timeline_micro_scenes(text: str) -> list[dict]:
@@ -1175,6 +1240,7 @@ def _parse_timeline_micro_scenes(text: str) -> list[dict]:
                 "visual_action": description,
                 "camera_note": "",
                 "continuity_note": "",
+                "visible_characters": [],
             }
         )
     return scenes
@@ -1194,7 +1260,7 @@ def _normalize_micro_scenes_from_shot(shot: dict) -> list[dict]:
     )
     return _parse_timeline_micro_scenes(text)
 
-def _normalize_shot_payload(shot, *, index: int) -> dict:
+def _normalize_shot_payload(shot, *, index: int, dialogue_mode: str | None = None) -> dict:
     if not isinstance(shot, dict):
         return {
             "scene_order": 1,
@@ -1217,6 +1283,42 @@ def _normalize_shot_payload(shot, *, index: int) -> dict:
     composition = _planning_value_to_text(_first_present(shot, "composition", "visual_composition"))
     if not composition and visual_prompt:
         composition = visual_prompt
+    visible_characters = _first_present(shot, "visible_characters", "foreground_characters", "characters_in_frame")
+    normalized_visible_characters = [
+        item if isinstance(item, dict) else {"name": _planning_value_to_text(item)}
+        for item in (visible_characters if isinstance(visible_characters, list) else [])
+    ]
+    narration = _planning_value_to_text(
+        _first_present(shot, *video_purpose_service.NARRATION_TEXT_FIELD_ALIASES)
+    )
+    vietnamese_description = _planning_value_to_text(
+        _first_present(
+            shot,
+            "vietnamese_description",
+            "description_vi",
+            "description_vietnamese",
+            "user_description",
+            "summary_vi",
+            "vietnamese_summary",
+            "segment_description_vi",
+            "segment_description",
+            "review_description_vi",
+            "micro_scenes",
+            "micro_scene_timeline",
+            "timeline",
+            "beats",
+        )
+    )
+    environment_motion = _planning_value_to_text(
+        _first_present(shot, "environment_motion", "background_motion", "environment_movement")
+    )
+    speech_cues = video_speech.normalize_speech_cues(
+        _first_present(shot, "speech_cues", "dialogue_lines", "voice_lines", "spoken_lines"),
+        narration=narration,
+        dialogue_mode=dialogue_mode,
+        visible_characters=normalized_visible_characters,
+        shot_context="; ".join(part for part in (vietnamese_description, primary_action, environment_motion) if part),
+    )
 
     return {
         "scene_order": int(_number_or_default(_first_present(shot, "scene_order", "scene_number", "scene", "sceneIndex", "parent_scene_order"), 1)),
@@ -1230,27 +1332,8 @@ def _normalize_shot_payload(shot, *, index: int) -> dict:
             _first_present(shot, "duration_seconds", "duration", "seconds", "usable_duration_seconds", "timeline_duration_seconds", "segment_duration_seconds"),
             None,
         ),
-        "vietnamese_description": _planning_value_to_text(
-            _first_present(
-                shot,
-                "vietnamese_description",
-                "description_vi",
-                "description_vietnamese",
-                "user_description",
-                "summary_vi",
-                "vietnamese_summary",
-                "segment_description_vi",
-                "segment_description",
-                "review_description_vi",
-                "micro_scenes",
-                "micro_scene_timeline",
-                "timeline",
-                "beats",
-            )
-        ),
-        "english_narration": _planning_value_to_text(
-            _first_present(shot, *video_purpose_service.NARRATION_TEXT_FIELD_ALIASES)
-        ),
+        "vietnamese_description": vietnamese_description,
+        "english_narration": narration,
         "primary_action": primary_action or visual_prompt,
         "purpose": _planning_value_to_text(_first_present(shot, "purpose", "goal", "story_purpose", "segment_purpose", "objective")),
         "shot_type": _planning_value_to_text(_first_present(shot, "shot_type", "type", "camera_shot", "segment_type")),
@@ -1259,9 +1342,7 @@ def _normalize_shot_payload(shot, *, index: int) -> dict:
         "composition": composition,
         "camera_motion": _planning_value_to_text(_first_present(shot, "camera_motion", "camera_movement", "movement")),
         "subject_motion": _planning_value_to_text(_first_present(shot, "subject_motion", "character_motion", "subject_movement")),
-        "environment_motion": _planning_value_to_text(
-            _first_present(shot, "environment_motion", "background_motion", "environment_movement")
-        ),
+        "environment_motion": environment_motion,
         "transition_to_next": _planning_value_to_text(
             _first_present(shot, "transition_to_next", "transition", "next_transition")
         ),
@@ -1269,6 +1350,8 @@ def _normalize_shot_payload(shot, *, index: int) -> dict:
         "open_loop": _planning_value_to_text(_first_present(shot, "open_loop", "curiosity_gap", "viewer_question")),
         "visual_surprise": _planning_value_to_text(_first_present(shot, "visual_surprise", "pattern_interrupt", "surprise", "visual_hook")),
         "cut_reason": _planning_value_to_text(_first_present(shot, "cut_reason", "edit_reason", "reason_to_cut")),
+        "visible_characters": normalized_visible_characters,
+        "speech_cues": speech_cues,
         "transition_pack": _normalize_transition_payload(
             _first_present(shot, "transition_pack", "transition", "edit_transition", "next_transition"),
             final=False,
@@ -1282,8 +1365,9 @@ def _normalize_shot_payload(shot, *, index: int) -> dict:
         "micro_scenes": _normalize_micro_scenes_from_shot(shot),
     }
 
-def _normalize_shot_breakdown_payload(payload: dict) -> dict:
+def _normalize_shot_breakdown_payload(payload: dict, *, dialogue_mode: str | None = None) -> dict:
     payload = _normalize_purpose_metadata_payload(payload)
+    effective_dialogue_mode = dialogue_mode or _planning_value_to_text(payload.get("dialogue_mode")) or None
     _reject_alias_conflict(payload, "shots", ("shots", "segments", "prompt_segments", "video_segments", "segment_breakdown"))
     shots = _first_present(payload, "shots", "segments", "prompt_segments", "video_segments", "segment_breakdown")
     if not isinstance(shots, list):
@@ -1306,7 +1390,7 @@ def _normalize_shot_breakdown_payload(payload: dict) -> dict:
     normalized = dict(payload)
     normalized_shots: list[dict] = []
     for index, shot in enumerate(shots, start=1):
-        normalized_shot = _normalize_shot_payload(shot, index=index)
+        normalized_shot = _normalize_shot_payload(shot, index=index, dialogue_mode=effective_dialogue_mode)
         # Shot breakdown rows are persisted in list order below. Treat list order as
         # canonical so local scene indexes, zero-based indexes, or offset indexes
         # from the AI do not fail mapping before the backend assigns DB order.
@@ -1392,6 +1476,18 @@ _VIDEO_RENDER_TEXT_CUE_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
 )
 
+_VIDEO_RENDER_3D_PROMPT_RULE = (
+    "Visual style rule: generate high-quality stylized 3D cinematic animation with dimensional characters, "
+    "volumetric lighting, depth, textured materials, parallax, and real camera movement; if the source is manga, "
+    "webtoon, illustration, image, or another 2D reference, translate it into a 3D animated video look, not a "
+    "flat/static image."
+)
+
+_VIDEO_RENDER_3D_NEGATIVE_RULE = (
+    "no 2D illustration, no flat drawing, no flat comic panel, no static image, no image prompt, "
+    "no storyboard frame, no line-art-only render"
+)
+
 def _render_safe_video_prompt_text(prompt: str) -> str:
     safe = str(prompt or "").strip()
     if not safe:
@@ -1404,23 +1500,30 @@ def _render_safe_video_prompt_text(prompt: str) -> str:
     text_block_rule = "Do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks in the video."
     if text_block_rule.casefold() not in safe.casefold():
         safe = f"{safe} {text_block_rule}".strip()
+    if _VIDEO_RENDER_3D_PROMPT_RULE.casefold() not in safe.casefold():
+        safe = f"{safe} {_VIDEO_RENDER_3D_PROMPT_RULE}".strip()
     return safe
 
 def _render_safe_video_negative_prompt_text(negative_prompt: str) -> str:
     base = _bounded_prompt_field(negative_prompt, 6000)
-    required = "no subtitles, no captions, no text overlays, no letters, no words, no UI text"
-    if required.casefold() in base.casefold():
-        return base
-    return _bounded_prompt_field(", ".join(part for part in [base, required] if part), 6000)
+    required_parts = [
+        "no subtitles, no captions, no text overlays, no letters, no words, no UI text",
+        _VIDEO_RENDER_3D_NEGATIVE_RULE,
+    ]
+    parts = [base] if base else []
+    for required in required_parts:
+        if required.casefold() not in base.casefold():
+            parts.append(required)
+    return _bounded_prompt_field(", ".join(part for part in parts if part), 6000)
 
 def _normalize_video_prompt_payload(item, *, index: int, global_negative_prompt: str = "", global_continuity: str = "") -> dict:
     if not isinstance(item, dict):
         prompt = _planning_value_to_text(item)
         return {
             "shot_order": index,
-            "prompt": prompt,
+            "prompt": _bounded_prompt_field(_render_safe_video_prompt_text(prompt), 20000),
             "prompt_explanation_vi": _fallback_prompt_explanation_vi(prompt),
-            "negative_prompt": global_negative_prompt,
+            "negative_prompt": _render_safe_video_negative_prompt_text(global_negative_prompt),
             "continuity_notes": global_continuity,
             "retention_notes": VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["retention_notes"],
             "transition_notes": VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["transition_notes"],
@@ -1884,13 +1987,14 @@ def _fallback_source_snippets(project: DBVideoProject, db: Session, *, limit: in
     values.extend(block.content or "" for block in _ordered_source_blocks(project.id, db))
     snippets: list[str] = []
     seen: set[str] = set()
+    provenance_markers = ("provenance", "video inspiration job id", "link nguồn", "source link", "đường dẫn file nguồn", "source file path", "gói phân tích", "analysis package", "checksum", "artifact", "job id", "http://", "https://", "s3://", "video_inspiration/", ".json", ".mp4")
     for value in values:
         for part in re.split(r"(?=Panel\s+\d+:)|\n\s*\n+|\n-", value or "", flags=re.IGNORECASE):
             text = re.sub(r"\s+", " ", part).strip(" -\t\r\n")
             if not text or len(text) < 35:
                 continue
             lowered = text.lower()
-            if lowered.startswith("language lock") or lowered.startswith("negative prompt"):
+            if lowered.startswith("language lock") or lowered.startswith("negative prompt") or any(marker in lowered for marker in provenance_markers):
                 continue
             text = text[:520].rstrip(" ,.;:") + ("..." if len(text) > 520 else "")
             key = text.lower()
@@ -1901,19 +2005,36 @@ def _fallback_source_snippets(project: DBVideoProject, db: Session, *, limit: in
             if len(snippets) >= limit:
                 return snippets
     fallback = (project.topic or project.title or "Nguồn video đã handoff").strip()
-    return snippets or [fallback]
+    if snippets:
+        return snippets
+    if any(marker in fallback.lower() for marker in provenance_markers):
+        fallback = "Approved video concept"
+    return [fallback]
+
+def _production_narration_valid(text: str | None, *, target_language: str | None = None) -> bool:
+    value = re.sub(r"\s+", " ", (text or "")).strip()
+    if not value or len(value) < 3:
+        return False
+    lowered = value.lower()
+    markers = ("provenance", "video inspiration job id", "link nguồn", "đường dẫn file nguồn", "gói phân tích", "http://", "https://", "video_inspiration/", "job id", "checksum")
+    if any(marker in lowered for marker in markers):
+        return False
+    if video_language.normalize_video_language(target_language) == "en" and re.search(r"[à-ỹđ]", lowered):
+        return False
+    return True
 
 def _fallback_story_development_payload(project: DBVideoProject, db: Session, *, fallback_reason: str) -> dict[str, Any]:
     snippets = _fallback_source_snippets(project, db, limit=8)
     scene_titles = [
-        "Hook mở màn",
-        "Sự thật trong gương",
-        "Lời thề cứu người thân",
-        "Bài toán gia tộc",
-        "Quyết tâm bước tiếp",
+        "Hook từ nguồn",
+        "Xung đột chính",
+        "Bước ngoặt",
+        "Cao trào",
+        "Payoff và hướng tiếp theo",
     ]
     scenes: list[dict[str, Any]] = []
     default_duration = int(project.default_shot_duration_seconds or 5)
+    style_label = (project.visual_style or "phong cách hình ảnh đã duyệt").strip()
     for index, title in enumerate(scene_titles, start=1):
         source = snippets[(index - 1) % len(snippets)]
         scenes.append(
@@ -1923,27 +2044,35 @@ def _fallback_story_development_payload(project: DBVideoProject, db: Session, *,
                     f"{title}: chuyển ý nguồn thành một cảnh video dọc 9:16. Trọng tâm nguồn: {source}"
                 ),
                 "english_narration": (
-                    f"{source} Nhịp kể giữ tiếng Việt tự nhiên, nhấn cảm xúc hồi quy, quyết tâm và bí mật chưa thể nói ra."
+                    f"{source} Nhịp kể giữ đúng nội dung nguồn, tăng dần xung đột và dẫn tới một payoff rõ ràng."
                 ),
-                "character_appearance": "Nhân vật chính kiểu anime/webtoon, gương mặt trẻ, mắt biểu cảm rõ, thiết kế nhất quán với truyện tranh gốc.",
-                "wardrobe_and_sandals": "Trang phục quý tộc trẻ em/nhân vật theo nguồn; footwear không luôn thấy rõ, tránh tự bịa sandals nếu khung hình không lộ chân.",
-                "subject_motion_by_duration": f"Trong khoảng {default_duration}s, nhân vật thực hiện một hành động rõ: tỉnh lại, quay nhìn, chạm gương, nắm tay hoặc bước ra cửa.",
-                "setting_and_lighting": "Trang viên quý tộc Lombardy, thư viện/phòng thay đồ/hành lang sáng mềm, ánh sáng điện ảnh, bảng màu webtoon sạch.",
-                "detailed_mood": "Hoang mang, xúc động, căng thẳng nhưng dần chuyển thành quyết tâm chiến lược.",
+                "character_appearance": "Kế thừa đúng nhân vật, hình dáng, nhận diện và biểu cảm đã mô tả trong nguồn; không tự thêm nhân vật hoặc canon mới.",
+                "wardrobe_and_sandals": "Giữ nguyên trang phục và footwear theo nguồn; nếu nguồn không nêu hoặc khung hình không thấy thì không tự bịa chi tiết.",
+                "subject_motion_by_duration": f"Trong khoảng {default_duration}s, nhân vật thực hiện đúng một hành động chính nhìn thấy rõ, bám nội dung nguồn của cảnh.",
+                "setting_and_lighting": f"Bám đúng bối cảnh, thời điểm và ánh sáng trong nguồn; thể hiện nhất quán theo {style_label}.",
+                "detailed_mood": "Giữ đúng cảm xúc của đoạn nguồn, tăng nhịp hợp lý từ hook qua xung đột đến payoff.",
                 "target_duration_seconds": default_duration,
             }
         )
+    for scene in scenes:
+        current = scene.get("english_narration")
+        if not _production_narration_valid(current, target_language=project.target_language):
+            scene["english_narration"] = (
+                "The approved source detail unfolds into a clear visual beat, builds tension through the character's decision, and lands on a concrete payoff."
+                if video_language.normalize_video_language(project.target_language) == "en"
+                else "Cảnh đã duyệt phát triển thành một nhịp hình ảnh rõ ràng, tăng dần xung đột qua quyết định của nhân vật và kết thúc bằng một payoff cụ thể."
+            )
     synthesis = (
         f"Fallback phase2 do provider lỗi/chậm: {fallback_reason[:260]}. "
-        f"Video bám nguồn handoff của project '{project.title}', dùng tiếng Việt và style anime/manga/webtoon 9:16."
+        f"Video bám nguồn handoff của project '{project.title}', ngôn ngữ {project.target_language} và {style_label}."
     )
     strategy = (
-        "Mở bằng cú sốc hồi quy và người thân đã mất còn sống, sau đó chuyển qua kiểm chứng cơ thể trẻ nhỏ, "
-        "ký ức bi kịch tương lai, lời thề cứu cha/gia tộc và cliffhanger về bước đầu giành lòng tin."
+        "Mở bằng chi tiết mạnh nhất trong nguồn, phát triển xung đột theo thứ tự nhân quả, tạo bước ngoặt rõ, "
+        "đưa tới cao trào và kết bằng payoff hoặc open loop có căn cứ trong nội dung đã duyệt."
     )
     continuity = (
-        "Giữ Tia/Florentia là bé gái tóc đỏ/nâu đỏ mắt xanh theo webtoon, Gallahan/cha là điểm tựa cảm xúc, "
-        "bối cảnh Lombardy là dinh thự quý tộc. Không đổi sang photorealistic, không thêm nhân vật/canon mới ngoài nguồn."
+        f"Giữ nguyên nhân vật, trang phục, đạo cụ, bối cảnh, bảng màu, {style_label} và trạng thái câu chuyện từ nguồn. "
+        "Không thêm nhân vật có tên, quan hệ, địa danh hoặc canon mới ngoài nội dung đã duyệt."
     )
     detailed_script = "\n\n".join(f"Cảnh {idx}: {scene['vietnamese_description']}" for idx, scene in enumerate(scenes, start=1))
     return {
@@ -1959,16 +2088,23 @@ def _fallback_story_development_payload(project: DBVideoProject, db: Session, *,
         "detailed_script_vi": detailed_script,
         "detailed_script": detailed_script,
         "retention_plan": _default_retention_payload(
-            fallback="0-2s mở bằng cú sốc thấy cha còn sống; giữa video giữ câu hỏi Tia đã trở về lúc nào; cuối video chốt lời thề cứu cha và gia tộc."
+            fallback="0-2s mở bằng chi tiết mạnh nhất trong nguồn; giữa video giữ một câu hỏi chưa giải đáp; cuối video trả payoff và mở hướng tiếp theo từ chính nội dung đã duyệt."
         ),
         "sound_design_plan": _default_sound_payload(
             has_narration=True,
-            fallback="soft page-turn, heartbeat hit, mirror shimmer, orchestral rise at the vow",
+            fallback="ambience đúng bối cảnh, một nhịp impact cho bước ngoặt và cao trào âm nhạc vừa đủ dưới narration",
         ),
         "scenes": scenes,
     }
 
-def _fallback_shot_breakdown_payload(project: DBVideoProject, scenes: list[DBVideoScene], *, fallback_reason: str) -> dict[str, Any]:
+def _fallback_shot_breakdown_payload(
+    project: DBVideoProject,
+    scenes: list[DBVideoScene],
+    *,
+    fallback_reason: str,
+    segment_count: int | None = None,
+    first_shot_order: int = 1,
+) -> dict[str, Any]:
     rows = scenes or []
     if not rows:
         rows = [
@@ -1982,11 +2118,34 @@ def _fallback_shot_breakdown_payload(project: DBVideoProject, scenes: list[DBVid
                 target_duration_seconds=project.default_shot_duration_seconds or 5,
             )
         ]
+    if segment_count is None:
+        selected_scenes = rows[:8]
+    else:
+        requested_count = max(0, int(segment_count))
+        configured_total = _resolve_prompt_segment_config(project).segment_count
+        total_segment_count = configured_total or (first_shot_order - 1 + requested_count)
+        selected_scenes = []
+        for shot_order in range(first_shot_order, first_shot_order + requested_count):
+            if len(rows) == 1 or total_segment_count <= 1:
+                scene_index = 0
+            else:
+                scene_index = round(
+                    (shot_order - 1) * (len(rows) - 1) / (total_segment_count - 1)
+                )
+            selected_scenes.append(rows[min(len(rows) - 1, max(0, scene_index))])
+
     shots: list[dict[str, Any]] = []
     micro_count = int(project.micro_scenes_per_prompt or DEFAULT_MICRO_SCENES_PER_PROMPT)
-    for index, scene in enumerate(rows[:8], start=1):
-        profile = SEGMENT_CAMERA_VARIATION_PROFILES[(index - 1) % len(SEGMENT_CAMERA_VARIATION_PROFILES)]
-        duration = int(scene.target_duration_seconds or project.default_shot_duration_seconds or 5)
+    project_label = (project.title or project.topic or "dự án video").strip()
+    style_label = (project.visual_style or "phong cách hình ảnh đã duyệt").strip()
+    for offset, scene in enumerate(selected_scenes):
+        shot_order = first_shot_order + offset
+        profile = SEGMENT_CAMERA_VARIATION_PROFILES[(shot_order - 1) % len(SEGMENT_CAMERA_VARIATION_PROFILES)]
+        duration = _clamp_shot_duration(
+            scene.target_duration_seconds,
+            project,
+            shot_order=shot_order,
+        )
         ranges = _micro_scene_ranges(duration, micro_count)
         base = (scene.visual_description or scene.dialogue or scene.title or project.topic or project.title or "").strip()
         micro_scenes = [
@@ -1995,34 +2154,36 @@ def _fallback_shot_breakdown_payload(project: DBVideoProject, scenes: list[DBVid
                 "start_seconds": start,
                 "end_seconds": end,
                 "description_vi": f"{_micro_scene_range_label(start, end)}: {base[:260]}",
-                "visual_action": f"Nhân vật giữ hành động chính của cảnh {index}, biểu cảm rõ, chuyển động nhỏ nhưng đọc được.",
+                "visual_action": f"Nhân vật giữ hành động chính của cảnh {scene.scene_order or shot_order}, biểu cảm rõ, chuyển động nhỏ nhưng đọc được.",
                 "camera_note": profile["camera_motion"],
-                "continuity_note": "Giữ cùng nhân vật, trang phục, style webtoon và trạng thái câu chuyện.",
+                "continuity_note": f"Giữ cùng nhân vật, trang phục, {style_label} và trạng thái câu chuyện.",
+                "visible_characters": [],
             }
             for micro_index, (start, end) in enumerate(ranges, start=1)
         ]
         shots.append(
             {
-                "scene_order": int(scene.scene_order or index),
-                "shot_order": index,
+                "scene_order": int(scene.scene_order or shot_order),
+                "shot_order": shot_order,
                 "duration_seconds": duration,
-                "vietnamese_description": f"Segment {index}: {base}",
+                "vietnamese_description": f"Segment {shot_order}: {base}",
                 "english_narration": scene.dialogue or base,
-                "primary_action": "Nhân vật phản ứng với ký ức/hồi quy rồi đưa ra một hành động quyết tâm.",
-                "purpose": "Chuyển story handoff thành nhịp video dọc có hook, cảm xúc và payoff.",
+                "primary_action": "Nhân vật thực hiện một hành động chính rõ ràng theo scene đã duyệt, với phản ứng và chuyển động dễ đọc.",
+                "purpose": "Chuyển scene đã duyệt thành nhịp video dọc có hook, cảm xúc và payoff.",
                 "shot_type": profile["shot_type"],
                 "camera_angle": profile["camera_angle"],
                 "framing": profile["framing"],
                 "composition": profile["composition"],
                 "camera_motion": profile["camera_motion"],
-                "subject_motion": "Subtle anime/webtoon motion: blink, turn, step, hand-to-chest, mirror glance, controlled emotional reaction.",
-                "environment_motion": "Soft floating dust, page shimmer, curtain movement, gentle light drift.",
+                "subject_motion": "Subtle readable motion consistent with the approved scene: blink, turn, step, gesture, react, then settle.",
+                "environment_motion": "Subtle environmental motion consistent with the approved setting, with controlled depth and light drift.",
                 "transition_to_next": "Motivated cut on the final look or narration beat.",
                 "retention_role": "Open loop hoặc payoff nhỏ để giữ người xem.",
-                "open_loop": "Tia đã trở về lúc nào và sẽ cứu cha bằng cách nào?",
-                "visual_surprise": "Thân hình trẻ nhỏ đối lập ký ức trưởng thành và bi kịch tương lai.",
+                "open_loop": f"Điều gì sẽ xảy ra tiếp theo trong {project_label}?",
+                "visual_surprise": "Một thay đổi hình ảnh hoặc phản ứng bất ngờ được lấy trực tiếp từ scene đã duyệt.",
                 "cut_reason": "Cắt khi cảm xúc hoặc thông tin mới đạt đỉnh.",
-                "transition_pack": _default_transition_payload(final=index == len(rows[:8])),
+                "visible_characters": [],
+                "transition_pack": _default_transition_payload(final=offset == len(selected_scenes) - 1),
                 "sound_design": _default_sound_payload(has_narration=bool(scene.dialogue or base)),
                 "micro_scenes": micro_scenes,
             }
@@ -2032,7 +2193,12 @@ def _fallback_shot_breakdown_payload(project: DBVideoProject, scenes: list[DBVid
         "dialogue_mode": project.dialogue_mode or "character_lines",
         "narration_density": project.narration_density or "dense",
         "call_to_action_style": project.call_to_action_style or "direct",
-        "shots": shots,
+        "shots": [
+            ({**shot, "english_narration": "", "speech_cues": []}
+             if not _production_narration_valid(shot.get("english_narration"), target_language=project.target_language)
+             else shot)
+            for shot in shots
+        ],
     }
 
 def _fallback_video_prompt_pack_payload(
@@ -2042,29 +2208,50 @@ def _fallback_video_prompt_pack_payload(
     fallback_reason: str,
 ) -> dict[str, Any]:
     prompts: list[dict[str, Any]] = []
+    style_label = (project.visual_style or "the approved project visual style").strip()
     for shot in shots:
         duration = _clamp_shot_duration(shot.duration_seconds, project, shot_order=shot.shot_order)
         micro_text = _micro_scene_timeline_text(shot.micro_scenes_json or [])
+        character_text = video_series_characters.fallback_prompt_character_text(project)
+        speech_cues = shot.speech_cues_json if isinstance(shot.speech_cues_json, list) else []
+        speech_text = json.dumps(speech_cues, ensure_ascii=False) if speech_cues else (shot.english_narration or "")
+        sound_text = json.dumps(shot.sound_design_json or {}, ensure_ascii=False)
         prompt = (
-            f"Create a {duration:g}-second {project.aspect_ratio} anime webtoon cinematic video. "
+            f"Create a {duration:g}-second {project.aspect_ratio} high-quality cinematic animation video in this visual style: {style_label}. "
             f"Shot {shot.shot_order}: {shot.vietnamese_description}. "
-            "Main character stays consistent with the Lombardy webtoon style: expressive anime face, red-brown hair, green eyes when Tia is visible, noble mansion wardrobe and clean line-art. "
+            f"{character_text} "
             f"Action: {shot.primary_action}. Camera: {shot.camera_angle}, {shot.framing}, {shot.camera_motion}. "
             f"Composition: {shot.composition}. Subject motion: {shot.subject_motion}. Environment motion: {shot.environment_motion}. "
-            f"Lighting and mood: soft noble-mansion lighting, emotional regression drama, controlled cinematic contrast. "
+            f"Lighting and mood: preserve the approved scene setting, palette, atmosphere, and emotional tone; use controlled cinematic contrast, clear depth, and parallax. "
             f"Micro-scene timeline: {micro_text}. "
-            "Narration, voice, and subtitles are generated after the video clip. "
+            f"DIALOGUE / SPEECH (target language {video_language.video_language_label(project.target_language)}): {speech_text}. "
+            "Preserve exact dialogue text, speaker, delivery, emotion, context, and lip_sync_required; distinguish visible on-screen speech from off-screen voice-over. "
+            f"SOUND DESIGN: {sound_text}. Include ambience, music mood/energy, timed SFX, beat timing, and mixing notes. "
+            "For Veo 3 native-audio rendering, render this dialogue and sound design inside the clip itself; do not replace it with invented language. "
             "Do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks in the video."
         )
+        negative_prompt = (
+            "No watermark, no logo, no random text, no burned-in subtitles, no distorted face, no bad hands, "
+            "no extra characters, no photorealistic live-action, no flicker, no 2D illustration, no flat drawing, "
+            "no flat comic panel, no static image, no image prompt, no storyboard frame, no line-art-only render."
+        )
+        if project.series_id:
+            negative_prompt = (
+                "No watermark, no logo, no random text, no burned-in subtitles, no distorted face, no bad hands, "
+                "no extra characters, no duplicate character, no identity swap, no unintended named character, no wrong face, "
+                "no wrong hairstyle, no wrong signature outfit, no extra foreground character outside the approved cast, "
+                "no photorealistic live-action, no flicker, no 2D illustration, no flat drawing, no flat comic panel, "
+                "no static image, no image prompt, no storyboard frame, no line-art-only render."
+            )
         prompts.append(
             {
                 "shot_order": shot.shot_order,
                 "prompt": prompt,
                 "prompt_explanation_vi": (
-                    f"Fallback prompt video cho shot {shot.shot_order}: chuyển segment thành clip {duration:g}s, giữ style anime/webtoon 9:16, "
-                    "nhân vật và bối cảnh Lombardy nhất quán, có timeline micro-scene; voice và phụ đề được tạo ở bước sau."
+                    f"Fallback prompt video cho shot {shot.shot_order}: chuyển segment thành clip {duration:g}s, giữ {style_label}, "
+                    "nhân vật, trang phục, bối cảnh và trạng thái câu chuyện đã duyệt; voice và phụ đề được tạo ở bước sau."
                 ),
-                "negative_prompt": "No watermark, no logo, no random text, no burned-in subtitles, no distorted face, no bad hands, no extra characters, no photorealistic live-action, no flicker.",
+                "negative_prompt": negative_prompt,
                 "duration_seconds": duration,
                 "aspect_ratio": project.aspect_ratio or "9:16",
                 "shot_type": shot.shot_type or "cinematic segment",
@@ -2074,14 +2261,14 @@ def _fallback_video_prompt_pack_payload(
                 "camera_motion": shot.camera_motion or "slow push-in",
                 "subject_motion": shot.subject_motion or shot.primary_action or "subtle emotional reaction",
                 "environment_motion": shot.environment_motion or "soft ambient movement",
-                "start_frame": "Start on a clean webtoon-style frame that establishes the current story beat.",
+                "start_frame": "Start on a clean frame that establishes the approved setting, characters, and current story beat.",
                 "end_frame": "End on an emotional hold or motivated transition into the next segment.",
-                "lighting": "soft cinematic mansion light, clean webtoon color, gentle highlights",
-                "mood": "emotional, tense, determined, noble-family regression drama",
-                "continuity_notes": "Same character identity, same anime/webtoon style, same Lombardy mansion continuity, Vietnamese viewer-facing language.",
-                "retention_notes": _planning_value_to_text(shot.retention_json) or "Open loop: Tia must understand the regression and save her father.",
+                "lighting": "cinematic lighting consistent with the approved shot description, controlled contrast, and readable subject separation",
+                "mood": "match the approved shot emotion and current story state without adding a different genre or canon",
+                "continuity_notes": video_series_characters.segment_continuity_rule(project),
+                "retention_notes": _planning_value_to_text(shot.retention_json) or "Maintain the approved open loop and pay it off through visible action from the source.",
                 "transition_notes": _planning_value_to_text(shot.transition_json) or shot.transition_to_next or "Motivated cut to the next emotional beat.",
-                "sound_design_notes": _planning_value_to_text(shot.sound_design_json) or "Use subtle cinematic music and short transition SFX under clear Vietnamese narration.",
+                "sound_design_notes": _planning_value_to_text(shot.sound_design_json) or "Use subtle cinematic music and short transition SFX under clear narration in the approved target language.",
             }
         )
     return {
@@ -2089,8 +2276,11 @@ def _fallback_video_prompt_pack_payload(
         "dialogue_mode": project.dialogue_mode or "character_lines",
         "narration_density": project.narration_density or "dense",
         "call_to_action_style": project.call_to_action_style or "direct",
-        "global_negative_prompt": "No watermark, no logo, no random text, no burned-in subtitles, no distorted faces.",
-        "global_continuity": "Anime/manga/webtoon Lombardy style, same character identity, Vietnamese viewer-facing language.",
+        "global_negative_prompt": "No watermark, no logo, no random text, no burned-in subtitles, no distorted faces, no 2D illustration, no flat drawing, no flat comic panel, no static image, no image prompt, no storyboard frame, no line-art-only render.",
+        "global_continuity": (
+            f"{style_label}. Keep the same approved character identities, proportions, wardrobe logic, props, locations, "
+            "color palette, and story state across all segments. Do not invent named characters or canon details."
+        ),
         "prompts": prompts,
     }
 
@@ -2540,16 +2730,28 @@ def _phase2_codex_timeout(settings) -> int:
     configured = settings.timeout_seconds or 60
     return max(5, min(max(configured, phase2_floor), PHASE2_MAX_CODEX_TIMEOUT_SECONDS))
 
-def _run_structured_codex(db: Session, project: DBVideoProject, prompt: str, schema: dict, *, step_name: str) -> dict:
+def _run_structured_codex(
+    db: Session,
+    project: DBVideoProject,
+    prompt: str,
+    schema: dict,
+    *,
+    step_name: str,
+    max_attempts: int | None = None,
+    technical_context: dict[str, object] | None = None,
+) -> dict:
     settings = settings_service.get_ai_planning_settings(db)
     timeout_seconds = _phase2_codex_timeout(settings)
+    attempt_limit = max(1, int(max_attempts or MAX_RETRIES))
     schema_properties = schema.get("properties") if isinstance(schema, dict) else None
     schema_keys = sorted(str(key) for key in schema_properties)[:20] if isinstance(schema_properties, dict) else []
     log_details = {
         "timeout_seconds": timeout_seconds,
         "prompt_chars": len(prompt),
         "schema_keys": schema_keys,
-        "max_retries": MAX_RETRIES,
+        "max_attempts": attempt_limit,
+        "max_retries": attempt_limit,
+        **(technical_context or {}),
     }
     last_error: BaseException | None = None
     with video_planning_pool.planning_slot(
@@ -2560,7 +2762,7 @@ def _run_structured_codex(db: Session, project: DBVideoProject, prompt: str, sch
         model=settings.model,
         details=log_details,
     ):
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, attempt_limit + 1):
             started = time.perf_counter()
             try:
                 video_observability.log_event(
@@ -2592,7 +2794,7 @@ def _run_structured_codex(db: Session, project: DBVideoProject, prompt: str, sch
             except (ai_planning.AIPlanningError, VideoPlanningValidationError) as exc:
                 last_error = exc
                 error_code = getattr(exc, "error_code", "VIDEO_PLANNING_INVALID_OUTPUT")
-                should_retry = attempt < MAX_RETRIES and error_code not in {
+                should_retry = attempt < attempt_limit and error_code not in {
                     "CODEX_EXEC_TIMEOUT",
                     "CODEX_PROVIDER_REJECTED",
                 }
@@ -2637,6 +2839,8 @@ def develop_story(project_id: str, db: Session, *, force: bool = False) -> model
 Bạn là Script-to-Video-Prompt Studio trong Voicebox. Người dùng có thể nhập nguồn nội dung bằng tiếng Việt, tiếng Anh hoặc lẫn cả hai. Video cuối phải dùng ngôn ngữ video đã chọn.
 
 {_project_context(project, db)}
+
+{video_series_characters.story_development_instructions(project, db)}
 
 Hãy phát triển nội dung thành story strategy hấp dẫn và kịch bản chi tiết.
 Yêu cầu bắt buộc:
@@ -2739,16 +2943,20 @@ Yêu cầu bắt buộc:
     story_strategy = _bilingual_planning_text(plan.story_strategy_vi, plan.story_strategy, reference_label=reference_label)
     continuity_bible = _bilingual_planning_text(plan.continuity_bible_vi, plan.continuity_bible, reference_label=reference_label)
     detailed_script = _bilingual_planning_text(plan.detailed_script_vi, plan.detailed_script, reference_label=reference_label)
+    retention_payload = {
+        **plan.retention_plan.model_dump(),
+        "quality_check": retention_quality,
+    }
+    character_flow = video_series_characters.build_story_character_flow(project, db, normalized_plan or {})
+    if character_flow is not None:
+        retention_payload[video_series_characters.CHARACTER_FLOW_KEY] = character_flow
 
     project.phase = "phase2"
     project.input_synthesis = plan.input_synthesis
     project.story_strategy = story_strategy
     project.continuity_bible = continuity_bible
     project.detailed_script = detailed_script
-    project.retention_plan_json = {
-        **plan.retention_plan.model_dump(),
-        "quality_check": retention_quality,
-    }
+    project.retention_plan_json = retention_payload
     project.sound_design_plan_json = plan.sound_design_plan.model_dump()
     project.creative_brief = story_strategy
     project.script_text = detailed_script
@@ -2843,12 +3051,13 @@ def validate_shot_variation(shots: list[DBVideoShot] | list[ShotPlan]) -> bool:
             return False
     return True
 
-def _shot_retention_metadata(shot: ShotPlan) -> dict[str, str]:
+def _shot_retention_metadata(shot: ShotPlan) -> dict[str, Any]:
     return {
         "retention_role": shot.retention_role or "story beat",
         "open_loop": shot.open_loop or "Keep the viewer waiting for the next visual or narrative payoff.",
         "visual_surprise": shot.visual_surprise or "Use a visual change before the shot feels static.",
         "cut_reason": shot.cut_reason or "Cut on action, emotion, narration, or sound cue.",
+        "visible_characters": _json_safe(shot.visible_characters),
     }
 
 def _model_dump(value: BaseModel | dict | None) -> dict:
@@ -3025,6 +3234,8 @@ Bạn là editor điện ảnh tạo shot breakdown cho video AI.
 
 {_project_context(project, db)}
 
+{video_series_characters.shot_breakdown_instructions(project)}
+
 Story strategy:\n{project.story_strategy or ''}
 
 Continuity bible:\n{project.continuity_bible or ''}
@@ -3061,6 +3272,11 @@ Yêu cầu bắt buộc:
 - Mỗi shot phải kế thừa và cụ thể hóa 5 chi tiết trong scene: character appearance, wardrobe and sandals, subject motion căn theo duration_seconds thật của shot, setting and lighting, detailed mood.
 - Tạo transition_to_next rõ ràng, phù hợp continuity bible.
 - vietnamese_description giải thích cho người dùng Việt; english_narration chứa narration theo ngôn ngữ video đã chọn.
+- Mỗi shot có lời nói phải trả `speech_cues`: từng câu thoại chính xác, speaker_name, character_profile_id nếu có, speaker_role, voice_description, delivery, emotion, context và lip_sync_required.
+- `speech_cues[].text` phải đúng ngôn ngữ video đã chọn và không được diễn giải hoặc dịch khác với câu nhân vật sẽ nói.
+- Với nhân vật thuộc series, voice_description phải kế thừa canonical speech_style/giọng nói và personality; delivery/emotion/context chỉ mô tả trạng thái tạm thời của đúng shot.
+- Nếu người nói hiện trong khung hình, đặt lip_sync_required=true và mô tả hành động/bối cảnh lúc nói; nếu là voice-over ngoài hình, đặt speaker_role=offscreen_narrator và lip_sync_required=false.
+{('- Vì ngôn ngữ video là tiếng Việt, các speech_cues này sẽ được nối vào prompt Veo 3 để clip tự render giọng Việt; phải có câu thoại tiếng Việt chính xác và đủ mô tả giọng cho mọi shot có lời.' if video_speech.uses_veo_native_speech(project) else '- Audio của ngôn ngữ này vẫn dùng pipeline voice/TTS hiện tại của dự án; speech_cues chỉ là metadata nội dung và không cho Veo tự tạo lời nói.')}
 - {_narration_length_instruction(project)}
 - Không dùng tool/command, không đọc file trong project, không giải thích quá trình; schema đã được truyền qua output_schema.
 - Chỉ trả về đúng JSON theo schema, không thêm markdown.
@@ -3070,7 +3286,7 @@ Yêu cầu bắt buộc:
     sound_fallback_fields: list[str] = []
     try:
         raw_plan = _run_structured_codex(db, project, prompt, SHOT_BREAKDOWN_SCHEMA, step_name="shot_breakdown")
-        normalized_plan = _normalize_shot_breakdown_payload(raw_plan)
+        normalized_plan = _normalize_shot_breakdown_payload(raw_plan, dialogue_mode=project.dialogue_mode)
         plan = ShotBreakdownPlan.model_validate(normalized_plan)
         _validate_shot_order_output(
             plan,
@@ -3087,8 +3303,14 @@ Yêu cầu bắt buộc:
     except ai_planning.AIPlanningError as exc:
         if not _phase2_should_use_provider_fallback(exc):
             raise
-        raw_plan = _fallback_shot_breakdown_payload(project, scenes, fallback_reason=str(exc))
-        normalized_plan = _normalize_shot_breakdown_payload(raw_plan)
+        raw_plan = _fallback_shot_breakdown_payload(
+            project,
+            scenes,
+            fallback_reason=str(exc),
+            segment_count=segments_to_generate,
+            first_shot_order=1 + locked_segment_count,
+        )
+        normalized_plan = _normalize_shot_breakdown_payload(raw_plan, dialogue_mode=project.dialogue_mode)
         plan = ShotBreakdownPlan.model_validate(normalized_plan)
         _validate_shot_order_output(
             plan,
@@ -3207,6 +3429,7 @@ Yêu cầu bắt buộc:
             transition_json=item.transition_pack.model_dump(),
             sound_design_json=item.sound_design.model_dump(),
             micro_scenes_json=[micro_scene.model_dump() for micro_scene in item.micro_scenes],
+            speech_cues_json=[cue.model_dump() for cue in item.speech_cues],
             retainability_quality_check=quality,
             status="ready",
             prompt_status="missing",
@@ -3252,6 +3475,11 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
     for key, value in changed.items():
         if key == "micro_scenes":
             shot.micro_scenes_json = value or []
+        elif key == "speech_cues":
+            shot.speech_cues_json = [
+                item.model_dump() if isinstance(item, BaseModel) else item
+                for item in (value or [])
+            ]
         else:
             setattr(shot, key, value)
     prompt_affecting_fields = {
@@ -3267,17 +3495,37 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
         "transition_json",
         "sound_design_json",
         "micro_scenes",
+        "speech_cues",
         "retainability_quality_check",
     }
     if any(key in changed for key in prompt_affecting_fields):
         shot.prompt_status = "stale"
-        if any(key in changed for key in {"english_narration", "duration_seconds"}):
+        if any(key in changed for key in {"english_narration", "duration_seconds", "speech_cues"}):
             shot.subtitle_status = "stale"
+            from . import video_subtitles
+
+            video_subtitles.mark_subtitle_stale(
+                project_id,
+                db,
+                reason="Nội dung lời thoại hoặc timing segment đã thay đổi.",
+            )
         if "english_narration" in changed:
             shot.voice_status = "missing" if (shot.english_narration or "").strip() else "skipped"
     shot.updated_at = datetime.utcnow()
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is not None:
+        if video_speech.uses_veo_native_speech(project) and any(
+            key in changed for key in prompt_affecting_fields
+        ):
+            db.query(DBVideoShotClip).filter(
+                DBVideoShotClip.project_id == project_id,
+                DBVideoShotClip.shot_id == shot_id,
+                DBVideoShotClip.is_active.is_(True),
+                DBVideoShotClip.status == "ready",
+            ).update(
+                {"status": "stale", "updated_at": datetime.utcnow()},
+                synchronize_session=False,
+            )
         video_rendering.mark_render_outputs_stale(project_id, db)
         video_state.mark_package_stale(project, db)
         if any(key in changed for key in prompt_affecting_fields):
@@ -3341,12 +3589,13 @@ def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, durati
         )
     micro_timeline = _micro_scene_timeline_text(shot.micro_scenes_json or [])
     return (
-        f"Create a {config.prompt_duration_seconds}-second {project.aspect_ratio} cinematic video.\n"
+        f"Create a {config.prompt_duration_seconds}-second {project.aspect_ratio} high-quality stylized 3D cinematic animation video.\n"
         f"This is segment {shot.shot_order} of {config.segment_count} of a {config.target_duration_seconds or project.target_duration_seconds}-second video "
         f"covering timeline {timeline}.{final_hint}\n"
-        "Continuity rule: keep the same main character, same face/identity, same outfit or wardrobe logic, "
-        "same visual style, same color palette, and the story state from the previous segment. "
-        "Do not restart as a separate story.\n"
+        "3D visual rule: use dimensional characters, depth, volumetric lighting, textured materials, parallax, "
+        "and real camera movement; translate any manga, webtoon, illustration, image, or 2D reference into a 3D animated video look, "
+        "not a flat/static image.\n"
+        f"{video_series_characters.segment_continuity_rule(project)}\n"
         "Animation and text-safe rule: align visible action beats with the usable duration, use clear entry/hold/exit motion, "
         "and do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks.\n"
         f"Segment structure: use exactly {config.micro_scenes_per_prompt} connected micro-scenes inside this one prompt, all serving one primary visual action.\n"
@@ -3362,7 +3611,10 @@ def _segment_aware_prompt_text(item: VideoPromptPlan, shot: DBVideoShot, project
     has_segment = f"segment {shot.shot_order}" in lowered and "of" in lowered
     configured_duration = _resolve_prompt_segment_config(project).prompt_duration_seconds
     has_duration = f"{configured_duration}-second" in lowered or f"{configured_duration} second" in lowered or f"{configured_duration}s" in lowered
-    has_continuity = "same character" in lowered or "same main character" in lowered
+    if project.series_id:
+        has_continuity = "approved episode cast" in lowered or "episode-only guests" in lowered
+    else:
+        has_continuity = "same character" in lowered or "same main character" in lowered
     if has_segment and has_duration and has_continuity:
         return prompt
     return f"{prefix}\n\n{prompt}".strip()
@@ -3371,6 +3623,9 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
     duration_seconds = _clamp_shot_duration(prompt.duration_seconds or shot.duration_seconds, project, shot_order=shot.shot_order)
     prompt_text = _segment_aware_prompt_text(prompt, shot, project, duration_seconds=duration_seconds)
     segment_count = _target_prompt_segment_count(project)
+    visible_characters = []
+    if isinstance(shot.retention_json, dict) and isinstance(shot.retention_json.get("visible_characters"), list):
+        visible_characters = shot.retention_json.get("visible_characters") or []
     parts = [
         prompt_text,
         "",
@@ -3388,6 +3643,7 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
         f"Lighting: {prompt.lighting}",
         f"Mood: {prompt.mood}",
         f"Continuity notes: {prompt.continuity_notes}",
+        f"Visible characters: {json.dumps(visible_characters, ensure_ascii=False)}" if project.series_id and visible_characters else "",
         f"Retention notes: {prompt.retention_notes}",
         f"Transition notes: {prompt.transition_notes}",
         f"Sound design notes: {prompt.sound_design_notes}",
@@ -3409,6 +3665,48 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
         parts.extend(["", "Bản giải thích tiếng Việt:", prompt.prompt_explanation_vi.strip()])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
+
+def _prompt_pack_batches(
+    shots: list[DBVideoShot],
+    *,
+    batch_size: int = VIDEO_PROMPT_BATCH_SIZE,
+) -> list[list[DBVideoShot]]:
+    """Partition an already ordered shot list without changing its source order."""
+    size = max(1, int(batch_size))
+    return [shots[index : index + size] for index in range(0, len(shots), size)]
+
+
+def _prompt_pack_batch_idempotency_key(project: DBVideoProject, batch: list[DBVideoShot]) -> str:
+    """Return a stable key for this exact project/shot batch input."""
+    batch_input = ",".join(
+        f"{shot.id}:{int(getattr(shot, 'revision', 1) or 1)}:{shot.shot_order}"
+        for shot in batch
+    )
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"voicebox:video-prompt-pack:{project.id}:{batch_input}"))
+
+
+def _video_prompt_shot_lines(
+    shots: list[DBVideoShot],
+    project: DBVideoProject,
+    *,
+    target_segment_count: int | None,
+    segment_config: PromptSegmentConfig,
+) -> str:
+    return "\n".join(
+        (
+            f"Segment {shot.shot_order} of {target_segment_count}: timeline={_segment_timeline_label(project, shot.shot_order)}; "
+            f"prompt_clip_duration={segment_config.prompt_duration_seconds}s; usable_duration={shot.duration_seconds or _usable_segment_duration(project, shot.shot_order)}s; "
+            f"micro_scenes={json.dumps(shot.micro_scenes_json or [], ensure_ascii=False)}; "
+            f"vi={shot.vietnamese_description or ''}; narration={shot.english_narration or ''}; speech_cues={json.dumps(shot.speech_cues_json or [], ensure_ascii=False)}; action={shot.primary_action or ''}; "
+            f"camera={shot.camera_angle or ''}, {shot.framing or ''}, {shot.camera_motion or ''}; transition={shot.transition_to_next or ''}; "
+            f"retention={json.dumps(shot.retention_json or {}, ensure_ascii=False)}; transition_pack={json.dumps(shot.transition_json or {}, ensure_ascii=False)}; sound={json.dumps(shot.sound_design_json or {}, ensure_ascii=False)}"
+            if target_segment_count is not None
+            else f"Shot {shot.shot_order}: duration={shot.duration_seconds or 3}s; vi={shot.vietnamese_description or ''}; narration={shot.english_narration or ''}; speech_cues={json.dumps(shot.speech_cues_json or [], ensure_ascii=False)}; action={shot.primary_action or ''}; camera={shot.camera_angle or ''}, {shot.framing or ''}, {shot.camera_motion or ''}; transition={shot.transition_to_next or ''}; retention={json.dumps(shot.retention_json or {}, ensure_ascii=False)}; transition_pack={json.dumps(shot.transition_json or {}, ensure_ascii=False)}; sound={json.dumps(shot.sound_design_json or {}, ensure_ascii=False)}"
+        )
+        for shot in shots
+    )
+
+
 def generate_video_prompt_pack(project_id: str, db: Session) -> models.VideoShotPromptPackResponse | None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is None:
@@ -3420,23 +3718,24 @@ def generate_video_prompt_pack(project_id: str, db: Session) -> models.VideoShot
         raise VideoPlanningValidationError("Cần tạo shot trước khi tạo prompt video.")
     target_segment_count = _target_prompt_segment_count(project)
     segment_config = _resolve_prompt_segment_config(project)
-    shot_lines = "\n".join(
-        (
-            f"Segment {shot.shot_order} of {target_segment_count}: timeline={_segment_timeline_label(project, shot.shot_order)}; "
-            f"prompt_clip_duration={segment_config.prompt_duration_seconds}s; usable_duration={shot.duration_seconds or _usable_segment_duration(project, shot.shot_order)}s; "
-            f"micro_scenes={json.dumps(shot.micro_scenes_json or [], ensure_ascii=False)}; "
-            f"vi={shot.vietnamese_description or ''}; narration={shot.english_narration or ''}; action={shot.primary_action or ''}; "
-            f"camera={shot.camera_angle or ''}, {shot.framing or ''}, {shot.camera_motion or ''}; transition={shot.transition_to_next or ''}; "
-            f"retention={json.dumps(shot.retention_json or {}, ensure_ascii=False)}; transition_pack={json.dumps(shot.transition_json or {}, ensure_ascii=False)}; sound={json.dumps(shot.sound_design_json or {}, ensure_ascii=False)}"
-            if target_segment_count is not None
-            else f"Shot {shot.shot_order}: duration={shot.duration_seconds or 3}s; vi={shot.vietnamese_description or ''}; narration={shot.english_narration or ''}; action={shot.primary_action or ''}; camera={shot.camera_angle or ''}, {shot.framing or ''}, {shot.camera_motion or ''}; transition={shot.transition_to_next or ''}; retention={json.dumps(shot.retention_json or {}, ensure_ascii=False)}; transition_pack={json.dumps(shot.transition_json or {}, ensure_ascii=False)}; sound={json.dumps(shot.sound_design_json or {}, ensure_ascii=False)}"
-        )
-        for shot in shots
+    shot_lines = _video_prompt_shot_lines(
+        shots,
+        project,
+        target_segment_count=target_segment_count,
+        segment_config=segment_config,
+    )
+    prompt_batches = _prompt_pack_batches(shots)
+    batch_shot_token = "<<VOICEBOX_VIDEO_PROMPT_BATCH_SHOTS>>"
+    batch_count_token = "<<VOICEBOX_VIDEO_PROMPT_BATCH_COUNT>>"
+    segment_continuity_requirement = (
+        "dùng đúng approved episode cast và episode-only guests của tập; không dùng rule một nhân vật chính duy nhất."
+        if project.series_id
+        else "giữ continuity: same character / same style / same outfit / same story state."
     )
     segment_prompt_requirements = (
-        f"- Tạo đúng {len(shots)} prompt cho các segment được liệt kê, mỗi prompt ứng với nhãn Segment X of {target_segment_count}; không tạo nhiều prompt nhỏ hơn.\n"
-        f"- Mỗi main prompt phải bắt đầu hoặc nêu rõ: Create a {segment_config.prompt_duration_seconds}-second {project.aspect_ratio} video.\n"
-        "- Mỗi prompt phải nhắc `This is segment X of N` và giữ continuity: same character / same style / same outfit / same story state.\n"
+        f"- Tạo đúng {batch_count_token} prompt cho các segment được liệt kê, mỗi prompt ứng với nhãn Segment X of {target_segment_count}; không tạo nhiều prompt nhỏ hơn.\n"
+        f"- Mỗi main prompt phải bắt đầu hoặc nêu rõ: Create a {segment_config.prompt_duration_seconds}-second {project.aspect_ratio} high-quality stylized 3D cinematic animation video.\n"
+        f"- Mỗi prompt phải nhắc `This is segment X of N` và {segment_continuity_requirement}\n"
         f"- Mỗi prompt phải có timeline rõ ràng với đúng {segment_config.micro_scenes_per_prompt} micro-scene liên tục trong một clip {segment_config.prompt_duration_seconds}s, khớp micro_scenes đã liệt kê.\n"
         "- Cuối mỗi prompt phải có transition sang segment tiếp theo; segment cuối giữ final composition hoặc CTA.\n"
         f"- Nếu segment cuối có usable_duration dưới {segment_config.prompt_duration_seconds}s, prompt vẫn tạo clip {segment_config.prompt_duration_seconds}s nhưng phần usable phải nằm ở đầu clip để render có thể trim phần dư."
@@ -3459,17 +3758,23 @@ def generate_video_prompt_pack(project_id: str, db: Session) -> models.VideoShot
                 for item in reference_package.get("reference_assets", [])
                 if isinstance(item, dict)
             ]
-            reference_instruction = "Ảnh tham chiếu đã duyệt cần giữ trong prompt (provider-neutral, chỉ dùng ID/metadata an toàn):\n" + "\n".join(reference_lines)
+            reference_instruction = (
+                "Visual references đã duyệt chỉ dùng để giữ identity/canon; khi viết prompt phải chuyển hóa thành "
+                "stylized 3D cinematic animation, không biến thành prompt ảnh tĩnh hoặc flat 2D panel "
+                "(provider-neutral, chỉ dùng ID/metadata an toàn):\n" + "\n".join(reference_lines)
+            )
     prompt = f"""
 Bạn là chuyên gia prompt tạo video AI. Tạo prompt video dạng dùng chung, không nhắc tên provider cụ thể, và không được mâu thuẫn với ngôn ngữ video đã chọn.
 
 {_project_context(project, db)}
 
+{video_series_characters.video_prompt_instructions(project)}
+
 Continuity bible:\n{project.continuity_bible or project.style_bible or ''}
 
 {reference_instruction}
 
-Shot/segment cần tạo prompt:\n{shot_lines}
+Shot/segment cần tạo prompt:\n{batch_shot_token}
 
 Yêu cầu bắt buộc:
 - {video_language.viewer_language_instruction(project.target_language)}
@@ -3477,6 +3782,8 @@ Yêu cầu bắt buộc:
 - Prompt phải là prompt tạo video, không phải prompt ảnh.
 - Không nhắc Runway, Kling, Veo, Pika, Luma hoặc provider cụ thể.
 {segment_prompt_requirements}
+- Tất cả prompt video phải ưu tiên high-quality stylized 3D/cinematic 3D animation: nhân vật có khối, chiều sâu, volumetric lighting, vật liệu có độ dày, parallax và camera movement thật.
+- Nếu source là truyện tranh, webtoon, manga, ảnh, illustration hoặc reference 2D thì chỉ dùng làm căn cứ visual/canon và phải chuyển hóa thành 3D animated video look; không giữ dạng flat 2D illustration, comic panel, storyboard frame hoặc static image.
 - Mỗi prompt có đủ duration, aspect ratio, subject/action, shot type, camera angle, framing, composition, camera movement, subject motion, environment motion, lighting, mood, start frame, end frame, continuity notes.
 - Mỗi prompt có đủ duration, aspect ratio, subject/action, shot type, camera angle, framing, composition, camera movement, subject motion, environment motion, lighting, mood, start frame, end frame, continuity notes, retention_notes, transition_notes và sound_design_notes.
 - Mỗi prompt/shot chỉ có một hành động chính. Không gom nhiều hành động chính như mở cửa + chạy + hồi tưởng + ngã trong cùng một shot; nếu nội dung có nhiều hành động chính thì phải tách ở bước shot/segment trước khi viết prompt.
@@ -3492,58 +3799,146 @@ Yêu cầu bắt buộc:
 - prompt_explanation_vi cũng phải giải thích retention purpose, chuyển cảnh và cue âm thanh/SFX của segment.
 - Nếu prompt dùng tiếng Anh kỹ thuật cho camera/visual, vẫn phải chỉ dẫn rõ viewer-facing narration, speech, subtitle hoặc on-screen text dùng {video_language.video_language_label(project.target_language)}.
 - Negative prompt tránh text overlay, subtitle sai, watermark, logo, distorted face, bad hands, flicker, unwanted camera shake, audio-caption mismatch hoặc extra people nếu không phù hợp.
+- Với project series, negative prompt phải chặn duplicate character, identity swap, unintended named character, wrong face, wrong hairstyle, wrong signature outfit và extra foreground character ngoài cast.
+- Negative prompt phải chặn thêm các lỗi 2D/static-image: no 2D illustration, no flat drawing, no flat comic panel, no static image, no image prompt, no storyboard frame, no line-art-only render.
 - Không dùng tool/command, không đọc file trong project, không giải thích quá trình; schema đã được truyền qua output_schema.
 - Chỉ trả về đúng JSON theo schema, không thêm markdown.
 """.strip()
     raw_pack: dict | None = None
     normalized_pack: dict | None = None
+    batch_raw_items: list[dict] = []
+    batch_normalized_items: list[dict] = []
     try:
-        for mapping_attempt in range(1, MAX_RETRIES + 1):
-            try:
-                raw_pack = _run_structured_codex(db, project, prompt, VIDEO_PROMPT_PACK_SCHEMA, step_name="video_prompt_generation")
-                normalized_pack = _normalize_video_prompt_pack_payload(raw_pack, project)
-                pack = VideoPromptPackPlan.model_validate(normalized_pack)
-                quality_by_order = _validate_prompt_pack_output(raw_pack, pack, shots, project)
-                break
-            except ai_planning.AIPlanningError as exc:
-                if not _phase2_should_use_provider_fallback(exc):
-                    raise
-                raw_pack = _fallback_video_prompt_pack_payload(project, shots, fallback_reason=str(exc))
-                normalized_pack = _normalize_video_prompt_pack_payload(raw_pack, project)
-                pack = VideoPromptPackPlan.model_validate(normalized_pack)
-                quality_by_order = _validate_prompt_pack_output(raw_pack, pack, shots, project)
-                video_observability.log_event(
-                    db,
-                    step_name="video_prompt_fallback",
-                    status="warning",
-                    project_id=project_id,
-                    error_code=getattr(exc, "error_code", "CODEX_EXEC_TIMEOUT"),
-                    exc=exc,
-                    message="Provider prompt pack lỗi/chậm; dùng fallback nội bộ từ shots đã duyệt.",
+        for batch_index, batch_shots in enumerate(prompt_batches, start=1):
+            batch_orders = [shot.shot_order for shot in batch_shots]
+            batch_idempotency_key = _prompt_pack_batch_idempotency_key(project, batch_shots)
+            batch_context = {
+                "batch_index": batch_index,
+                "batch_count": len(prompt_batches),
+                "batch_start_order": batch_orders[0],
+                "batch_end_order": batch_orders[-1],
+                "batch_shot_orders": batch_orders,
+                "batch_idempotency_key": batch_idempotency_key,
+                "expected_prompt_count": len(batch_shots),
+                "batch_max_attempts": VIDEO_PROMPT_BATCH_MAX_ATTEMPTS,
+            }
+            batch_shot_lines = _video_prompt_shot_lines(
+                batch_shots,
+                project,
+                target_segment_count=target_segment_count,
+                segment_config=segment_config,
+            )
+            batch_prompt = prompt.replace(batch_shot_token, batch_shot_lines).replace(
+                batch_count_token,
+                str(len(batch_shots)),
+            )
+            batch_context["batch_prompt_chars"] = len(batch_prompt)
+            batch_context["batch_retry_count"] = 0
+
+            batch_succeeded = False
+            for batch_attempt in range(1, VIDEO_PROMPT_BATCH_MAX_ATTEMPTS + 1):
+                raw_pack = None
+                normalized_pack = None
+                try:
+                    raw_pack = _run_structured_codex(
+                        db,
+                        project,
+                        batch_prompt,
+                        VIDEO_PROMPT_PACK_SCHEMA,
+                        step_name="video_prompt_generation",
+                        max_attempts=1,
+                        technical_context={**batch_context, "batch_attempt": batch_attempt},
+                    )
+                    normalized_pack = _normalize_video_prompt_pack_payload(raw_pack, project)
+                    batch_pack = VideoPromptPackPlan.model_validate(normalized_pack)
+                    _validate_prompt_pack_output(raw_pack, batch_pack, batch_shots, project)
+                    raw_items = _raw_items_from_payload(raw_pack, *VIDEO_PROMPT_LIST_KEYS)
+                    batch_raw_items.extend(item for item in raw_items if isinstance(item, dict))
+                    batch_normalized_items.extend(
+                        item for item in normalized_pack.get("prompts", []) if isinstance(item, dict)
+                    )
+                    video_observability.log_event(
+                        db,
+                        step_name="video_prompt_generation_batch",
+                        status="success",
+                        project_id=project_id,
+                        retry_count=batch_attempt - 1,
+                        technical_details={
+                            **batch_context,
+                            "batch_attempt": batch_attempt,
+                            "batch_retry_count": batch_attempt - 1,
+                            "output_prompt_count": len(batch_pack.prompts),
+                        },
+                        message=f"Hoàn tất batch prompt video {batch_index}/{len(prompt_batches)}.",
+                    )
+                    batch_succeeded = True
+                    break
+                except (ai_planning.AIPlanningError, ValidationError, VideoPlanningValidationError) as exc:
+                    should_retry = batch_attempt < VIDEO_PROMPT_BATCH_MAX_ATTEMPTS
+                    batch_context["batch_retry_count"] = batch_attempt if should_retry else batch_attempt - 1
+                    video_observability.log_event(
+                        db,
+                        step_name="video_prompt_generation_batch_retry" if should_retry else "video_prompt_generation_batch_failure",
+                        status="warning" if should_retry else "failure",
+                        project_id=project_id,
+                        retry_count=batch_attempt,
+                        error_code=getattr(exc, "error_code", "VIDEO_PROMPT_INVALID_OUTPUT"),
+                        exc=exc,
+                        technical_details={
+                            **batch_context,
+                            "batch_attempt": batch_attempt,
+                            "will_retry": should_retry,
+                            "raw_field_types": _payload_type_summary(raw_pack or {}),
+                            "normalized_field_types": _payload_type_summary(normalized_pack or {}),
+                            "raw_prompt_count": len(_raw_items_from_payload(raw_pack or {}, *VIDEO_PROMPT_LIST_KEYS)),
+                            "normalized_prompt_count": len(normalized_pack.get("prompts", [])) if isinstance(normalized_pack, dict) else 0,
+                        },
+                        validation_errors=(
+                            exc.errors()
+                            if isinstance(exc, ValidationError)
+                            else _validation_errors_from_exception(exc)
+                        ),
+                        message=(
+                            f"Batch prompt video {batch_index}/{len(prompt_batches)} lỗi; sẽ retry một lần."
+                            if should_retry
+                            else f"Batch prompt video {batch_index}/{len(prompt_batches)} thất bại sau một lần retry."
+                        ),
+                    )
+                    if isinstance(exc, (ValidationError, VideoPlanningValidationError)):
+                        video_observability.log_event(
+                            db,
+                            step_name="video_prompt_validation",
+                            status="warning" if should_retry else "failure",
+                            project_id=project_id,
+                            retry_count=batch_attempt,
+                            error_code=getattr(exc, "error_code", "VIDEO_PROMPT_INVALID_OUTPUT"),
+                            exc=exc,
+                            technical_details={**batch_context, "batch_attempt": batch_attempt, "will_retry": should_retry},
+                            validation_errors=(
+                                exc.errors()
+                                if isinstance(exc, ValidationError)
+                                else _validation_errors_from_exception(exc)
+                            ),
+                            message="Prompt pack mapping fail trong batch; chỉ retry batch hiện tại.",
+                        )
+                    if not should_retry:
+                        raise
+                    time.sleep(RETRY_DELAY_SECONDS)
+            if not batch_succeeded:
+                raise VideoPlanningValidationError(
+                    f"Không thể tạo batch prompt video {batch_index}/{len(prompt_batches)}."
                 )
-                break
-            except (ValidationError, VideoPlanningValidationError) as exc:
-                if mapping_attempt >= MAX_RETRIES:
-                    raise
-                video_observability.log_event(
-                    db,
-                    step_name="video_prompt_validation",
-                    status="warning",
-                    project_id=project_id,
-                    error_code=getattr(exc, "error_code", "VIDEO_PROMPT_INVALID_OUTPUT"),
-                    exc=exc,
-                    retry_count=mapping_attempt,
-                    technical_details={
-                        "mapping_attempt": mapping_attempt,
-                        "will_retry": True,
-                        "raw_field_types": _payload_type_summary(raw_pack or {}),
-                        "normalized_field_types": _payload_type_summary(normalized_pack or {}),
-                        "raw_prompt_count": len(_raw_items_from_payload(raw_pack or {}, *VIDEO_PROMPT_LIST_KEYS)),
-                        "normalized_prompt_count": len(normalized_pack.get("prompts", [])) if isinstance(normalized_pack, dict) else 0,
-                    },
-                    validation_errors=exc.errors() if isinstance(exc, ValidationError) else _validation_errors_from_exception(exc),
-                    message="Prompt pack mapping fail, đang retry Codex trước khi ghi DB.",
-                )
+
+        merged_raw = {
+            "prompts": [
+                {**raw_item, **normalized_item}
+                for raw_item, normalized_item in zip(batch_raw_items, batch_normalized_items)
+            ]
+        }
+        normalized_pack = {"prompts": batch_normalized_items}
+        pack = VideoPromptPackPlan.model_validate(normalized_pack)
+        quality_by_order = _validate_prompt_pack_output(merged_raw, pack, shots, project)
+        raw_pack = merged_raw
     except ValidationError as exc:
         video_observability.log_event(
             db,
@@ -3794,54 +4189,6 @@ def _stored_prompt_download_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, p
     ])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
-def _stored_prompt_download_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, project: DBVideoProject) -> str:  # type: ignore[no-redef]  # noqa: F811
-    is_english = video_language.normalize_video_language(project.target_language) == "en"
-    header = "# Original prompt for video tool copy" if is_english else "# Prompt goc de copy sang cong cu tao video"
-    transition_label = "Transition notes:" if is_english else "Chuyen canh:"
-    sound_label = "Sound design notes:" if is_english else "Am thanh/SFX:"
-    explanation_label = "Prompt explanation:" if is_english else "Ban giai thich tieng Viet:"
-    explanation_note = (
-        "Note: this is a directing guide only if you have not yet mixed real SFX/BGM into the MP4."
-        if is_english
-        else "Ghi chu: day la chi dan dung neu chua co asset SFX/BGM that duoc mix vao MP4."
-    )
-    missing_explanation = (
-        "No separate prompt explanation is available for this prompt. Regenerate the video prompt to create a full explanation."
-        if is_english
-        else _missing_prompt_explanation_text()
-    )
-    parts = [
-        header,
-        "",
-        (prompt.prompt or "").strip(),
-        "",
-        f"Video language: {video_language.video_language_english_name(project.target_language)}",
-        f"Aspect ratio: {prompt.aspect_ratio or project.aspect_ratio}",
-        f"Duration: {prompt.duration_seconds or shot.duration_seconds or ''} seconds",
-        f"Camera movement: {prompt.camera_motion or shot.camera_motion or ''}",
-        f"Subject motion: {prompt.subject_motion or shot.subject_motion or ''}",
-        f"Environment motion: {prompt.environment_motion or shot.environment_motion or ''}",
-        f"Start frame: {prompt.start_frame or ''}",
-        f"End frame: {prompt.end_frame or ''}",
-        f"Lighting: {prompt.lighting or ''}",
-        f"Mood: {prompt.mood or ''}",
-        f"Continuity notes: {prompt.continuity_notes or ''}",
-    ]
-    if prompt.negative_prompt:
-        parts.extend(["", "Negative prompt:", prompt.negative_prompt.strip()])
-    if prompt.retention_notes:
-        parts.extend(["", "Retention:", prompt.retention_notes.strip()])
-    if prompt.transition_notes:
-        parts.extend(["", transition_label, prompt.transition_notes.strip()])
-    if prompt.sound_design_notes:
-        parts.extend(["", sound_label, prompt.sound_design_notes.strip(), explanation_note])
-    parts.extend([
-        "",
-        explanation_label,
-        (prompt.prompt_explanation_vi or "").strip() or missing_explanation,
-    ])
-    return "\n".join(part for part in parts if part is not None).strip() + "\n"
-
 def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> models.VideoPromptContentResponse | None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     shot = db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id, DBVideoShot.id == shot_id).first()
@@ -3918,7 +4265,9 @@ Shot trả về phải có retention_role, open_loop, visual_surprise, cut_reaso
 {_narration_length_instruction(project, duration_seconds=shot.duration_seconds, shot_order=shot.shot_order)}
 """.strip()
     raw_plan = _run_structured_codex(db, project, prompt, SHOT_BREAKDOWN_SCHEMA, step_name="shot_regenerate")
-    plan = ShotBreakdownPlan.model_validate(_normalize_shot_breakdown_payload(raw_plan))
+    plan = ShotBreakdownPlan.model_validate(
+        _normalize_shot_breakdown_payload(raw_plan, dialogue_mode=project.dialogue_mode)
+    )
     if not plan.shots:
         raise VideoPlanningValidationError("AI không trả về shot để cập nhật.")
     _finalize_shot_creative_direction(plan.shots)
@@ -3946,6 +4295,7 @@ Shot trả về phải có retention_role, open_loop, visual_surprise, cut_reaso
             retention_json=_shot_retention_metadata(item),
             transition_json=item.transition_pack.model_dump(),
             sound_design_json=item.sound_design.model_dump(),
+            speech_cues=item.speech_cues,
             retainability_quality_check=quality,
         ),
         db,

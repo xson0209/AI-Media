@@ -1,0 +1,155 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - link:
+              - /url: /generate
+            - link:
+              - /url: /stories
+            - link:
+              - /url: /captures
+            - link:
+              - /url: /voices
+            - link:
+              - /url: /effects
+            - link:
+              - /url: /video-inspiration
+            - link:
+              - /url: /research
+            - link:
+              - /url: /ai-video
+            - link:
+              - /url: /product-video
+            - link:
+              - /url: /comic-series-analysis
+            - link:
+              - /url: /story-studio
+            - link:
+              - /url: /models
+            - link:
+              - /url: /settings
+          - generic: v0.5.0
+        - main:
+          - generic:
+            - generic:
+              - complementary:
+                - generic:
+                  - heading [level=1]: Video sản phẩm
+                - button: Dự án mới
+                - generic:
+                  - list:
+                    - listitem:
+                      - button:
+                        - generic: Combo bình giữ nhiệt
+                        - generic:
+                          - generic: 9:16
+                          - generic: 8 clip
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic: Sản phẩm và ý tưởng
+                      - textbox:
+                        - /placeholder: "Ví dụ: hộp khô gà cay, nhấn vị cay và tiện mang đi, combo 2 hộp 99K"
+                      - paragraph: Mô tả sản phẩm, điểm bán, và thông điệp muốn truyền.
+                    - generic:
+                      - generic:
+                        - generic: Ngôn ngữ video
+                        - combobox:
+                          - generic: Tiếng Việt
+                      - generic:
+                        - generic: Tỉ lệ video
+                        - combobox:
+                          - generic: Dọc 9:16
+                      - generic:
+                        - generic: Thể loại
+                        - combobox:
+                          - generic: Quảng cáo / bán hàng
+                      - generic:
+                        - generic: Thời lượng mục tiêu
+                        - combobox:
+                          - generic: 30 giây
+                        - paragraph: 30s → 4 clip × 8s = 32s thực tế
+                    - generic:
+                      - generic:
+                        - generic: Mode thoại
+                        - combobox [expanded]:
+                          - generic: Thuyết minh
+                      - generic:
+                        - generic: Mật độ thoại
+                        - combobox:
+                          - generic: Ít thoại
+                      - generic:
+                        - generic: CTA
+                        - combobox:
+                          - generic: Trực tiếp
+                    - generic:
+                      - generic:
+                        - generic: Cách chạy
+                        - generic: Tự chạy sau khi tạo
+                      - generic:
+                        - button [pressed]: Dựng nhanh
+                        - button: Thủ công
+                    - generic:
+                      - generic:
+                        - generic: Mức tự động
+                        - generic: Tự chạy hết
+                      - generic:
+                        - button:
+                          - generic:
+                            - generic: Duyệt từng chặng
+                            - generic: Dừng sau khi lập kế hoạch
+                        - button [pressed]:
+                          - generic:
+                            - generic: Tự chạy hết
+                            - generic: Tự sinh prompt pack nội bộ
+                    - generic:
+                      - generic:
+                        - generic: Đầu ra tự chạy
+                        - generic: Prompt + bridge dựng MP4
+                      - generic:
+                        - button [pressed]:
+                          - generic:
+                            - generic: Sẵn sàng dựng MP4
+                            - generic: Sinh prompt và chuẩn bị bridge; bạn vẫn upload clip rồi bấm Dựng MP4
+                        - button:
+                          - generic:
+                            - generic: Prompt pack thoại
+                            - generic: Sinh prompt để kiểm tra và tải xuống; không chạy provider/TTS
+                        - button:
+                          - generic:
+                            - generic: Chỉ câu lệnh video
+                            - generic: Chỉ lập kế hoạch cảnh, dừng trước bước sinh prompt
+                    - generic:
+                      - generic: Phong cách
+                      - combobox:
+                        - generic: UGC cầm sản phẩm ngoài đường
+                      - textbox:
+                        - /placeholder: "Mô tả phong cách bằng tiếng Anh: chủ thể, chuyển động camera, chuyển động hậu cảnh, ánh sáng."
+                        - text: "Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. Background is softly out of focus and clearly in motion while the product stays sharp. Lighting: warm natural daylight, soft shadow, no harsh glare across the label surface."
+                      - paragraph: Chọn preset để điền sẵn rồi sửa thoải mái, hoặc chọn Tự nhập để viết từ đầu.
+                    - generic:
+                      - generic:
+                        - generic: Số câu lệnh
+                        - spinbutton: "4"
+                        - paragraph: Số clip/prompt sẽ lập kế hoạch.
+                      - generic:
+                        - generic: Giây/câu lệnh
+                        - combobox:
+                          - generic: 8 giây
+                        - paragraph: Flow chỉ nhận 4, 6, 8 hoặc 10 giây.
+                      - generic:
+                        - generic: Cảnh nhỏ
+                        - spinbutton: "3"
+                        - paragraph: Số nhịp hình bên trong một clip. 1 đến 5.
+                    - paragraph:
+                      - generic: Luồng này dùng prompt sản phẩm riêng. Chế độ tự chạy chỉ lập kế hoạch và sinh prompt nội bộ — không tự gửi Veo, Chrome, TTS, phụ đề hay render. Sau đó bạn có thể tự dùng Flow, hoặc upload clip vào phần dựng MP4 bên dưới. Sẽ có 4 prompt cần dùng.
+                  - generic:
+                    - button [disabled]: Tạo dự án
+      - list
+  - listbox [ref=e202]:
+    - option "Thuyết minh" [active] [selected] [ref=e203]
+    - option "Nhân vật nói" [ref=e209]
+    - option "Kết hợp" [ref=e212]

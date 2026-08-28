@@ -1,93 +1,148 @@
 ## Context
 
-AI Video phase 2 hiện có nhiều bước dùng Codex CLI qua `ai_planning.run_codex_exec`: phát triển story, tạo shot breakdown và tạo prompt video pack. Auto-run đã điều phối các bước này theo từng project, nhưng khi nhiều project cùng chạy thì throughput chưa tối ưu vì mỗi bước planning nặng thường giữ một project chờ trong nhiều phút.
+Ứng dụng có hai luồng xử lý dài:
 
-Prompt video pack có yêu cầu continuity cao. Một project cần giữ một full-pack Codex call để AI nhìn toàn bộ shot list, segment order, continuity bible, transition và target language cùng lúc. Vì vậy tối ưu đúng ở đây không phải chia một project thành nhiều prompt call song song, mà là cho nhiều project khác nhau chạy planning song song với giới hạn an toàn.
+1. AI Video auto-run đã chạy nền và có planning pool, nhưng chưa có giới hạn chung theo số dự án và việc hủy chưa dọn voice đã xếp hàng.
+2. Video Inspiration analyze/rewrite vẫn thực hiện nhiều bước nặng ngay trong HTTP request. Analyze có các bước trích khung hình, nhận dạng lời nói và hai lần gọi Codex; rewrite có bốn lần gọi Codex nối tiếp. Vì vậy một request có thể kéo dài nhiều phút và làm polling/UI phản hồi chậm.
 
-Code hiện có các ràng buộc quan trọng:
-- Codex execution là subprocess blocking, có timeout/retry và structured output schema.
-- Auto-run chạy trong background task và đã có state machine riêng cho project.
-- TTS generation dùng serial queue riêng để tránh tranh GPU; change này không được đụng vào cơ chế đó.
-- App là local desktop/server single-process trong thực tế hiện tại, SQLite local và artifact storage local.
+Generation queue hiện mặc định có 2 worker nhưng có thể bị nâng lên 4 bằng môi trường, đường `/generate/stream` bỏ qua queue, và voice vừa enqueue đã bị ghi là `generating`. Do đó giới hạn 2 chưa phải giới hạn tuyệt đối và UI chưa phân biệt được đang chờ với đang chạy thật.
+
+Ứng dụng hiện là local desktop/server, một backend process, SQLite và artifact storage local. Thiết kế này tối ưu cho mô hình đó.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Cho phép tối đa 2 Codex planning jobs chạy song song toàn app theo mặc định.
-- Giữ mỗi project chỉ có một planning operation active tại một thời điểm.
-- Giữ `generate_video_prompt_pack` là một full-pack call trong một project, không tách batch theo shot.
-- Áp dụng cùng giới hạn cho auto-run và manual AI Video planning endpoints.
-- Hiển thị/log được trạng thái chờ slot, thời gian chờ, job đang chạy và lỗi.
-- Release slot chắc chắn khi planning success, validation fail, Codex timeout, exception hoặc auto-run dừng.
+
+- Tối đa 3 workflow AI Video hoặc Video Inspiration được xử lý cùng lúc.
+- Dự án thứ tư tự chờ theo FIFO và tự tiếp tục khi có slot.
+- Video Inspiration analyze/rewrite chạy nền và endpoint trả nhanh.
+- Tối đa 3 Codex planning operations toàn app, nhưng cùng một project/job không chạy planning trùng.
+- Tối đa 2 voice inferences toàn app, kể cả streaming.
+- Tối đa 1 STT inference mặc định.
+- Hiển thị trạng thái tài nguyên và hàng đợi bằng tiếng Việt.
+- Cancel/retry/restart không làm rò slot và không để job treo vô hạn.
+- Giữ prompt pack của một AI Video project là một full-pack Codex call.
 
 **Non-Goals:**
-- Không chia prompt pack của một project thành nhiều Codex call.
-- Không tăng song song voice/TTS generation.
-- Không thêm distributed queue, Redis hoặc worker process ngoài.
-- Không thay đổi output schema của prompt video, shot breakdown hoặc story development.
-- Không cố giải quyết multi-process server deployment trong change này.
+
+- Không làm một lần gọi Codex đơn lẻ nhanh hơn.
+- Không chia prompt pack theo shot để chạy song song trong cùng project.
+- Không thêm Redis, distributed queue, nhiều worker process hoặc nhiều máy.
+- Không tiếp tục một subprocess Codex/TTS đang chạy dở sau khi ứng dụng bị tắt đột ngột.
+- Không tạo engine voice mới hoặc thay đổi chất lượng giọng.
 
 ## Decisions
 
-### 1. Dùng global planning pool mặc định 2 slot
+### 1. Một workflow pool FIFO, tối đa 3 dự án
 
-Quyết định: thêm service nhỏ cho AI Video planning concurrency, ví dụ `video_planning_pool`, quản lý một global semaphore/pool với `max_concurrency = 2` theo mặc định. Giá trị có thể override bằng env hoặc setting sau khi test, nhưng default implementation phải an toàn và không vượt 2 nếu chưa cấu hình rõ.
+Thêm một coordinator in-memory dùng chung với `max_concurrency = 3`. Mỗi đơn vị công việc có khóa ổn định:
 
-Phương án khác đã cân nhắc: giữ tuần tự một job toàn app. Cách này an toàn nhưng không tận dụng được thời gian chờ network/API khi có nhiều project. Chạy không giới hạn thì dễ tạo nhiều subprocess Codex, tăng timeout/rate-limit và làm UI khó hiểu.
+- `ai-video:<project_id>`
+- `video-inspiration:<job_id>`
 
-### 2. Giữ per-project planning lock độc lập với global slot
+Pool lưu số đang chạy, số đang chờ và work keys để API/UI có thể hiển thị. Cùng một key không thể được chạy hai lần. Việc lấy và trả slot dùng context manager/finally để slot luôn được trả sau success, error hoặc cancel.
 
-Quyết định: trước khi một planning job xin global slot, service kiểm tra project đó có planning operation active chưa. Nếu có, request cùng project phải dừng rõ ràng bằng lỗi tiếng Việt hoặc trạng thái waiting/active đã biết, và không tạo thêm Codex call trùng.
+AI Video auto-run giữ slot khi nó đang tự xử lý. Khi run chuyển sang trạng thái cần người dùng duyệt/nhập thêm hoặc trạng thái kết thúc, slot được trả. Continue/retry sẽ xin slot lại. Video Inspiration analyze/rewrite giữ slot trong thời gian background operation đang xử lý.
 
-Lý do: prompt/story/shot writes đang cập nhật artifact và status theo project. Hai planning operations cùng project có thể ghi đè prompt, stale state hoặc package readiness sai. Per-project lock bảo vệ dữ liệu; global pool chỉ bảo vệ throughput.
+FIFO được dùng để project thứ tư không bị bỏ đói. Đây là fairness ở mức workflow; generation queue tiếp tục FIFO ở mức voice.
 
-### 3. Bọc planning call ở boundary chung, không rewrite từng prompt generator
+### 2. Planning pool dùng chung, tối đa 3 Codex operations
 
-Quyết định: mọi đường gọi Codex trong AI Video phase 2 phải đi qua một boundary chung, ví dụ wrapper quanh `_run_structured_codex` hoặc `ai_planning.run_codex_exec` khi có `project_id`/`step_name`. Boundary này chịu trách nhiệm acquire/release slot, log wait/run, và giữ retry behavior hiện có bên trong planning step.
+Planning pool hiện có được tổng quát hóa để nhận `work_key`, `workflow_type`, `project_id?`, `job_id?` thay vì giả lập Video Inspiration thành AI Video project. Global concurrency mặc định là 3, và mỗi work key có một lock riêng.
 
-Phương án khác đã cân nhắc: thêm semaphore riêng ở từng route/service method. Cách đó dễ bỏ sót path manual hoặc auto-run, và sau này thêm step planning mới sẽ dễ bypass giới hạn.
+Mọi AI Video manual/auto planning và mọi Codex call của Video Inspiration đều đi qua boundary này. Các retry của cùng một planning step nằm trong cùng slot. Debug events chỉ lưu id, step, thời lượng và số lượng; không lưu full prompt/source/narration.
 
-### 4. Full prompt pack vẫn là đơn vị atomic trong một project
+### 3. Video Inspiration dùng background runner và DB session riêng
 
-Quyết định: `generate_video_prompt_pack` vẫn build prompt từ toàn bộ shot cần tạo, gọi Codex một lần và validate/ghi kết quả như hiện tại. Concurrency chỉ xảy ra giữa project khác nhau, ví dụ project A và project B cùng tạo prompt pack.
+Analyze/rewrite endpoint thực hiện validate, đặt trạng thái `queued`, tạo background task và trả response ngay. Background runner mở DB session riêng, xin workflow slot, cập nhật trạng thái và chạy pipeline.
 
-Lý do: người dùng đã lo đúng về việc gọi Codex riêng có thể làm dữ liệu không đồng bộ. Full-pack call giữ cùng continuity bible, language instruction, target segment count và transition plan trong một response.
+Các phần blocking như FFmpeg/frame extraction/Codex subprocess được đưa sang worker thread bằng `asyncio.to_thread` để event loop vẫn phục vụ health check, polling và thao tác dự án khác. SQLAlchemy session không được dùng đồng thời giữa các thread.
 
-### 5. Auto-run có waiting planning state, manual API dùng cùng pool
+Analyze vẫn là pipeline async vì có STT. Rewrite được cung cấp async background core; wrapper đồng bộ cũ chỉ được giữ nếu test/đường gọi tương thích còn cần.
 
-Auto-run khi không lấy được slot ngay phải chuyển sang trạng thái dễ hiểu như `waiting_planning` hoặc giữ `running` với `current_step` mô tả đang chờ slot Codex. Khi có slot, auto-run tiếp tục step hiện tại.
+### 4. Voice có hard cap 2 trên mọi đường tạo giọng
 
-Manual endpoints vẫn có thể trả response đồng bộ như hiện tại, nhưng không được bypass pool. Nếu project đang có planning job khác active, manual endpoint trả lỗi tiếng Việt rõ ràng thay vì chờ mơ hồ hoặc tạo job trùng. Nếu chỉ thiếu global slot nhưng project không trùng, endpoint có thể chờ trong giới hạn timeout hiện có và log wait duration.
+Generation queue luôn clamp concurrency vào `1..2`; biến môi trường không thể nâng vượt 2. Thêm một inference gate dùng chung, được acquire bởi:
 
-### 6. Pool là in-memory cho MVP, không thêm migration
+- Worker của generation queue.
+- `/generate/stream` và mọi direct generation path còn lại.
 
-Quyết định: dùng in-memory semaphore/registry trong process cho MVP. App hiện chạy local single process; auto-run interruption đã có hướng xử lý khi app restart. Không cần thêm bảng DB nếu chỉ cần giới hạn concurrent Codex subprocess trong runtime.
+Nhờ vậy tổng số voice inference thật không vượt 2 trong một backend process. Gate được trả trong `finally` sau success, lỗi hoặc hủy.
 
-Phương án khác đã cân nhắc: persisted planning_jobs table. Cách này giúp inspect sâu và multi-process hơn, nhưng làm scope lớn hơn nhiều. Nếu sau này cần queue/history UI chi tiết, có thể nâng cấp từ pool in-memory sang persisted job model.
+Trạng thái voice được tách:
 
-### 7. TTS serial queue không bị thay đổi
+- `queued`: đã vào hàng đợi, chưa dùng model.
+- `loading_model`: worker đã nhận job và đang chuẩn bị model.
+- `generating`: model đang tạo audio.
+- `completed`, `failed`, `cancelled`: trạng thái kết thúc.
 
-Planning pool mới không được dùng `task_queue.enqueue_generation` vì queue đó cố ý serialize TTS inference. Auto-run vẫn enqueue nhiều voice shot như hiện tại, nhưng voice worker vẫn xử lý một generation tại một thời điểm.
+### 5. Hủy dự án truyền xuống công việc đang chờ
+
+Khi hủy AI Video auto-run, backend tìm generation thuộc các scene/shot của project:
+
+- Voice `queued` bị xóa/đánh dấu hủy ngay và không chạy sau đó.
+- Voice đang chạy nhận cancel signal nếu engine hỗ trợ; nếu không, kết quả không được dùng để tiếp tục auto-run và run dừng ở checkpoint an toàn.
+- Audio đã hoàn tất không bị xóa.
+
+Khi hủy Video Inspiration:
+
+- Job đang chờ workflow slot dừng ngay.
+- Job đang chạy dừng trước bước nặng tiếp theo. Subprocess đang chạy có thể chỉ dừng ở checkpoint nếu chưa hỗ trợ kill an toàn.
+
+### 6. STT mặc định 1, render giữ khóa hiện có
+
+Thêm STT gate in-memory mặc định 1 cho Video Inspiration. Job khác hiển thị đang chờ nhận dạng lời nói. Render tiếp tục dùng global render lock hiện có; change này không tạo một cơ chế render thứ hai.
+
+### 7. API tài nguyên là nguồn dữ liệu chung cho UI
+
+Resource status trả về các nhóm:
+
+- Workflow: `running`, `queued`, `max_concurrency = 3`.
+- Planning: `running`, `queued`, `max_concurrency = 3`.
+- Voice: `running`, `queued`, `max_concurrency = 2`.
+- STT: `running`, `queued`, `max_concurrency = 1`.
+
+Frontend chuyển các mã nội bộ sang câu tiếng Việt, ví dụ `Đang chạy 3/3 dự án`, `Tạo giọng 2/2`, `Có 4 giọng đang chờ`. Không hiển thị raw status code cho người dùng.
+
+### 8. Polling theo danh sách tổng hợp, detail theo lựa chọn
+
+Danh sách project/job tiếp tục poll nhanh khi có công việc active. Frontend không tạo một request detail riêng cho mọi project vô thời hạn. Detail chỉ poll cho project đang chọn và các run thực sự cần theo dõi; trạng thái tổng quát lấy từ list/resource status.
+
+Video Inspiration bỏ cờ `busy` toàn trang. Chỉ action của đúng job đang chạy bị khóa, vì vậy người dùng có thể chọn/tạo job khác và bắt đầu dự án thứ hai hoặc thứ ba.
+
+### 9. Restart đánh dấu interrupted và cho retry
+
+Pool là in-memory nên không phục hồi computation đang chạy dở. Khi backend khởi động:
+
+- Job lưu trong DB ở trạng thái active nhưng không còn task runtime được chuyển thành `interrupted`/`failed` với thông báo tiếng Việt.
+- Người dùng có thể retry từ checkpoint hợp lệ.
+- Không tự tạo trùng subprocess của job cũ.
+
+### 10. Phạm vi giới hạn là một backend process
+
+Mọi hard cap trong change này áp dụng cho một backend process local. Backend phải tiếp tục chạy một worker. Nếu sau này dùng nhiều process/replica, cần queue phân tán và semaphore dùng chung; đó là một change riêng.
 
 ## Risks / Trade-offs
 
-- Codex/API rate-limit khi chạy 2 job lớn cùng lúc -> Giữ default 2, log timeout/rate error và cho phép hạ về 1 bằng config.
-- Manual endpoint chờ slot có thể làm request lâu hơn -> Log wait state rõ ràng; nếu cần ở phase sau có thể chuyển manual planning sang job/poll endpoint.
-- In-memory pool không giữ trạng thái qua restart -> Running auto-run đã có cơ chế sync interrupted; sau restart pool bắt đầu trống và các run cũ phải được đánh failed/retry rõ ràng.
-- Per-project lock rò rỉ nếu exception không release -> Dùng context manager/finally và test exception path.
-- SQLite write contention nếu hai project hoàn tất Codex cùng lúc -> Mỗi project ghi DB trong transaction riêng, giữ critical section ngắn, không giữ DB session trong lúc chờ slot/Codex nếu có thể.
-- Tăng throughput có thể làm máy người dùng chậm khi Codex subprocess chạy song song -> Default 2, có setting/env để giảm và observability để thấy queue/wait.
+- Ba Codex jobs có thể gặp rate limit hoặc làm máy chậm: giữ config có thể hạ planning về 1 hoặc 2, hiển thị rõ hàng đợi và ghi lỗi an toàn.
+- Hai voice thật chạy song song có thể không phù hợp với mọi engine/GPU: cần smoke test bằng engine đang dùng; có thể hạ runtime về 1 nhưng không nâng quá 2.
+- Background task in-memory mất khi app tắt: đánh dấu interrupted và hỗ trợ retry, không tuyên bố resume chính xác giữa subprocess.
+- SQLite có thể tranh ghi khi nhiều job hoàn tất cùng lúc: mỗi background runner dùng session riêng và transaction ngắn.
+- Cancel subprocess đang chạy không tức thời ở mọi engine: UI nói rõ `Đang dừng...`, ngăn bước tiếp theo và dọn queue ngay.
+- Giữ workflow slot trong lúc chờ resource con có thể giảm throughput, nhưng bảo đảm đúng cam kết chỉ có 3 dự án active và làm trạng thái dễ hiểu.
 
 ## Migration Plan
 
-- Không cần migration database cho MVP.
-- Thêm planning pool service và cấu hình default 2.
-- Bọc các AI Video planning calls hiện có bằng pool chung.
-- Cập nhật auto-run summary/status để hiển thị chờ slot planning.
-- Rollback an toàn bằng cách đặt `max_concurrency = 1` hoặc bypass pool về behavior tuần tự hiện tại.
+1. Thêm workflow coordinator và mở rộng resource status.
+2. Chuyển Video Inspiration analyze/rewrite sang background runner, thêm cancel/retry/recovery.
+3. Đưa Video Inspiration Codex/STT qua các pool tương ứng.
+4. Đặt voice hard cap 2, thêm inference gate và trạng thái queue đúng.
+5. Tích hợp AI Video auto-run/cancel vào coordinator và generation cancellation.
+6. Cập nhật frontend tiếng Việt, per-job busy và polling.
+7. Chạy backend tests, frontend type/build, OpenSpec validate và manual smoke test.
+
+Rollback an toàn bằng cách đặt workflow/planning/voice concurrency về 1; không cần migration database mới nếu các trạng thái hiện có đủ lưu `queued/interrupted`. Nếu cần thêm enum/string status, vẫn dùng cột text hiện có.
 
 ## Open Questions
 
-- Có cần expose setting `max_concurrency` trong UI Settings ngay trong change này không, hay chỉ env/config internal trước?
-- Manual endpoint khi thiếu global slot nên chờ tới timeout hay trả lỗi 429/409 để UI retry/poll sau?
-- Có cần lưu lịch sử planning wait/run riêng trong debug panel, hay debug event hiện tại đủ cho MVP?
+- Không còn câu hỏi chặn implementation. Kiểm tra thực tế bằng hai voice engine/GPU sẽ quyết định runtime nên để 2 hay hạ tạm về 1 trên máy yếu; hard cap vẫn là 2.

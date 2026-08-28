@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cấu trúc prompt AI Video hiện tại</title>
+  <style>
+    :root{--ink:#172033;--muted:#5c6880;--line:#d8e0eb;--panel:#fff;--wash:#f4f7fb;--blue:#2457d6;--bluewash:#edf3ff;--green:#176d45;--greenwash:#ecf8f0;--amber:#8b5500;--amberwash:#fff6df;--purple:#6536a4;--purplewash:#f4efff}
+    *{box-sizing:border-box} body{margin:0;background:var(--wash);color:var(--ink);font:16px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} main{max-width:1180px;margin:0 auto;padding:24px 20px 70px}
+    header{background:#1f3b82;color:#fff;border:1px solid #3154a0;border-radius:20px;padding:34px 38px} h1{margin:0 0 8px;font-size:clamp(28px,4vw,46px);line-height:1.1;letter-spacing:-.03em} h2{margin:40px 0 12px;padding-top:12px;border-top:1px solid var(--line);font-size:27px;line-height:1.25} h3{margin:27px 0 8px;font-size:20px} p{margin:7px 0 13px}.lede{max-width:900px;color:#eaf0ff;font-size:18px}.meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:17px}.pill{border:1px solid #92a9df;border-radius:99px;padding:3px 10px;font-size:13px}
+    nav{margin:18px 0;padding:16px 19px;background:var(--panel);border:1px solid var(--line);border-radius:13px} nav strong{display:block;margin-bottom:5px} nav a{color:var(--blue);text-decoration:none;margin-right:17px} nav a:hover{text-decoration:underline}
+    section{margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 23px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.card{border:1px solid var(--line);border-radius:11px;padding:14px 16px;background:#fbfcff}.card strong{display:block;color:#1d418f;margin-bottom:4px}.callout{margin:14px 0;padding:13px 16px;border-left:5px solid var(--blue);border-radius:7px;background:var(--bluewash)}.callout.green{border-color:var(--green);background:var(--greenwash)}.callout.amber{border-color:var(--amber);background:var(--amberwash)}.callout.purple{border-color:var(--purple);background:var(--purplewash)}
+    table{width:100%;border-collapse:collapse;margin:12px 0 8px;font-size:14px}th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}th{background:#eef3f9;font-size:13px}tr:last-child td{border-bottom:0}.file{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--blue);font-size:13px;word-break:break-word}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#edf1f7;color:#203a78;padding:1px 5px;border-radius:4px;font-size:.91em}pre{overflow:auto;background:#101828;color:#edf3ff;border-radius:9px;padding:15px 17px;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word}.tag{display:inline-block;border-radius:5px;padding:2px 7px;font-size:12px;font-weight:750}.confirmed{background:var(--greenwash);color:var(--green)}.derived{background:var(--purplewash);color:var(--purple)}.boundary{background:var(--amberwash);color:var(--amber)}
+    .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:15px 0}.node{flex:1 1 150px;min-width:145px;padding:12px 13px;border:1px solid #b9c9e9;border-radius:10px;background:var(--bluewash)}.node strong{display:block;color:#17398f}.arrow{align-self:center;color:var(--blue);font-size:21px;font-weight:700}.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.two>div{min-width:0}details{border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:9px 0;background:#fbfcff}summary{cursor:pointer;font-weight:700}ul,ol{padding-left:23px}li{margin:4px 0}.small{font-size:13px;color:var(--muted)}footer{margin-top:28px;color:var(--muted);text-align:center;font-size:13px}@media(max-width:650px){main{padding:12px 10px 45px}header{padding:25px 22px;border-radius:15px}section{padding:16px}h2{font-size:24px}.arrow{display:none}th,td{padding:7px 6px}}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Cấu trúc prompt AI Video hiện tại</h1>
+    <p class="lede">Tài liệu này chỉ mô tả prompt được dựng từ code hiện tại và các boundary gửi đi. Nó không chạy prompt mới, không thay đổi dữ liệu và không giả định nội dung cụ thể của một project ngoài những cấu hình đã quan sát trong audit.</p>
+    <div class="meta"><span class="pill">Phase 2 AI Video</span><span class="pill">Codex CLI → Flow/Veo</span><span class="pill">Đọc code read-only</span><span class="pill">26/08/2026</span></div>
+  </header>
+
+  <nav><strong>Mục lục</strong><a href="#answer">Tóm tắt</a><a href="#entry">Entry points</a><a href="#context">Context chung</a><a href="#story">Story prompt</a><a href="#shots">Shot breakdown</a><a href="#pack">Prompt pack</a><a href="#schema">Output schema</a><a href="#codex">Codex command</a><a href="#stored">Prompt lưu DB</a><a href="#flow">Flow/Veo</a><a href="#map">File map</a></nav>
+
+  <section id="answer">
+    <h2>1. Tóm tắt một câu</h2>
+    <div class="callout"><strong>Frontend không gửi raw prompt lớn.</strong> Frontend chỉ gửi <code>project_id</code> và một số cờ nhỏ; backend đọc project/source/story/shot từ DB, ghép thành prompt dài, gửi prompt đó qua stdin cho <code>codex exec</code>, nhận JSON theo schema, rồi mới lưu prompt video.</div>
+    <div class="flow"><div class="node"><strong>UI</strong>Story / Shots / Prompts</div><div class="arrow">→</div><div class="node"><strong>FastAPI</strong>route + worker DB</div><div class="arrow">→</div><div class="node"><strong>video_phase2</strong>ghép context + instruction</div><div class="arrow">→</div><div class="node"><strong>Codex</strong>prompt stdin + schema file</div><div class="arrow">→</div><div class="node"><strong>DB</strong>story / shots / prompt rows</div><div class="arrow">→</div><div class="node"><strong>Flow/Veo</strong>prompt compact ≤ khoảng 5.200 ký tự</div></div>
+    <p class="small"><span class="tag confirmed">ĐÃ XÁC NHẬN</span> Có ba prompt Codex khác nhau: <code>story_development</code>, <code>shot_breakdown</code>, <code>video_prompt_generation</code>. Chúng không phải ba tên khác nhau cho cùng một prompt.</p>
+  </section>
+
+  <section id="entry">
+    <h2>2. Entry point: request frontend gửi gì?</h2>
+    <table><thead><tr><th>Hành động</th><th>HTTP request</th><th>Body thực tế</th><th>Code</th></tr></thead><tbody>
+      <tr><td>Generate story</td><td><code>POST /ai-video/projects/{project_id}/story</code></td><td><code>{ "force": false }</code></td><td class="file">app/src/lib/api/client.ts:2124-2128<br>backend/routes/ai_video.py:1193-1219</td></tr>
+      <tr><td>Generate shots</td><td><code>POST /ai-video/projects/{project_id}/shots</code></td><td>Không có body prompt</td><td class="file">app/src/lib/api/client.ts:2138-2142<br>backend/routes/ai_video.py:1230-1250</td></tr>
+      <tr><td>Generate prompt pack</td><td><code>POST /ai-video/projects/{project_id}/prompts</code></td><td>Không có body prompt</td><td class="file">app/src/lib/api/client.ts:2216-2224<br>backend/routes/ai_video.py:1360-1404</td></tr>
+    </tbody></table>
+    <p>Route chạy service trong worker DB. Nếu project Phase 2, endpoint prompts gọi <code>video_phase2.generate_video_prompt_pack</code>; nếu không phải Phase 2, route rẽ sang legacy <code>video_planning.generate_prompt_pack</code>.</p>
+  </section>
+
+  <section id="context">
+    <h2>3. Context chung được chèn vào prompt</h2>
+    <p class="file">backend/services/video_phase2.py:2608-2651, 2699-2722</p>
+    <p><code>normalize_phase2_codex_context()</code> chuẩn hóa dữ liệu trước, sau đó <code>_project_context()</code> biến nó thành text. Cấu trúc chung theo thứ tự:</p>
+    <ol><li><strong>Project identity:</strong> title, topic.</li><li><strong>Language contract:</strong> UI/explanation luôn tiếng Việt; viewer-facing video language theo <code>target_language</code>; instruction ngôn ngữ.</li><li><strong>Creative settings:</strong> video purpose, dialogue mode, narration density, CTA style, preset guidance.</li><li><strong>Timeline settings:</strong> target duration, aspect ratio, shot/prompt plan, visual style.</li><li><strong>Series context (nếu có):</strong> series memory/character/world/style/continuity/negative rules và previous episode summary.</li><li><strong>Source context:</strong> các source block theo dạng <code>[sort_order] block_type: content</code>.</li></ol>
+    <pre>Tên dự án: &lt;project.title&gt;
+Topic ngắn: &lt;project.topic&gt;
+Ngôn ngữ UI và phần giải thích cho người dùng: tiếng Việt
+Ngôn ngữ video người xem nghe/đọc: &lt;target_language_label&gt; (&lt;target_language&gt;)
+Chỉ dẫn ngôn ngữ video: &lt;viewer_language_instruction&gt;
+Mục đích video: &lt;video_purpose&gt;
+Dialogue mode: &lt;dialogue_mode&gt;
+Narration density: &lt;narration_density&gt;
+CTA style: &lt;call_to_action_style hoặc none&gt;
+Purpose/preset guidance:
+- &lt;purpose_context_line_1&gt;
+- &lt;purpose_context_line_2&gt;
+Thời lượng mục tiêu: &lt;target_duration_seconds hoặc tự chọn&gt; giây
+Tỷ lệ khung hình: &lt;aspect_ratio&gt;
+Kế hoạch shot/prompt: &lt;shot duration preference&gt;
+Phong cách video: &lt;visual_style hoặc tự đề xuất&gt;
+
+[nếu project thuộc series]
+Series context:
+- Series title: ...
+- Episode: ...
+- memory / character profiles / bible / world / style / continuity / negative rules
+
+Nguồn nội dung:
+[1] &lt;block_type&gt;:
+&lt;content&gt;</pre>
+    <div class="callout amber"><strong>Điểm làm prompt phình:</strong> source blocks và series context được chèn vào prompt nội bộ Codex. Đây là lý do request frontend nhỏ nhưng prompt backend có thể dài hàng chục nghìn ký tự.</div>
+  </section>
+
+  <section id="story">
+    <h2>4. Prompt số 1 — phát triển story</h2>
+    <p class="file">backend/services/video_phase2.py:2829-2873</p>
+    <p>Call này chỉ xảy ra khi story chưa được approve, hoặc request có <code>force=true</code>. Nó tạo kế hoạch story cấp project, chưa tạo shot video cuối.</p>
+    <details open><summary>Skeleton prompt được ghép từ f-string</summary><pre>Bạn là Script-to-Video-Prompt Studio trong Voicebox. Người dùng có thể nhập nguồn nội dung bằng tiếng Việt, tiếng Anh hoặc lẫn cả hai. Video cuối phải dùng ngôn ngữ video đã chọn.
+
+&lt;_project_context(project, db)&gt;
+
+&lt;story_development_instructions(project, db)&gt;
+
+Hãy phát triển nội dung thành story strategy hấp dẫn và kịch bản chi tiết.
+
+Yêu cầu bắt buộc:
+- &lt;viewer_language_instruction&gt;
+- &lt;narration_field_note&gt;
+- &lt;purpose_generation_instructions&gt;
+- story_strategy_vi, continuity_bible_vi, detailed_script_vi bằng tiếng Việt tự nhiên
+- story_strategy, continuity_bible, detailed_script theo ngôn ngữ video
+- english_narration mỗi scene đủ dài cho giọng đọc tự nhiên
+- hook, conflict, emotional arc, curiosity, climax, payoff
+- retention_plan: hook_0_2s, viewer_question, curiosity_gap, beat_curve, pattern_interrupts, payoff_plan, dropoff_risks
+- sound_design_plan: music_mood, energy_curve, ambience_bed, sound_cues, silence_drops, mixing_notes
+- continuity bible: character, wardrobe, props, setting, color, mood, camera style
+- mỗi scene có character_appearance, wardrobe_and_sandals, subject_motion_by_duration,
+  setting_and_lighting, detailed_mood
+- Chia thành scene lớn; chưa tạo shot ở bước này.
+- Không tool/command; chỉ trả đúng JSON theo schema.</pre></details>
+    <h3>Output story yêu cầu</h3>
+    <table><thead><tr><th>Nhóm</th><th>Field chính</th><th>Giới hạn đáng chú ý</th></tr></thead><tbody>
+      <tr><td>Global settings</td><td><code>video_purpose</code>, <code>dialogue_mode</code>, <code>narration_density</code>, <code>call_to_action_style</code></td><td>Pattern từ video purpose service</td></tr>
+      <tr><td>Strategy/script</td><td><code>input_synthesis</code>, <code>story_strategy_vi</code>, <code>story_strategy</code>, <code>continuity_bible_vi</code>, <code>continuity_bible</code>, <code>detailed_script_vi</code>, <code>detailed_script</code></td><td>Script có thể tới 80.000 ký tự</td></tr>
+      <tr><td>Retention/audio</td><td><code>retention_plan</code>, <code>sound_design_plan</code></td><td>Cấu trúc object lồng nhau</td></tr>
+      <tr><td>Characters</td><td><code>episode_cast</code>, <code>episode_only_guests</code>, <code>new_character_proposals</code></td><td>Tối đa 50 mỗi list</td></tr>
+      <tr><td>Scenes</td><td><code>scenes[]</code>: title, vietnamese_description, english_narration, 5 scene detail fields, duration, related characters</td><td>1–120 scenes; narration field tương thích cũ nhưng mang ngôn ngữ video đã chọn</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="shots">
+    <h2>5. Prompt số 2 — shot breakdown</h2>
+    <p class="file">backend/services/video_phase2.py:3176-3288</p>
+    <p>Đây là call lấy story đã approve và biến nó thành các shot/segment. Prompt nhét lại toàn bộ context project cộng với story plan, scenes và các plan retention/sound.</p>
+    <details open><summary>Skeleton prompt được ghép từ f-string</summary><pre>Bạn là editor điện ảnh tạo shot breakdown cho video AI.
+
+&lt;_project_context(project, db)&gt;
+
+&lt;shot_breakdown_instructions(project)&gt;
+
+Story strategy:
+&lt;project.story_strategy&gt;
+
+Continuity bible:
+&lt;project.continuity_bible&gt;
+
+Retention map:
+&lt;json.dumps(project.retention_plan_json)&gt;
+
+Sound design plan:
+&lt;json.dumps(project.sound_design_plan_json)&gt;
+
+Detailed script:
+&lt;project.detailed_script hoặc project.script_text&gt;
+
+Scenes đã duyệt:
+Scene 1: &lt;title&gt;
+Mô tả cho người dùng: &lt;visual_description&gt;
+Narration theo ngôn ngữ video: &lt;dialogue&gt;
+Target duration: &lt;seconds&gt;s
+...
+
+Yêu cầu bắt buộc:
+- language/purpose/narration rules
+- tạo đúng N prompt segment; mỗi segment đúng duration và đúng micro-scene count
+- mỗi segment một primary action, nối continuity trước/sau
+- retention_role, open_loop, visual_surprise, cut_reason
+- transition_pack và sound_design đầy đủ
+- kế thừa character/wardrobe/setting/lighting/mood từ scene
+- transition_to_next rõ ràng
+- speech_cues chính xác theo target language; speaker, role, delivery, emotion, lip_sync_required
+- không tool/command; chỉ trả đúng JSON theo schema.</pre></details>
+    <h3>Output shot</h3>
+    <div class="grid"><div class="card"><strong>Identity/timeline</strong><code>scene_order</code>, <code>shot_order</code>, <code>duration_seconds</code></div><div class="card"><strong>Viewer text</strong><code>vietnamese_description</code>, <code>english_narration</code> (thực tế là narration theo language đã chọn)</div><div class="card"><strong>Visual</strong><code>primary_action</code>, <code>purpose</code>, <code>shot_type</code>, <code>camera_angle</code>, <code>framing</code>, <code>composition</code>, <code>camera_motion</code></div><div class="card"><strong>Motion/continuity</strong><code>subject_motion</code>, <code>environment_motion</code>, <code>transition_to_next</code></div><div class="card"><strong>Retention</strong><code>retention_role</code>, <code>open_loop</code>, <code>visual_surprise</code>, <code>cut_reason</code></div><div class="card"><strong>Audio/dialogue</strong><code>speech_cues</code>, <code>sound_design</code></div><div class="card"><strong>Nested timeline</strong><code>micro_scenes[]</code>: order, start/end, description_vi, visual_action, camera_note, continuity_note, visible_characters</div><div class="card"><strong>Transitions</strong><code>transition_pack</code>: type, trigger, timing, edit reason, SFX, continuity risk</div></div>
+    <div class="callout purple"><strong>Observed project configuration:</strong> audit đã thấy project có khoảng 21 segment, mỗi segment 8 giây và 4 micro-scene. Đây là dữ liệu của project đã quan sát, không phải default bắt buộc cho mọi project.</div>
+  </section>
+
+  <section id="pack">
+    <h2>6. Prompt số 3 — video prompt pack</h2>
+    <p class="file">backend/services/video_phase2.py:3669-3707, 3710-3848</p>
+    <p>Đây là bước biến shot đã lưu thành prompt có thể copy sang công cụ tạo video. Backend chia shot thành batch; hiện hằng là <code>VIDEO_PROMPT_BATCH_SIZE = 5</code> và mỗi batch tối đa 2 attempts.</p>
+    <h3>6.1 Mỗi shot được serialize thành một dòng input</h3>
+    <pre>Segment &lt;shot_order&gt; of &lt;target_segment_count&gt;:
+timeline=&lt;timeline label&gt;;
+prompt_clip_duration=&lt;prompt duration&gt;s;
+usable_duration=&lt;usable duration&gt;s;
+micro_scenes=&lt;json micro_scenes&gt;;
+vi=&lt;vietnamese_description&gt;;
+narration=&lt;english_narration / selected-language narration&gt;;
+speech_cues=&lt;json speech cues&gt;;
+action=&lt;primary_action&gt;;
+camera=&lt;camera_angle&gt;, &lt;framing&gt;, &lt;camera_motion&gt;;
+transition=&lt;transition_to_next&gt;;
+retention=&lt;json retention&gt;;
+transition_pack=&lt;json transition pack&gt;;
+sound=&lt;json sound design&gt;</pre>
+    <h3>6.2 Skeleton prompt batch</h3>
+    <details open><summary>Template chung; token được replace cho từng batch</summary><pre>Bạn là chuyên gia prompt tạo video AI. Tạo prompt video dạng dùng chung, không nhắc tên provider cụ thể, và không được mâu thuẫn với ngôn ngữ video đã chọn.
+
+&lt;_project_context(project, db)&gt;
+
+&lt;video_prompt_instructions(project)&gt;
+
+Continuity bible:
+&lt;project.continuity_bible hoặc project.style_bible&gt;
+
+&lt;reference_instruction nếu project thuộc series&gt;
+
+Shot/segment cần tạo prompt:
+&lt;&lt;VOICEBOX_VIDEO_PROMPT_BATCH_SHOTS&gt;&gt;
+
+Yêu cầu:
+- Tạo đúng &lt;&lt;VOICEBOX_VIDEO_PROMPT_BATCH_COUNT&gt;&gt; prompt cho các segment được liệt kê.
+- Mỗi prompt là video &lt;prompt_duration&gt;s, đúng aspect ratio.
+- Nêu Segment X of N, giữ continuity.
+- Timeline có đúng micro-scene count và một primary visual action.
+- Có transition sang segment sau; segment cuối giữ final composition/CTA.
+- Có duration, aspect ratio, subject/action, shot type, camera, framing, composition,
+  camera movement, subject/environment motion, lighting, mood, start/end frame,
+  continuity, retention, transition và sound design.
+- Chuyển reference 2D thành stylized 3D cinematic animation; không tạo ảnh tĩnh/flat panel.
+- Không render subtitle/caption/text/logo/watermark trong video.
+- prompt chính dùng ngôn ngữ kỹ thuật phù hợp; explanation_vi dùng tiếng Việt.
+- negative prompt chặn text, watermark, logo, distorted face, bad hands, flicker,
+  wrong identity/hairstyle/outfit, 2D/static-image.
+- Không tool/command; chỉ trả đúng JSON theo schema.</pre></details>
+    <p class="small"><span class="tag derived">ĐƯỢC SUY RA TỪ CODE</span> Template được dựng một lần, sau đó thay token <code>&lt;&lt;VOICEBOX_VIDEO_PROMPT_BATCH_SHOTS&gt;&gt;</code> và count cho từng batch; context/instruction tĩnh được lặp lại ở mỗi batch.</p>
+  </section>
+
+  <section id="schema">
+    <h2>7. Output schema mà Codex phải trả</h2>
+    <p class="file">backend/services/video_phase2.py:314-439</p>
+    <p>Schema được tạo từ Pydantic bằng <code>model_json_schema()</code> và truyền cho wrapper Codex qua file <code>--output-schema</code>. Đây là hợp đồng output; nó không phải prompt text.</p>
+    <table><thead><tr><th>Call</th><th>Root object</th><th>Danh sách chính</th><th>Giới hạn</th></tr></thead><tbody>
+      <tr><td>Story</td><td><code>StoryDevelopmentPlan</code></td><td><code>scenes[]</code>, retention, sound, cast</td><td>scenes 1–120; script fields tới 80K</td></tr>
+      <tr><td>Shots</td><td><code>ShotBreakdownPlan</code></td><td><code>shots[]</code> → <code>micro_scenes[]</code>, speech, transition, sound</td><td>shots 1–400; micro-scenes tối đa 20/shot</td></tr>
+      <tr><td>Prompt pack</td><td><code>VideoPromptPackPlan</code></td><td><code>prompts[]</code> → prompt, negative, camera, frames, notes, quality</td><td>prompts 1–400; prompt text tối đa 20K</td></tr>
+    </tbody></table>
+    <pre>// Tên constant trong code
+STORY_DEVELOPMENT_SCHEMA = StoryDevelopmentPlan.model_json_schema()
+SHOT_BREAKDOWN_SCHEMA = ShotBreakdownPlan.model_json_schema()
+VIDEO_PROMPT_PACK_SCHEMA = VideoPromptPackPlan.model_json_schema()</pre>
+    <div class="callout amber"><strong>Output có thể lớn hơn input:</strong> shot breakdown và prompt pack yêu cầu nhiều object lồng nhau. Audit đã thấy trường hợp output/stderr khoảng 202K ký tự dù prompt input khoảng 78K.</div>
+  </section>
+
+  <section id="codex">
+    <h2>8. Prompt được đưa vào Codex CLI như thế nào?</h2>
+    <p class="file">backend/services/ai_planning.py:739-848</p>
+    <pre>codex exec
+  --skip-git-repo-check
+  --ephemeral
+  --output-last-message &lt;temporary-file&gt;
+  --model &lt;configured model&gt;
+  --config model_reasoning_effort="&lt;configured effort&gt;"
+  --output-schema &lt;temporary schema file&gt;
+  -</pre>
+    <table><thead><tr><th>Thành phần</th><th>Cách truyền</th><th>Ý nghĩa</th></tr></thead><tbody><tr><td>Prompt text</td><td>stdin qua dấu <code>-</code></td><td>Toàn bộ template + context + batch shot lines</td></tr><tr><td>Output contract</td><td>File tạm qua <code>--output-schema</code></td><td>Schema strict được tạo từ Pydantic</td></tr><tr><td>Model/effort</td><td>CLI flags/config</td><td>Model và reasoning setting của AI planning</td></tr><tr><td>Final answer</td><td><code>--output-last-message</code></td><td>Wrapper đọc file này, hoặc stdout nếu file chưa tồn tại</td></tr></tbody></table>
+    <p>Wrapper ghi audit với prompt chars, schema keys, timeout, model/effort, output/stderr chars, step name và request id. Timeout được clamp tối đa 600 giây trong code hiện tại.</p>
+  </section>
+
+  <section id="stored">
+    <h2>9. Từ output prompt pack đến prompt lưu DB</h2>
+    <p class="file">backend/services/video_phase2.py:3987-4055, 3579-3666</p>
+    <p>Mỗi item trong <code>VideoPromptPackPlan.prompts[]</code> được ghép với shot cùng <code>shot_order</code>. Trước khi lưu, backend có thể thêm segment prefix nếu prompt chưa tự chứa duration/segment/continuity.</p>
+    <pre>Create a &lt;prompt_duration&gt;-second &lt;aspect_ratio&gt; high-quality stylized 3D cinematic animation video.
+This is segment &lt;shot_order&gt; of &lt;segment_count&gt; of a &lt;target_duration&gt;-second video covering timeline &lt;timeline&gt;.
+3D visual rule: dimensional characters, depth, volumetric lighting, textured materials, parallax, real camera movement.
+Animation and text-safe rule: clear entry/hold/exit motion; do not render subtitles, captions, lyrics, text overlays, letters, words, UI text, logos, or watermarks.
+Segment structure: exactly &lt;micro_scene_count&gt; connected micro-scenes serving one primary visual action.
+Micro-scene timeline:
+&lt;micro scene lines&gt;
+
+&lt;item.prompt&gt;
+
+Video language: &lt;video language&gt;
+Aspect ratio: &lt;aspect ratio&gt;
+Segment: &lt;shot_order&gt; of &lt;segment_count&gt;
+Video generation clip length: &lt;seconds&gt;
+Usable timeline duration: &lt;duration&gt;
+Timeline position: &lt;timeline&gt;
+Micro-scene timeline: &lt;json-derived lines&gt;
+Shot type / camera / framing / composition / movement
+Start frame / End frame / Lighting / Mood
+Continuity notes / Retention notes / Transition notes / Sound design notes
+
+Negative prompt:
+&lt;negative_prompt nếu có&gt;
+
+Bản giải thích tiếng Việt:
+&lt;prompt_explanation_vi nếu có&gt;</pre>
+    <p><span class="tag confirmed">ĐÃ XÁC NHẬN</span> Field <code>prompt_explanation_vi</code> là text duyệt cho người dùng; code không mặc định trộn nó vào prompt generation chính, nhưng phần stored/download text có thể hiển thị nó sau prompt.</p>
+  </section>
+
+  <section id="flow">
+    <h2>10. Prompt cuối gửi Google Flow/Veo</h2>
+    <p class="file">backend/services/video_clip_generation.py:91, 182-302, 930-1010<br>backend/services/video_veo_chrome.py:807-937</p>
+    <div class="flow"><div class="node"><strong>DB</strong><code>DBVideoShotPrompt.prompt</code></div><div class="arrow">→</div><div class="node"><strong>Sanitize</strong>strip provider-unfriendly/post-render cues</div><div class="arrow">→</div><div class="node"><strong>Compact</strong>cắt theo giới hạn Flow</div><div class="arrow">→</div><div class="node"><strong>Speech block</strong>native Vietnamese speech hoặc narration context</div><div class="arrow">→</div><div class="node"><strong>CDP</strong><code>Input.insertText</code></div><div class="arrow">→</div><div class="node"><strong>Verify</strong>đọc lại text/hash rồi submit</div></div>
+    <table><thead><tr><th>Biến đổi</th><th>Hiện trạng</th></tr></thead><tbody><tr><td>Provider safety</td><td>Xóa/đổi các cue hậu kỳ, cue narration không nên điều khiển provider.</td></tr><tr><td>Độ dài</td><td><code>FLOW_PROVIDER_PROMPT_MAX_CHARS = 5200</code> là giới hạn compact hiện tại.</td></tr><tr><td>Audio</td><td>Nếu dùng Veo native speech, thêm block do <code>video_speech.build_veo_native_speech_section</code>; nếu không, dùng narration context.</td></tr><tr><td>Browser transport</td><td>Chrome CDP gọi <code>Input.insertText({ text: prompt })</code>, sau đó đọc lại nội dung trong Flow.</td></tr></tbody></table>
+    <div class="callout green"><strong>Không nhầm hai loại prompt:</strong> prompt Codex nội bộ có thể dài 40–130K ký tự và chứa JSON shot/context; prompt Flow/Veo là bản đã sanitize/compact, khác về mục đích và kích thước.</div>
+  </section>
+
+  <section id="map">
+    <h2>11. File map để mở code</h2>
+    <table><thead><tr><th>File</th><th>Đọc để xem</th></tr></thead><tbody><tr><td class="file">app/src/lib/api/client.ts</td><td>Frontend request body và endpoint.</td></tr><tr><td class="file">backend/routes/ai_video.py</td><td>Route, worker DB, branch Phase 2/legacy và error mapping.</td></tr><tr><td class="file">backend/services/video_phase2.py</td><td>Context, ba prompt template, serializers, Pydantic schemas, persistence.</td></tr><tr><td class="file">backend/services/ai_planning.py</td><td>Codex command, stdin, output schema, timeout, audit.</td></tr><tr><td class="file">backend/services/video_clip_generation.py</td><td>Sanitize/compact prompt trước khi đưa sang Flow.</td></tr><tr><td class="file">backend/services/video_veo_chrome.py</td><td>CDP insertText, verify và submit Flow.</td></tr></tbody></table>
+  </section>
+
+  <section>
+    <h2>12. Điều chưa thể biết chỉ từ cấu trúc code</h2>
+    <ul><li>Nội dung cụ thể của prompt runtime phụ thuộc project/source/series DB; HTML này mô tả template và field, không thay thế một capture có request id.</li><li>Chưa chạy prompt thật trong phiên này, nên không đo lại prompt chars/output chars mới.</li><li>Batch size hiện tại của prompt pack là 5; shot breakdown vẫn là một call duy nhất trong code hiện tại, chưa có batch/resume implementation.</li><li>Prompt được lưu DB có thể được bổ sung segment prefix nếu model output thiếu duration/continuity; vì vậy “prompt model trả” và “prompt stored” không luôn giống hệt nhau.</li></ul>
+  </section>
+
+  <footer>Generated from current repository code. No application code or project data was changed.</footer>
+</main>
+</body>
+</html>

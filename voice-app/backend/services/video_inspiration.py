@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from array import array
+import hashlib
 import importlib.util
 import json
 import logging
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 import wave
 from contextlib import contextmanager
@@ -64,7 +66,15 @@ TRANSCRIPT_CHUNK_SECONDS = 25.0
 TRANSCRIPT_SINGLE_PASS_MAX_SECONDS = 28.0
 FFMPEG_TIMEOUT_SECONDS = 600
 AI_TIMEOUT_SECONDS = 600
-ACTIVE_JOB_STALE_SECONDS = 15 * 60
+def _active_job_stale_seconds() -> int:
+    raw = os.environ.get("VOICEBOX_VIDEO_INSPIRATION_STALE_SECONDS", "900")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 900
+    return max(5 * 60, min(4 * 60 * 60, value))
+
+ACTIVE_JOB_STALE_SECONDS = _active_job_stale_seconds()
 ACTIVE_JOB_STALE_DELTA = timedelta(seconds=ACTIVE_JOB_STALE_SECONDS)
 ACTIVE_JOB_STATUSES = {"analyzing", "rewriting", "handoff"}
 _STDERR_LIMIT = 1200
@@ -990,7 +1000,7 @@ def _extract_audio_transcript_chunk(source_path: Path, chunk_path: Path, *, star
     )
     if result.returncode != 0 or not chunk_path.exists() or chunk_path.stat().st_size <= 0:
         raise VideoInspirationError(
-            "KhÃ´ng cáº¯t Ä‘Æ°á»£c audio dÃ i Ä‘á»ƒ chuyá»ƒn lá»i nÃ³i thÃ nh chá»¯.",
+            "Không cắt được audio dài để chuyển lời nói thành chữ.",
             error_code="VIDEO_INSPIRATION_AUDIO_CHUNK_FAILED",
         )
 
@@ -1970,6 +1980,297 @@ REWRITE_REVIEW_SCHEMA: dict[str, Any] = {
 }
 
 REWRITE_SCHEMA: dict[str, Any] = REWRITE_PAYLOAD_SCHEMA
+
+VARIANT_SCORE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "reviews": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "candidate_index": {"type": "number"},
+                    "score": {"type": "number"},
+                    "hook_score": {"type": "number"},
+                    "clarity_score": {"type": "number"},
+                    "originality_score": {"type": "number"},
+                    "retention_score": {"type": "number"},
+                    "production_feasibility_score": {"type": "number"},
+                    "sound_design_score": {"type": "number"},
+                    "alignment_score": {"type": "number"},
+                    "strengths": {"type": "array", "items": {"type": "string"}},
+                    "weaknesses": {"type": "array", "items": {"type": "string"}},
+                    "best_parts": {"type": "array", "items": {"type": "string"}},
+                    "recommendation": {"type": "string"},
+                },
+                "required": ["candidate_index", "score", "hook_score", "clarity_score", "originality_score", "retention_score", "production_feasibility_score", "sound_design_score", "alignment_score", "strengths", "weaknesses", "best_parts", "recommendation"],
+            },
+        },
+        "synthesis_direction": {"type": "string"},
+        "rubric_version": {"type": "string"},
+    },
+    "required": ["reviews", "synthesis_direction", "rubric_version"],
+}
+
+VARIANT_SYNTHESIS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "final_versions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "variant_id": {"type": "string"},
+                    "strategy": {"type": "string"},
+                    "source_basis": {"type": "array", "items": {"type": "string"}},
+                    "payload": REWRITE_PAYLOAD_SCHEMA,
+                },
+                "required": ["variant_id", "strategy", "source_basis", "payload"],
+            },
+        },
+    },
+    "required": ["final_versions"],
+}
+
+VARIANT_RUBRIC_VERSION = "video-inspiration-rubric.v1"
+VARIANT_PIPELINE_FEATURE_ENV = "VOICEBOX_FEATURE_VIDEO_INSPIRATION_VARIANTS"
+
+def variant_pipeline_enabled() -> bool:
+    return os.environ.get(VARIANT_PIPELINE_FEATURE_ENV, "true").strip().lower() not in {"0", "false", "no", "off"}
+
+def _variant_pipeline(row: DBVideoInspirationJob) -> dict[str, Any]:
+    analysis = row.analysis_json if isinstance(row.analysis_json, dict) else {}
+    pipeline = analysis.get("variant_pipeline")
+    return pipeline if isinstance(pipeline, dict) else {}
+
+def _variant_fingerprint(*values: Any) -> str:
+    payload = json.dumps(values, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:24]
+
+def _variant_model_key(db: Session) -> str:
+    settings = settings_service.get_ai_planning_settings(db)
+    return f"{settings.provider}:{settings.model}"
+
+def _variant_analysis_revision(row: DBVideoInspirationJob) -> str:
+    package = row.analysis_package_json if isinstance(row.analysis_package_json, dict) else {}
+    return str(
+        package.get("revision")
+        or package.get("schema_version")
+        or row.analysis_package_path
+        or row.analysis_schema_version
+    )
+
+def _variant_stage_metrics(*, started_at: datetime, started_perf: float, prompt_chars: int, model: str, output_count: int) -> dict[str, Any]:
+    return {
+        "started_at": started_at.isoformat(),
+        "completed_at": _now().isoformat(),
+        "latency_ms": max(0, round((time.perf_counter() - started_perf) * 1000)),
+        "prompt_chars": max(0, prompt_chars),
+        "estimated_input_tokens": max(0, math.ceil(prompt_chars / 4)),
+        "output_count": max(0, output_count),
+        "model": model,
+    }
+
+def _archive_variant_stage(pipeline: dict[str, Any], key: str) -> dict[str, Any]:
+    current = pipeline.get(key)
+    if not current:
+        return pipeline
+    history_key = f"{key}_history"
+    history = pipeline.get(history_key) if isinstance(pipeline.get(history_key), list) else []
+    return {**pipeline, history_key: [*history, {**current, "archived_at": _now().isoformat()}]}
+
+def _save_variant_pipeline(row: DBVideoInspirationJob, db: Session, pipeline: dict[str, Any]) -> None:
+    row.analysis_json = {**(row.analysis_json or {}), "variant_pipeline": pipeline}
+    row.updated_at = _now()
+    db.commit()
+
+def _candidate_id(candidate: dict[str, Any], index: int) -> str:
+    raw = str(candidate.get("variant_id") or candidate.get("id") or f"candidate-{index + 1}").strip()
+    return raw[:120] or f"candidate-{index + 1}"
+
+def _normalize_candidates(payload: dict[str, Any], count: int) -> list[dict[str, Any]]:
+    items = payload.get("candidates") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(items[:count]):
+        if not isinstance(item, dict):
+            continue
+        candidate = {**item, "variant_id": _candidate_id(item, index)}
+        try:
+            _validate_optimized_rewrite_payload(candidate)
+        except VideoInspirationError:
+            continue
+        normalized.append(candidate)
+    return normalized
+
+def _variant_candidates_prompt(row: DBVideoInspirationJob, brief: dict[str, Any], count: int) -> str:
+    return _rewrite_candidates_prompt(row, brief).replace("đúng 2 bản nháp", f"đúng {count} bản nháp")
+
+def _variant_score_prompt(row: DBVideoInspirationJob, candidates: list[dict[str, Any]]) -> str:
+    return f"""
+Báº¡n lÃ  editor trÆ°á»Ÿng. HÃ£y cháº¥m Ä‘iá»ƒm batch cÃ¡c candidate dÆ°á»›i Ä‘Ã¢y báº±ng tiáº¿ng Viá»‡t.
+
+Ngá»¯ cáº£nh:
+{_rewrite_context(row)}
+
+Candidates:
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Rubric version: {VARIANT_RUBRIC_VERSION}
+Cháº¥m riÃªng tá»«ng candidate theo hook, clarity, originality, retention, production feasibility, sound design vÃ  alignment. Mỗi review phải đặt candidate_index theo vị trí trong danh sách, score từ 0 đến 10, strengths, weaknesses và best_parts. Trả đúng JSON.
+""".strip()
+
+def _variant_synthesis_prompt(row: DBVideoInspirationJob, candidates: list[dict[str, Any]], reviews: dict[str, Any], count: int, strategy: str) -> str:
+    return f"""
+Báº¡n lÃ  biÃªn ká»‹ch kiÃªm producer AI Video. HÃ£y tá»•ng há»£p {count} phiÃªn báº£n tá»‘i Æ°u theo chiáº¿n lÆ°á»£c {strategy} tá»« cÃ¡c candidate vÃ  review dÆ°á»›i Ä‘Ã¢y.
+
+Ngá»¯ cáº£nh:
+{_rewrite_context(row)}
+
+Candidates:
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+Review:
+{json.dumps(reviews, ensure_ascii=False, indent=2)}
+
+Mỗi final version phải có variant_id, strategy, source_basis và payload đầy đủ theo schema kịch bản tối ưu. Không copy sát video gốc. Trả đúng JSON.
+""".strip()
+
+def generate_variant_candidates(job_id: str, data: models.VideoInspirationVariantGenerateRequest, db: Session) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    if not row.analysis_json:
+        raise VideoInspirationError("Cần phân tích video trước khi tạo nhiều phiên bản.", error_code="VIDEO_INSPIRATION_ANALYSIS_REQUIRED")
+    if not variant_pipeline_enabled():
+        raise VideoInspirationError("Tính năng tạo nhiều phiên bản đang được tạm tắt.", error_code="VIDEO_INSPIRATION_VARIANTS_DISABLED", status_code=503)
+    pipeline = _variant_pipeline(row)
+    model_key = _variant_model_key(db)
+    fingerprint = _variant_fingerprint(_variant_analysis_revision(row), row.analysis_mode, row.target_language, row.user_direction, data.candidate_count, model_key)
+    if pipeline.get("candidate_generation", {}).get("fingerprint") == fingerprint and pipeline.get("candidates"):
+        return _job_response(row, db)
+    brief = pipeline.get("creative_brief")
+    if not isinstance(brief, dict):
+        brief = _run_structured_ai(db, _creative_brief_prompt(row), CREATIVE_BRIEF_SCHEMA)
+    prompt = _variant_candidates_prompt(row, brief, data.candidate_count)
+    started_at, started_perf = _now(), time.perf_counter()
+    payload = _run_structured_ai(db, prompt, REWRITE_CANDIDATES_SCHEMA)
+    candidates = _normalize_candidates(payload, data.candidate_count)
+    if len(candidates) < 2:
+        raise VideoInspirationError("AI chưa tạo đủ ít nhất 2 bản nháp hợp lệ.", error_code="VIDEO_INSPIRATION_VARIANTS_INCOMPLETE")
+    revision = int((pipeline.get("candidate_generation") or {}).get("revision") or 0) + 1
+    candidates = [
+        {**candidate, "revision": revision, "fingerprint": fingerprint, "provenance": {"analysis_revision": _variant_analysis_revision(row), "model": model_key}}
+        for candidate in candidates
+    ]
+    pipeline = _archive_variant_stage(_archive_variant_stage(_archive_variant_stage(pipeline, "candidate_generation"), "scoring"), "synthesis")
+    pipeline = {**pipeline, "creative_brief": brief, "candidates": candidates, "candidate_generation": {"status": "completed", "fingerprint": fingerprint, "candidate_count": len(candidates), "rubric_version": VARIANT_RUBRIC_VERSION, "revision": revision, "metrics": _variant_stage_metrics(started_at=started_at, started_perf=started_perf, prompt_chars=len(prompt), model=model_key, output_count=len(candidates))}}
+    pipeline.pop("scoring", None)
+    pipeline.pop("synthesis", None)
+    _save_variant_pipeline(row, db, pipeline)
+    row.status = "analyzed"
+    row.current_step = "variant_candidates_ready"
+    row.progress = 0.90
+    row.updated_at = _now()
+    db.commit()
+    return _job_response(row, db)
+
+def score_variant_candidates(job_id: str, data: models.VideoInspirationVariantScoreRequest, db: Session) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    if not variant_pipeline_enabled():
+        raise VideoInspirationError("Tính năng chấm điểm nhiều phiên bản đang được tạm tắt.", error_code="VIDEO_INSPIRATION_VARIANTS_DISABLED", status_code=503)
+    pipeline = _variant_pipeline(row)
+    candidates = pipeline.get("candidates") if isinstance(pipeline.get("candidates"), list) else []
+    selected = data.variant_ids or [_candidate_id(item, index) for index, item in enumerate(candidates)]
+    selected_candidates = [item for item in candidates if isinstance(item, dict) and item.get("variant_id") in selected]
+    if not selected_candidates:
+        raise VideoInspirationError("Hãy chọn ít nhất một bản nháp để chấm điểm.", error_code="VIDEO_INSPIRATION_VARIANTS_SELECTION_REQUIRED")
+    model_key = _variant_model_key(db)
+    fingerprint = _variant_fingerprint(pipeline.get("candidate_generation", {}).get("fingerprint"), selected, VARIANT_RUBRIC_VERSION, model_key)
+    if pipeline.get("scoring", {}).get("fingerprint") == fingerprint:
+        return _job_response(row, db)
+    prompt = _variant_score_prompt(row, selected_candidates)
+    started_at, started_perf = _now(), time.perf_counter()
+    review = _run_structured_ai(db, prompt, VARIANT_SCORE_SCHEMA)
+    revision = int((pipeline.get("scoring") or {}).get("revision") or 0) + 1
+    reviews = review.get("reviews", [])
+    pipeline = _archive_variant_stage(_archive_variant_stage(pipeline, "scoring"), "synthesis")
+    pipeline = {**pipeline, "scoring": {"status": "completed", "fingerprint": fingerprint, "variant_ids": selected, "rubric_version": VARIANT_RUBRIC_VERSION, "reviews": reviews, "synthesis_direction": review.get("synthesis_direction", ""), "revision": revision, "model": model_key, "metrics": _variant_stage_metrics(started_at=started_at, started_perf=started_perf, prompt_chars=len(prompt), model=model_key, output_count=len(reviews))}}
+    pipeline.pop("synthesis", None)
+    _save_variant_pipeline(row, db, pipeline)
+    row.status = "analyzed"
+    row.current_step = "variant_scores_ready"
+    row.progress = 0.93
+    row.updated_at = _now()
+    db.commit()
+    return _job_response(row, db)
+
+def synthesize_variant_versions(job_id: str, data: models.VideoInspirationVariantSynthesisRequest, db: Session) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    if not variant_pipeline_enabled():
+        raise VideoInspirationError("Tính năng tổng hợp nhiều phiên bản đang được tạm tắt.", error_code="VIDEO_INSPIRATION_VARIANTS_DISABLED", status_code=503)
+    pipeline = _variant_pipeline(row)
+    candidates = pipeline.get("candidates") if isinstance(pipeline.get("candidates"), list) else []
+    selected = data.variant_ids or pipeline.get("scoring", {}).get("variant_ids", [])
+    selected_candidates = [item for item in candidates if isinstance(item, dict) and item.get("variant_id") in selected]
+    reviews = pipeline.get("scoring", {})
+    if not selected_candidates or not reviews.get("reviews"):
+        raise VideoInspirationError("Cần tạo và chấm điểm candidate trước khi tổng hợp.", error_code="VIDEO_INSPIRATION_VARIANTS_SCORING_REQUIRED")
+    model_key = _variant_model_key(db)
+    fingerprint = _variant_fingerprint(pipeline.get("scoring", {}).get("fingerprint"), selected, data.final_version_count, data.strategy, model_key)
+    if pipeline.get("synthesis", {}).get("fingerprint") == fingerprint:
+        return _job_response(row, db)
+    prompt = _variant_synthesis_prompt(row, selected_candidates, reviews, data.final_version_count, data.strategy)
+    started_at, started_perf = _now(), time.perf_counter()
+    payload = _run_structured_ai(db, prompt, VARIANT_SYNTHESIS_SCHEMA)
+    versions = []
+    previous_versions = pipeline.get("synthesis", {}).get("versions", [])
+    revision = max([int(item.get("revision") or 0) for item in previous_versions if isinstance(item, dict)] or [0]) + 1
+    for index, item in enumerate(payload.get("final_versions", [])):
+        if not isinstance(item, dict) or not isinstance(item.get("payload"), dict):
+            continue
+        _validate_optimized_rewrite_payload(item["payload"])
+        versions.append({**item, "variant_id": str(item.get("variant_id") or f"final-{index + 1}")[:120], "revision": revision, "score_fingerprint": reviews.get("fingerprint"), "created_at": _now().isoformat()})
+    if not versions:
+        raise VideoInspirationError("AI chưa tạo được phiên bản tối ưu hợp lệ.", error_code="VIDEO_INSPIRATION_VARIANTS_SYNTHESIS_INCOMPLETE")
+    pipeline = _archive_variant_stage(pipeline, "synthesis")
+    pipeline = {**pipeline, "synthesis": {"status": "completed", "fingerprint": fingerprint, "strategy": data.strategy, "versions": versions, "revision": revision, "model": model_key, "metrics": _variant_stage_metrics(started_at=started_at, started_perf=started_perf, prompt_chars=len(prompt), model=model_key, output_count=len(versions))}}
+    _save_variant_pipeline(row, db, pipeline)
+    row.status = "rewritten"
+    row.current_step = "variant_versions_ready"
+    row.progress = 1.0
+    row.updated_at = _now()
+    db.commit()
+    return _job_response(row, db)
+
+def select_variant_version(job_id: str, data: models.VideoInspirationVariantSelectRequest, db: Session) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    pipeline = _variant_pipeline(row)
+    versions = pipeline.get("synthesis", {}).get("versions", [])
+    selected = next((item for item in versions if isinstance(item, dict) and item.get("variant_id") == data.variant_id), None)
+    if not selected:
+        raise VideoInspirationError("Không tìm thấy phiên bản tối ưu đã chọn.", error_code="VIDEO_INSPIRATION_VARIANT_NOT_FOUND")
+    payload = selected.get("payload") if isinstance(selected.get("payload"), dict) else {}
+    _validate_optimized_rewrite_payload(payload)
+    row.rewritten_script = _format_optimized_script(payload)
+    row.script_title = _truncate(payload.get("title"), 160)
+    row.big_idea = _truncate(payload.get("big_idea"), 20000)
+    row.hook = _truncate(payload.get("hook_3_5s") or payload.get("hook"), 12000)
+    _save_variant_pipeline(row, db, {**pipeline, "selected_final": {"variant_id": data.variant_id, "revision": int(row.approved_script_revision or 1)}})
+    return _job_response(row, db)
 
 def _visual_analysis_prompt(frames: list[DBVideoInspirationFrame]) -> str:
     frame_lines = "\n".join(
@@ -3086,7 +3387,7 @@ def update_script(job_id: str, data: models.VideoInspirationScriptUpdate, db: Se
             row.id,
             db,
             changed_scope="narration",
-            reason_vi="Ká»‹ch báº£n Ä‘Ã­ch Ä‘Ã£ Ä‘á»•i; cáº§n táº¡o láº¡i voice, subtitle vÃ  package liÃªn quan.",
+            reason_vi="Kịch bản đích đã đổi; cần tạo lại voice, subtitle và package liên quan.",
         )
     else:
         db.commit()

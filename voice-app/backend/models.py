@@ -463,6 +463,27 @@ class VideoShotMicroScene(BaseModel):
     visual_action: str = Field(default="", max_length=4000)
     camera_note: str = Field(default="", max_length=4000)
     continuity_note: Optional[str] = Field(default=None, max_length=4000)
+    visible_characters: List[dict[str, Any]] = Field(default_factory=list, max_length=20)
+
+
+class VideoShotSpeechCue(BaseModel):
+    """One exact spoken line and its character/scene delivery context."""
+
+    speaker_name: str = Field(default="Narrator", max_length=160)
+    character_profile_id: Optional[str] = Field(default=None, max_length=160)
+    speaker_role: str = Field(
+        default="offscreen_narrator",
+        pattern="^(visible_character|offscreen_narrator|episode_guest|unknown)$",
+    )
+    text: str = Field(..., min_length=1, max_length=20000)
+    voice_description: Optional[str] = Field(default=None, max_length=4000)
+    delivery: Optional[str] = Field(default=None, max_length=4000)
+    emotion: Optional[str] = Field(default=None, max_length=2000)
+    context: Optional[str] = Field(default=None, max_length=6000)
+    start_seconds: Optional[float] = Field(default=None, ge=0, le=7200)
+    end_seconds: Optional[float] = Field(default=None, ge=0, le=7200)
+    lip_sync_required: bool = False
+
 
 class VideoShotDraft(BaseModel):
     scene_id: Optional[str] = None
@@ -481,6 +502,7 @@ class VideoShotDraft(BaseModel):
     environment_motion: Optional[str] = Field(default=None, max_length=4000)
     transition_to_next: Optional[str] = Field(default=None, max_length=4000)
     micro_scenes: List[VideoShotMicroScene] = Field(default_factory=list, max_length=20)
+    speech_cues: List[VideoShotSpeechCue] = Field(default_factory=list, max_length=20)
 
 class VideoShotUpdate(BaseModel):
     duration_seconds: Optional[float] = Field(default=None, ge=0.5, le=30)
@@ -500,6 +522,7 @@ class VideoShotUpdate(BaseModel):
     transition_json: Optional[dict[str, Any]] = None
     sound_design_json: Optional[dict[str, Any]] = None
     micro_scenes: Optional[List[VideoShotMicroScene]] = Field(default=None, max_length=20)
+    speech_cues: Optional[List[VideoShotSpeechCue]] = Field(default=None, max_length=20)
     retainability_quality_check: Optional[dict[str, Any]] = None
 
 class VideoShotLockRequest(BaseModel):
@@ -530,6 +553,7 @@ class VideoShotResponse(BaseModel):
     transition_json: Optional[dict[str, Any]] = None
     sound_design_json: Optional[dict[str, Any]] = None
     micro_scenes: List[VideoShotMicroScene] = Field(default_factory=list)
+    speech_cues: List[VideoShotSpeechCue] = Field(default_factory=list)
     retainability_quality_check: Optional[dict[str, Any]] = None
     locked: bool = False
     status: str
@@ -625,22 +649,43 @@ class VideoRenderSettings(BaseModel):
     """User-selected settings for rendering the final MP4."""
 
     resolution: str = Field(default="auto", pattern="^(auto|720p|1080p)$")
-    fps: int = Field(default=30, ge=12, le=60)
+    fps: int = Field(default=60, ge=12, le=60)
     fit_mode: str = Field(default="crop", pattern="^(crop|pad)$")
     duration_mode: str = Field(default="freeze", pattern="^(freeze|trim_only)$")
-    subtitle_mode: str = Field(default="burn_in", pattern="^(burn_in|sidecar|none)$")
-    mute_clip_audio: bool = True
+    subtitle_mode: str = Field(default="none", pattern="^(burn_in|sidecar|none)$")
+    mute_clip_audio: bool = False
+    # The three-level audio choice. Absent means "infer from mute_clip_audio": settings
+    # written before this field existed live on in job rows and in the browser, and giving
+    # this field a hard default would read a stored bed job as "drop" and silently strip the
+    # original audio out of every later unattended render.
+    clip_audio_mode: Optional[str] = Field(default=None, pattern="^(drop|bed|clip_only)$")
     background_color: str = Field(default="#111827", max_length=20)
     force: bool = False
     enhanced_render: bool = False
     enhanced_audio: bool = True
     ai_review: bool = True
-    max_fix_attempts: int = Field(default=1, ge=0, le=2)
+    max_fix_attempts: int = Field(default=0, ge=0, le=2)
+    watermark_cleanup: bool = True
+    # cv2 is the default because it is ~27x faster than migan on the same clip while the
+    # two outputs are visually indistinguishable (PSNR 50,7 dB / SSIM 0,9965). migan stays
+    # selectable for clips whose logo sits on a background cv2 fills poorly.
+    watermark_backend: str = Field(default="cv2", pattern="^(cv2|migan)$")
 
 class VideoRenderWarning(BaseModel):
     shot_id: Optional[str] = None
     code: str
     message: str
+
+class VideoRenderWatermarkBackendStatus(BaseModel):
+    """Readiness of a single watermark region-fill backend."""
+
+    backend: str
+    ready: bool
+    failure_reason: Optional[str] = None
+    error_code: Optional[str] = None
+    revision: Optional[str] = None
+    # "cached" | "not_cached" | "unknown"; None when the backend needs no model.
+    model_cache: Optional[str] = None
 
 class VideoRenderReadinessResponse(BaseModel):
     """Checklist before creating an MP4 render job."""
@@ -649,6 +694,11 @@ class VideoRenderReadinessResponse(BaseModel):
     ready: bool
     ffmpeg_ready: bool = False
     ffprobe_ready: bool = False
+    watermark_cleanup_ready: bool = True
+    watermark_cleanup_revision: Optional[str] = None
+    watermark_cleanup_failure_reason: Optional[str] = None
+    # Per-backend readiness, populated only while watermark cleanup is enabled.
+    watermark_backends: List[VideoRenderWatermarkBackendStatus] = Field(default_factory=list)
     missing_clip_shot_ids: List[str] = Field(default_factory=list)
     invalid_clip_shot_ids: List[str] = Field(default_factory=list)
     missing_voice_shot_ids: List[str] = Field(default_factory=list)
@@ -1045,6 +1095,87 @@ class SeriesCharacterProfileResponse(SeriesCharacterProfileBase):
     class Config:
         from_attributes = True
 
+class EpisodeCastMember(BaseModel):
+    """Project-level cast item selected from approved series character profiles."""
+
+    character_profile_id: Optional[str] = None
+    name: str = Field(default="", max_length=160)
+    episode_role: Optional[str] = Field(default=None, max_length=500)
+    importance: str = Field(default="supporting", max_length=80)
+    reason_vi: Optional[str] = Field(default=None, max_length=2000)
+    identity_lock: Optional[str] = Field(default=None, max_length=4000)
+    visual_identity: Optional[str] = Field(default=None, max_length=4000)
+    fixed_traits: Optional[str] = Field(default=None, max_length=4000)
+
+class EpisodeOnlyGuest(BaseModel):
+    """A reviewed character that may be used in one episode but is not series canon."""
+
+    guest_id: str = Field(default="", max_length=120)
+    proposal_id: Optional[str] = Field(default=None, max_length=120)
+    name: str = Field(default="", max_length=160)
+    episode_role: Optional[str] = Field(default=None, max_length=500)
+    appearance: Optional[str] = Field(default=None, max_length=4000)
+    personality: Optional[str] = Field(default=None, max_length=4000)
+    speech_style: Optional[str] = Field(default=None, max_length=4000)
+    reason_vi: Optional[str] = Field(default=None, max_length=2000)
+    approved_at: Optional[str] = None
+
+class NewCharacterProposal(BaseModel):
+    """AI proposal for a new character. Canon writes require explicit user decision."""
+
+    proposal_id: str = Field(default="", max_length=120)
+    name: str = Field(default="", max_length=160)
+    episode_role: Optional[str] = Field(default=None, max_length=500)
+    reason_vi: Optional[str] = Field(default=None, max_length=4000)
+    canon_impact: str = Field(default="unknown", max_length=120)
+    reappears_likely: bool = False
+    has_dialogue: bool = False
+    foreground: bool = False
+    affects_plot: bool = False
+    background_extra: bool = False
+    requires_review: bool = True
+    face_description: Optional[str] = Field(default=None, max_length=4000)
+    hair_description: Optional[str] = Field(default=None, max_length=4000)
+    body_description: Optional[str] = Field(default=None, max_length=4000)
+    signature_outfit: Optional[str] = Field(default=None, max_length=4000)
+    personality: Optional[str] = Field(default=None, max_length=4000)
+    speech_style: Optional[str] = Field(default=None, max_length=4000)
+    fixed_traits: Optional[str] = Field(default=None, max_length=4000)
+    additional_notes: Optional[str] = Field(default=None, max_length=4000)
+    affected_artifacts: List[str] = Field(default_factory=list, max_length=20)
+    status: str = Field(default="pending_review", max_length=80)
+    decision: Optional[str] = Field(default=None, max_length=80)
+    decided_at: Optional[str] = None
+    decided_note_vi: Optional[str] = Field(default=None, max_length=2000)
+    series_character_profile_id: Optional[str] = None
+
+class VideoProjectCharacterFlowResponse(BaseModel):
+    """Character-flow artifact stored on one AI Video project."""
+
+    project_id: str
+    series_id: Optional[str] = None
+    episode_cast: List[EpisodeCastMember] = Field(default_factory=list)
+    episode_only_guests: List[EpisodeOnlyGuest] = Field(default_factory=list)
+    new_character_proposals: List[NewCharacterProposal] = Field(default_factory=list)
+    pending_required_count: int = 0
+    required_proposals_decided: bool = True
+    resume_step: Optional[str] = None
+    message: str = ""
+
+class CharacterProposalDecisionRequest(BaseModel):
+    """Decision for one AI-proposed character."""
+
+    decision: str = Field(..., pattern="^(approve_as_series_character|keep_episode_only|reject)$")
+    note_vi: Optional[str] = Field(default=None, max_length=2000)
+
+class CharacterProposalDecisionResponse(BaseModel):
+    """Updated project character flow after a proposal decision."""
+
+    character_flow: VideoProjectCharacterFlowResponse
+    created_character_profile: Optional[SeriesCharacterProfileResponse] = None
+    auto_run_ready_to_continue: bool = False
+    message: str
+
 class SeriesCharacterProfileReorderRequest(BaseModel):
     """Persist a manual character profile order."""
 
@@ -1386,6 +1517,10 @@ class StoryImageOutputSettings(BaseModel):
             raise ValueError("panel_count is required when image panel_mode is manual")
         return self
 
+DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT = 6
+DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS = 10
+DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT = 4
+
 class StoryVideoHandoffSettings(BaseModel):
     """Video handoff settings copied from Story Studio into AI Video."""
 
@@ -1397,10 +1532,14 @@ class StoryVideoHandoffSettings(BaseModel):
     narration_density: str = Field(default="dense", pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default="direct", pattern=video_purpose_service.CTA_STYLE_PATTERN)
     target_duration_seconds: Optional[int] = Field(default=None, ge=5, le=7200)
-    default_shot_duration_seconds: Optional[int] = Field(default=5, ge=1, le=5)
-    prompt_segment_count: Optional[int] = Field(default=None, ge=1, le=100)
-    prompt_segment_duration_seconds: Optional[int] = Field(default=None, ge=3, le=30)
-    micro_scenes_per_prompt: Optional[int] = Field(default=3, ge=1, le=5)
+    default_shot_duration_seconds: Optional[int] = Field(default=None, ge=1, le=5)
+    prompt_segment_count: Optional[int] = Field(default=DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT, ge=1, le=100)
+    prompt_segment_duration_seconds: Optional[int] = Field(
+        default=DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS,
+        ge=3,
+        le=30,
+    )
+    micro_scenes_per_prompt: Optional[int] = Field(default=DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT, ge=1, le=5)
 
 class StoryEpisodeOutputSettings(BaseModel):
     """Normalized Story Studio episode production settings."""
@@ -1658,7 +1797,7 @@ class VideoEpisodeCreate(_VisualStyleLimitedModel):
     episode_title: Optional[str] = Field(default=None, max_length=160)
     episode_number: Optional[int] = Field(default=None, ge=1, le=10000)
     title: Optional[str] = Field(default=None, max_length=160)
-    language: str = Field(default="vi", max_length=20)
+    language: str = Field(default="en", max_length=20)
     target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
@@ -1693,7 +1832,7 @@ class VideoProjectCreate(_VisualStyleLimitedModel):
     story_episode_id: Optional[str] = None
     episode_number: Optional[int] = Field(default=None, ge=1, le=10000)
     episode_title: Optional[str] = Field(default=None, max_length=160)
-    language: str = Field(default="vi", max_length=20)
+    language: str = Field(default="en", max_length=20)
     target_language: str = Field(default="en", pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
     video_purpose: str = Field(default=video_purpose_service.VIDEO_PURPOSE_CUSTOM, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
@@ -2069,6 +2208,7 @@ class VideoPackageReadinessResponse(BaseModel):
 
     project_id: str
     language: str = "en"
+    speech_source: str = "project_audio"
     video_purpose: str = video_purpose_service.VIDEO_PURPOSE_CUSTOM
     dialogue_mode: str = "voiceover"
     narration_density: str = "balanced"
@@ -2099,6 +2239,7 @@ class VideoPackageManifestResponse(BaseModel):
     project_id: str
     project_title: str
     language: str
+    speech_source: str = "project_audio"
     video_purpose: str = video_purpose_service.VIDEO_PURPOSE_CUSTOM
     dialogue_mode: str = "voiceover"
     narration_density: str = "balanced"
@@ -2411,6 +2552,7 @@ class VideoInspirationAnalyzeRequest(BaseModel):
     allow_audio_only: bool = False
     stt_model: Optional[str] = Field(default=None, pattern="^(base|small|medium|large|turbo)$")
     analysis_mode: str = Field(default="quick", pattern="^(quick|high_quality)$")
+    handoff_to_ai_video: bool = False
 
 class VideoInspirationTranscriptUpdate(BaseModel):
     transcript_text: str = Field(..., max_length=120000)
@@ -2601,6 +2743,20 @@ class VideoInspirationDirectionUpdate(BaseModel):
 class VideoInspirationRewriteRequest(BaseModel):
     target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
     user_direction: Optional[str] = Field(default=None, max_length=20000)
+
+class VideoInspirationVariantGenerateRequest(BaseModel):
+    candidate_count: int = Field(default=2, ge=2, le=3)
+
+class VideoInspirationVariantScoreRequest(BaseModel):
+    variant_ids: List[str] = Field(default_factory=list, max_length=3)
+
+class VideoInspirationVariantSynthesisRequest(BaseModel):
+    variant_ids: List[str] = Field(default_factory=list, max_length=3)
+    final_version_count: int = Field(default=1, ge=1, le=3)
+    strategy: str = Field(default="balanced", pattern="^(balanced|hook|emotion|retention|visual)$")
+
+class VideoInspirationVariantSelectRequest(BaseModel):
+    variant_id: str = Field(..., min_length=1, max_length=120)
 
 class VideoInspirationScriptUpdate(BaseModel):
     rewritten_script: str = Field(..., min_length=1, max_length=160000)
@@ -3284,3 +3440,509 @@ class AvailableEffectsResponse(BaseModel):
     """Response listing all available effect types."""
 
     effects: List[AvailableEffect]
+
+
+# Research Workspace contracts. Kept separate from AI Video contracts so the
+# new route can evolve without changing existing request/response behavior.
+class ResearchProjectCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=2000)
+    brief: Optional[str] = Field(None, max_length=20000)
+    tags: List[str] = Field(default_factory=list, max_length=20)
+
+
+class ResearchProjectUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = Field(None, max_length=2000)
+    brief: Optional[str] = Field(None, max_length=20000)
+    tags: Optional[List[str]] = Field(None, max_length=20)
+    status: Optional[str] = Field(None, pattern="^(draft|researching|ready_for_review|approved|archived)$")
+
+
+class ResearchProjectResponse(BaseModel):
+    id: str
+    title: str
+    description: Optional[str] = None
+    brief: Optional[str] = None
+    status: str
+    revision: int
+    memory_path: Optional[str] = None
+    manifest_path: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchContextRequest(BaseModel):
+    project_ids: List[str] = Field(default_factory=list, max_length=10)
+    max_chars: int = Field(default=60000, ge=1000, le=200000)
+    per_project_chars: int = Field(default=12000, ge=500, le=50000)
+
+
+class ResearchContextResponse(BaseModel):
+    project_ids: List[str]
+    context: str
+    omitted_project_ids: List[str] = Field(default_factory=list)
+    total_chars: int
+    truncated: bool = False
+
+
+class ResearchSourceResponse(BaseModel):
+    id: str
+    project_id: str
+    source_type: str
+    title: Optional[str] = None
+    input_url: Optional[str] = None
+    file_path: Optional[str] = None
+    status: str
+    revision: int
+    source_package_path: Optional[str] = None
+    summary_path: Optional[str] = None
+    result: dict = Field(default_factory=dict)
+    limitations: List[Any] = Field(default_factory=list)
+    provenance: dict = Field(default_factory=dict)
+    error_code: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchSourceTextCreate(BaseModel):
+    source_type: str = Field(..., pattern="^(text|docs_url|video_url|story_url)$")
+    title: Optional[str] = Field(None, max_length=200)
+    content: Optional[str] = Field(None, max_length=100000)
+    input_url: Optional[str] = Field(None, max_length=4000)
+
+
+class ResearchSeriesMemorySourceCreate(BaseModel):
+    series_id: str = Field(..., min_length=1, max_length=160)
+    episode_number: Optional[int] = Field(None, ge=1, le=10000)
+    max_chars: int = Field(default=40000, ge=2000, le=60000)
+
+
+class ResearchSourceApproveRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=300)
+    observation_indexes: List[int] = Field(default_factory=list, max_length=100)
+
+
+class ResearchSourceRetryRequest(BaseModel):
+    resolve_dns: bool = True
+
+
+class ResearchRunCreate(BaseModel):
+    mode: str = Field(..., pattern="^(research|creative|both)$")
+    brief: Optional[str] = Field(None, max_length=20000)
+    source_ids: List[str] = Field(default_factory=list, max_length=50)
+    related_project_ids: List[str] = Field(default_factory=list, max_length=10)
+    run_ai: bool = True
+
+
+class ResearchRunRetryRequest(BaseModel):
+    run_ai: bool = True
+
+
+class ResearchRunMergeRequest(BaseModel):
+    materialize_options: bool = True
+
+
+class ResearchRunResponse(BaseModel):
+    id: str
+    project_id: str
+    mode: str
+    status: str
+    output: dict = Field(default_factory=dict)
+    provider_metadata: dict = Field(default_factory=dict)
+    cost: dict = Field(default_factory=dict)
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchIdeaCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    summary: Optional[str] = Field(None, max_length=10000)
+    content: dict = Field(default_factory=dict)
+    run_id: Optional[str] = None
+    source_provider: Optional[str] = Field(None, max_length=80)
+
+
+class ResearchIdeaResponse(BaseModel):
+    id: str
+    project_id: str
+    run_id: Optional[str] = None
+    title: str
+    summary: Optional[str] = None
+    status: str
+    content: dict = Field(default_factory=dict)
+    source_provider: Optional[str] = None
+    dependency_fingerprint: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchScriptCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    content: Optional[str] = Field(None, max_length=50000)
+    content_json: dict = Field(default_factory=dict)
+    idea_id: Optional[str] = None
+    target_format: str = Field(default="series_3_minute", max_length=100)
+
+
+class ResearchScriptResponse(BaseModel):
+    id: str
+    project_id: str
+    idea_id: Optional[str] = None
+    title: str
+    status: str
+    content: Optional[str] = None
+    content_json: dict = Field(default_factory=dict)
+    target_format: Optional[str] = None
+    dependency_fingerprint: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchScoreRequest(BaseModel):
+    target_type: str = Field(..., pattern="^(idea|script)$")
+    target_id: str = Field(..., min_length=1)
+    components: Optional[dict[str, float]] = None
+    explanations: dict[str, str] = Field(default_factory=dict)
+    evidence_refs: List[Any] = Field(default_factory=list)
+    limitations: List[Any] = Field(default_factory=list)
+    constraint_violations: List[str] = Field(default_factory=list)
+    run_ai: bool = True
+    originality: Optional[float] = Field(None, ge=0, le=10)
+    feasibility: Optional[float] = Field(None, ge=0, le=10)
+
+
+class ResearchScoreResponse(BaseModel):
+    id: str
+    project_id: str
+    target_type: str
+    target_id: str
+    rubric_version: str
+    components: dict = Field(default_factory=dict)
+    total_score: float
+    recommendation_status: str
+    recommendation_reason: Optional[str] = None
+    confidence: Optional[float] = None
+    rank: Optional[int] = None
+    tie_group: Optional[int] = None
+    completeness_status: str = "incomplete"
+    stale_reason: Optional[str] = None
+    improvement_actions: List[Any] = Field(default_factory=list)
+    tradeoffs: dict = Field(default_factory=dict)
+    safety_gate: dict = Field(default_factory=dict)
+    provider_metadata: dict = Field(default_factory=dict)
+    cost: dict = Field(default_factory=dict)
+    evidence_refs: List[Any] = Field(default_factory=list)
+    limitations: List[Any] = Field(default_factory=list)
+    dependency_fingerprint: Optional[str] = None
+    user_override_status: Optional[str] = None
+    user_override_reason: Optional[str] = None
+    user_override_revision: int = 0
+    user_override_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ResearchScoreOverrideRequest(BaseModel):
+    status: Optional[str] = Field(None, pattern="^(recommended|alternative|blocked)$")
+    reason: Optional[str] = Field(None, max_length=2000)
+
+
+class ResearchRecommendationResponse(BaseModel):
+    project_id: str
+    rubric_version: str
+    ranked_scores: List[ResearchScoreResponse] = Field(default_factory=list)
+    recommended_target_ids: List[str] = Field(default_factory=list)
+    selected_target_id: Optional[str] = None
+    selected_score_id: Optional[str] = None
+    decision_source: str = "none"
+    tie_groups: List[dict] = Field(default_factory=list)
+    has_incomplete: bool = False
+    has_stale: bool = False
+    summary_reason: Optional[str] = None
+
+
+class ResearchStatusRequest(BaseModel):
+    status: str = Field(..., min_length=1, max_length=40)
+
+
+class ResearchChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=20000)
+    mode: str = Field(default="creative", pattern="^(research|creative|both)$")
+    selected_project_ids: List[str] = Field(default_factory=list, max_length=10)
+    action: str = Field(
+        default="develop",
+        pattern="^(develop|variant|next_episode|increase_drama|fix_logic|develop_character|script_seed)$",
+    )
+    thread_id: Optional[str] = None
+    branch_name: Optional[str] = Field(None, max_length=120)
+    parent_message_id: Optional[str] = None
+    run_ai: bool = True
+
+
+class ResearchChatResponse(BaseModel):
+    thread_id: str
+    user_message_id: str
+    assistant_message_id: str
+    draft: str
+    suggestions: List[dict] = Field(default_factory=list)
+    status: str = "draft"
+    branch_name: str = "canon"
+    continuity: dict = Field(default_factory=dict)
+    context_project_ids: List[str] = Field(default_factory=list)
+
+
+class ResearchChatMessageResponse(BaseModel):
+    id: str
+    thread_id: str
+    role: str
+    content: str
+    message_type: str
+    status: str
+    metadata: dict = Field(default_factory=dict)
+    created_at: datetime
+
+
+class ResearchChatThreadResponse(BaseModel):
+    id: str
+    project_id: str
+    title: Optional[str] = None
+    selected_project_ids: List[str] = Field(default_factory=list)
+    branch_name: str
+    status: str
+    messages: List[ResearchChatMessageResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchChatApprovalRequest(BaseModel):
+    promotion_type: str = Field(..., pattern="^(idea|script|memory_card)$")
+    title: Optional[str] = Field(None, max_length=300)
+    accept: bool = True
+
+
+class ResearchChatPromotionResponse(BaseModel):
+    message_id: str
+    promotion_type: str
+    status: str
+    project_revision: int
+    idea: Optional[ResearchIdeaResponse] = None
+    script: Optional[ResearchScriptResponse] = None
+
+
+class ResearchChatMessageStatusRequest(BaseModel):
+    status: str = Field(..., pattern="^(draft|rejected)$")
+
+
+class ResearchHandoffCreate(BaseModel):
+    accepted_idea_ids: List[str] = Field(default_factory=list, max_length=20)
+    accepted_script_ids: List[str] = Field(default_factory=list, max_length=20)
+    selected_target_id: Optional[str] = Field(None, max_length=100)
+    selection_source: Optional[str] = Field(None, pattern="^(user_override|ai|none)$")
+    title: Optional[str] = Field(None, max_length=200)
+    target_language: str = Field(default="vi", pattern="^(vi|en)$")
+    target_duration_seconds: Optional[int] = Field(None, ge=1, le=3600)
+    aspect_ratio: str = Field(default="9:16", pattern="^(9:16|16:9|1:1)$")
+    idempotency_key: Optional[str] = Field(None, max_length=200)
+
+
+class ResearchHandoffResponse(BaseModel):
+    id: str
+    project_id: str
+    revision: int
+    status: str
+    target_ai_video_project_id: Optional[str] = None
+    deep_link: Optional[str] = None
+    payload: dict = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+PRODUCT_VIDEO_ASPECT_RATIO_PATTERN = "^(9:16|16:9)$"
+PRODUCT_VIDEO_MIN_DURATION_SECONDS = 15
+PRODUCT_VIDEO_MAX_DURATION_SECONDS = 180
+PRODUCT_VIDEO_CREATION_MODE_PATTERN = "^(quick|manual)$"
+PRODUCT_VIDEO_AUTOMATION_MODE_PATTERN = "^(review_gated|full_auto)$"
+PRODUCT_VIDEO_OUTPUT_TARGET_PATTERN = "^(render_ready|prompt_pack|shots_only)$"
+
+
+class ProductVideoProjectCreate(_VisualStyleLimitedModel):
+    """Request model for creating a product video prompt project."""
+
+    topic: str = Field(..., min_length=1, max_length=4000)
+    title: Optional[str] = Field(default=None, max_length=160)
+    target_language: str = Field(default="vi", pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
+    video_purpose: str = Field(default="sales_ad", pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
+    narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
+    call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    creation_mode: str = Field(default="quick", pattern=PRODUCT_VIDEO_CREATION_MODE_PATTERN)
+    automation_mode: str = Field(default="full_auto", pattern=PRODUCT_VIDEO_AUTOMATION_MODE_PATTERN)
+    output_target: str = Field(default="render_ready", pattern=PRODUCT_VIDEO_OUTPUT_TARGET_PATTERN)
+    aspect_ratio: str = Field(default="9:16", pattern=PRODUCT_VIDEO_ASPECT_RATIO_PATTERN)
+    target_duration_seconds: int = Field(
+        default=30,
+        ge=PRODUCT_VIDEO_MIN_DURATION_SECONDS,
+        le=PRODUCT_VIDEO_MAX_DURATION_SECONDS,
+    )
+    visual_style: Optional[str] = Field(default=None, max_length=_VIDEO_VISUAL_STYLE_MAX_LENGTH)
+    # No pattern on purpose: the preset list changes often and lives in the frontend.
+    visual_style_preset: Optional[str] = Field(default=None, max_length=40)
+    prompt_segment_count: Optional[int] = Field(default=None, ge=1, le=60)
+    prompt_segment_duration_seconds: Optional[int] = Field(default=None, ge=3, le=30)
+    micro_scenes_per_prompt: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+class ProductVideoProjectUpdate(_VisualStyleLimitedModel):
+    """Partial update for a product video prompt project."""
+
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    topic: Optional[str] = Field(default=None, min_length=1, max_length=4000)
+    target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
+    video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
+    narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
+    call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    creation_mode: Optional[str] = Field(default=None, pattern=PRODUCT_VIDEO_CREATION_MODE_PATTERN)
+    automation_mode: Optional[str] = Field(default=None, pattern=PRODUCT_VIDEO_AUTOMATION_MODE_PATTERN)
+    output_target: Optional[str] = Field(default=None, pattern=PRODUCT_VIDEO_OUTPUT_TARGET_PATTERN)
+    aspect_ratio: Optional[str] = Field(default=None, pattern=PRODUCT_VIDEO_ASPECT_RATIO_PATTERN)
+    target_duration_seconds: Optional[int] = Field(
+        default=None,
+        ge=PRODUCT_VIDEO_MIN_DURATION_SECONDS,
+        le=PRODUCT_VIDEO_MAX_DURATION_SECONDS,
+    )
+    visual_style: Optional[str] = Field(default=None, max_length=_VIDEO_VISUAL_STYLE_MAX_LENGTH)
+    visual_style_preset: Optional[str] = Field(default=None, max_length=40)
+    prompt_segment_count: Optional[int] = Field(default=None, ge=1, le=60)
+    prompt_segment_duration_seconds: Optional[int] = Field(default=None, ge=3, le=30)
+    micro_scenes_per_prompt: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+class ProductVideoProjectResponse(BaseModel):
+    """List/detail summary for a product video prompt project."""
+
+    id: str
+    title: str
+    topic: str
+    target_language: str
+    aspect_ratio: str
+    visual_style: Optional[str] = None
+    visual_style_preset: Optional[str] = None
+    video_purpose: str
+    dialogue_mode: str
+    narration_density: str
+    call_to_action_style: Optional[str] = None
+    creation_mode: str
+    automation_mode: str
+    output_target: str
+    target_duration_seconds: int
+    prompt_segment_count: Optional[int] = None
+    prompt_segment_duration_seconds: Optional[int] = None
+    micro_scenes_per_prompt: Optional[int] = None
+    status: str
+    planning_status: str
+    planning_error: Optional[str] = None
+    hook_text: Optional[str] = None
+    # Derived because Veo snaps clip length to 4/6/8/10s, so the real duration
+    # is a multiple of the clip length and rarely equals the requested value.
+    derived_clip_count: int = 0
+    derived_clip_duration_seconds: int = 0
+    derived_duration_seconds: int = 0
+    shot_count: int = 0
+    prompt_count: int = 0
+    render_project_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProductVideoShotResponse(BaseModel):
+    """One planned Flow clip of a product video project."""
+
+    id: str
+    project_id: str
+    shot_order: int
+    shot_type: Optional[str] = None
+    framing: Optional[str] = None
+    camera_angle: Optional[str] = None
+    composition: Optional[str] = None
+    camera_motion: Optional[str] = None
+    subject_motion: Optional[str] = None
+    environment_motion: Optional[str] = None
+    lighting: Optional[str] = None
+    mood: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    beat_role: Optional[str] = None
+    narration_text: Optional[str] = None
+    retention_notes: Optional[str] = None
+    transition_notes: Optional[str] = None
+    sound_design_notes: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProductVideoPromptResponse(BaseModel):
+    """Rendered Flow prompt for one product video shot."""
+
+    id: str
+    project_id: str
+    shot_id: str
+    shot_order: int = 1
+    prompt: str
+    negative_prompt: Optional[str] = None
+    prompt_explanation_vi: Optional[str] = None
+    aspect_ratio: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ProductVideoPromptPackResponse(BaseModel):
+    """Full prompt pack ready to paste into Google Flow."""
+
+    project_id: str
+    aspect_ratio: str
+    target_language: str
+    derived_clip_count: int = 0
+    derived_clip_duration_seconds: int = 0
+    derived_duration_seconds: int = 0
+    hook_text: Optional[str] = None
+    prompts: List[ProductVideoPromptResponse] = Field(default_factory=list)
+
+
+class ProductVideoProjectDetailResponse(ProductVideoProjectResponse):
+    """Project detail with its planned shots and generated prompts."""
+
+    shots: List[ProductVideoShotResponse] = Field(default_factory=list)
+    prompts: List[ProductVideoPromptResponse] = Field(default_factory=list)
+    render_shots: List[VideoShotResponse] = Field(default_factory=list)

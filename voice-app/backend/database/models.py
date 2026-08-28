@@ -838,6 +838,7 @@ class VideoShot(Base):
     transition_json = Column(JSON, nullable=True)
     sound_design_json = Column(JSON, nullable=True)
     micro_scenes_json = Column(JSON, nullable=True)
+    speech_cues_json = Column(JSON, nullable=True)
     retainability_quality_check = Column(JSON, nullable=True)
     locked = Column(Boolean, nullable=False, default=False)
     status = Column(String, nullable=False, default="draft")
@@ -859,6 +860,14 @@ class VideoShot(Base):
     @micro_scenes.setter
     def micro_scenes(self, value):
         self.micro_scenes_json = value
+
+    @property
+    def speech_cues(self):
+        return self.speech_cues_json or []
+
+    @speech_cues.setter
+    def speech_cues(self, value):
+        self.speech_cues_json = value
 
 class VideoShotPrompt(Base):
     """Structured video prompt artifact for a phase 2 shot."""
@@ -1787,4 +1796,360 @@ class ComicSourceVersionRecord(Base):
     target_id = Column(String, nullable=False)
     evidence_ids_json = Column(JSON, nullable=True)
     metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ResearchProject(Base):
+    """Persistent research workspace; DB is the source of truth."""
+
+    __tablename__ = "research_projects"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    brief = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="draft")
+    revision = Column(Integer, nullable=False, default=1)
+    memory_path = Column(String, nullable=True)
+    manifest_path = Column(String, nullable=True)
+    tags_json = Column(JSON, nullable=True, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchSource(Base):
+    """One immutable input and its normalized research package."""
+
+    __tablename__ = "research_sources"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    source_type = Column(String, nullable=False)
+    title = Column(String, nullable=True)
+    input_url = Column(Text, nullable=True)
+    file_path = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="queued")
+    revision = Column(Integer, nullable=False, default=1)
+    source_package_path = Column(String, nullable=True)
+    summary_path = Column(String, nullable=True)
+    artifact_dir = Column(String, nullable=True)
+    source_hash = Column(String, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    limitations_json = Column(JSON, nullable=True, default=list)
+    provenance_json = Column(JSON, nullable=True, default=dict)
+    error_code = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchRun(Base):
+    """A research/creative attempt or an explicit merge run."""
+
+    __tablename__ = "research_runs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    mode = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="queued")
+    brief_path = Column(String, nullable=True)
+    research_result_path = Column(String, nullable=True)
+    creative_result_path = Column(String, nullable=True)
+    merged_result_path = Column(String, nullable=True)
+    output_json = Column(JSON, nullable=True)
+    provider_metadata_json = Column(JSON, nullable=True)
+    cost_json = Column(JSON, nullable=True)
+    error_code = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchIdea(Base):
+    """Candidate or accepted content option."""
+
+    __tablename__ = "research_ideas"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    run_id = Column(String, ForeignKey("research_runs.id"), nullable=True)
+    title = Column(String, nullable=False)
+    summary = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="candidate")
+    idea_path = Column(String, nullable=True)
+    source_provider = Column(String, nullable=True)
+    content_json = Column(JSON, nullable=True, default=dict)
+    dependency_fingerprint = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchScript(Base):
+    """Draft or accepted script seed linked to an idea."""
+
+    __tablename__ = "research_scripts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    idea_id = Column(String, ForeignKey("research_ideas.id"), nullable=True)
+    title = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="draft")
+    script_path = Column(String, nullable=True)
+    content = Column(Text, nullable=True)
+    content_json = Column(JSON, nullable=True, default=dict)
+    target_format = Column(String, nullable=True, default="series_3_minute")
+    dependency_fingerprint = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchScore(Base):
+    """Versioned rubric score and recommendation for an idea or script."""
+
+    __tablename__ = "research_scores"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    target_type = Column(String, nullable=False)
+    target_id = Column(String, nullable=False)
+    rubric_version = Column(String, nullable=False, default="research-score.v1")
+    components_json = Column(JSON, nullable=False, default=dict)
+    total_score = Column(Float, nullable=False, default=0.0)
+    recommendation_status = Column(String, nullable=False, default="alternative")
+    recommendation_reason = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=True)
+    rank = Column(Integer, nullable=True)
+    tie_group = Column(Integer, nullable=True)
+    completeness_status = Column(String, nullable=False, default="incomplete")
+    stale_reason = Column(Text, nullable=True)
+    improvement_actions_json = Column(JSON, nullable=True, default=list)
+    tradeoffs_json = Column(JSON, nullable=True, default=dict)
+    safety_gate_json = Column(JSON, nullable=True, default=dict)
+    provider_metadata_json = Column(JSON, nullable=True, default=dict)
+    cost_json = Column(JSON, nullable=True, default=dict)
+    evidence_refs_json = Column(JSON, nullable=True, default=list)
+    limitations_json = Column(JSON, nullable=True, default=list)
+    dependency_fingerprint = Column(String, nullable=True)
+    user_override_status = Column(String, nullable=True)
+    user_override_reason = Column(Text, nullable=True)
+    user_override_revision = Column(Integer, nullable=False, default=0)
+    user_override_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchChatThread(Base):
+    """A persistent content-development conversation."""
+
+    __tablename__ = "research_chat_threads"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    title = Column(String, nullable=True)
+    selected_project_ids_json = Column(JSON, nullable=True, default=list)
+    branch_name = Column(String, nullable=True, default="canon")
+    status = Column(String, nullable=False, default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ResearchChatMessage(Base):
+    """One user or AI draft message; accepted actions are explicit."""
+
+    __tablename__ = "research_chat_messages"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    thread_id = Column(String, ForeignKey("research_chat_threads.id"), nullable=False)
+    role = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String, nullable=False, default="draft")
+    status = Column(String, nullable=False, default="draft")
+    metadata_json = Column(JSON, nullable=True, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ResearchHandoff(Base):
+    """Immutable approved handoff from research into an AI Video project."""
+
+    __tablename__ = "research_handoffs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("research_projects.id"), nullable=False)
+    revision = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, default="previewed")
+    idempotency_key = Column(String, nullable=True, unique=True)
+    dependency_fingerprint = Column(String, nullable=True)
+    accepted_idea_ids_json = Column(JSON, nullable=True, default=list)
+    accepted_script_ids_json = Column(JSON, nullable=True, default=list)
+    payload_json = Column(JSON, nullable=False, default=dict)
+    handoff_path = Column(String, nullable=True)
+    target_ai_video_project_id = Column(String, nullable=True)
+    error_code = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AutomationConnection(Base):
+    """Encrypted connection metadata for Automation Hub integrations."""
+
+    __tablename__ = "automation_connections"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    kind = Column(String, nullable=False, default="publisher")
+    platform = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="not_configured")
+    public_config_json = Column(JSON, nullable=False, default=dict)
+    secret_ciphertext = Column(Text, nullable=True)
+    secret_fingerprint = Column(String, nullable=True)
+    scopes_json = Column(JSON, nullable=True, default=list)
+    last_checked_at = Column(DateTime, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AutomationAsset(Base):
+    """Immutable video snapshot used by Automation Hub publishing jobs."""
+
+    __tablename__ = "automation_assets"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_type = Column(String, nullable=False, default="upload")
+    source_ref = Column(String, nullable=True)
+    stored_path = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False, default="video/mp4")
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AutomationPublishJob(Base):
+    """Independent social publishing job owned by Automation Hub."""
+
+    __tablename__ = "automation_publish_jobs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    asset_id = Column(String, ForeignKey("automation_assets.id"), nullable=False)
+    connection_id = Column(String, ForeignKey("automation_connections.id"), nullable=False)
+    platform = Column(String, nullable=False)
+    publish_mode = Column(String, nullable=False, default="standard")
+    status = Column(String, nullable=False, default="queued")
+    title = Column(Text, nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    tags_json = Column(JSON, nullable=True, default=list)
+    privacy = Column(String, nullable=True)
+    scheduled_at = Column(DateTime, nullable=True)
+    idempotency_key = Column(String, nullable=False, unique=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    provider_post_id = Column(String, nullable=True)
+    provider_url = Column(Text, nullable=True)
+    result_json = Column(JSON, nullable=True, default=dict)
+    error_code = Column(String, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AutomationPublishAttempt(Base):
+    """Redacted audit record for one provider upload attempt."""
+
+    __tablename__ = "automation_publish_attempts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    job_id = Column(String, ForeignKey("automation_publish_jobs.id"), nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="running")
+    request_meta_json = Column(JSON, nullable=True, default=dict)
+    response_meta_json = Column(JSON, nullable=True, default=dict)
+    error_code = Column(String, nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProductVideoProject(Base):
+    """Product-selling video project with a prompt-only planning boundary.
+
+    ``render_project_id`` points at an internal phase-2 AI Video bridge used
+    only after the user uploads clips and explicitly starts an MP4 render.
+    Product Video never creates provider-generation or TTS jobs automatically.
+    """
+
+    __tablename__ = "product_video_projects"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = Column(String, nullable=False)
+    topic = Column(Text, nullable=False)
+    target_language = Column(String, nullable=False, default="vi")
+    aspect_ratio = Column(String, nullable=False, default="9:16")
+    visual_style = Column(Text, nullable=True)
+    visual_style_preset = Column(String, nullable=True)
+    video_purpose = Column(String, nullable=False, default="sales_ad")
+    dialogue_mode = Column(String, nullable=False, default="voiceover")
+    narration_density = Column(String, nullable=False, default="light")
+    call_to_action_style = Column(String, nullable=True)
+    # These mirror AI Video's creation controls. They govern only Product
+    # Video planning/prompt stages; provider/TTS/render work remains explicit.
+    creation_mode = Column(String, nullable=False, default="quick")
+    automation_mode = Column(String, nullable=False, default="full_auto")
+    output_target = Column(String, nullable=False, default="render_ready")
+    target_duration_seconds = Column(Integer, nullable=False, default=30)
+    prompt_segment_count = Column(Integer, nullable=True)
+    prompt_segment_duration_seconds = Column(Integer, nullable=True)
+    micro_scenes_per_prompt = Column(Integer, nullable=True)
+    status = Column(String, nullable=False, default="draft")
+    planning_status = Column(String, nullable=False, default="draft")
+    planning_error = Column(Text, nullable=True)
+    hook_text = Column(Text, nullable=True)
+    retention_plan_json = Column(JSON, nullable=True)
+    sound_design_plan_json = Column(JSON, nullable=True)
+    render_project_id = Column(String, ForeignKey("video_projects.id"), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProductVideoShot(Base):
+    """One planned Flow clip of a product video project."""
+
+    __tablename__ = "product_video_shots"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("product_video_projects.id"), nullable=False)
+    shot_order = Column(Integer, nullable=False, default=1)
+    shot_type = Column(String, nullable=True)
+    framing = Column(String, nullable=True)
+    camera_angle = Column(String, nullable=True)
+    composition = Column(Text, nullable=True)
+    camera_motion = Column(Text, nullable=True)
+    subject_motion = Column(Text, nullable=True)
+    environment_motion = Column(Text, nullable=True)
+    lighting = Column(Text, nullable=True)
+    mood = Column(Text, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    beat_role = Column(String, nullable=True)
+    narration_text = Column(Text, nullable=True)
+    retention_notes = Column(Text, nullable=True)
+    transition_notes = Column(Text, nullable=True)
+    sound_design_notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ProductVideoShotPrompt(Base):
+    """Rendered Flow prompt text for one product video shot."""
+
+    __tablename__ = "product_video_shot_prompts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey("product_video_projects.id"), nullable=False)
+    shot_id = Column(String, ForeignKey("product_video_shots.id"), nullable=False)
+    prompt = Column(Text, nullable=False)
+    negative_prompt = Column(Text, nullable=True)
+    prompt_explanation_vi = Column(Text, nullable=True)
+    aspect_ratio = Column(String, nullable=False, default="9:16")
     created_at = Column(DateTime, default=datetime.utcnow)

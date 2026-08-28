@@ -5,6 +5,35 @@
 
 # Changelog
 
+## [Unreleased]
+
+Voicebox bổ sung một workspace nghiên cứu nội dung độc lập ở `/research`, giúp người dùng gom nguồn, trò chuyện
+phát triển series drama 3 phút, lưu memory bền vững và chỉ handoff phần đã duyệt sang AI Video.
+
+### Nghiên cứu và phát triển content
+- Lưu Research Project, source, run, idea, script, score, chat và handoff trong database; compile memory accepted
+  thành file Markdown/JSON theo revision.
+- Nhận link video, upload video, link truyện, upload ảnh và text/docs với original bất biến, URL redaction và
+  trạng thái partial khi chưa có adapter phân tích sâu.
+- Hỗ trợ nghiên cứu tài liệu chỉ đọc bằng cấu hình người dùng trong `~/.claude/settings.json`, phát triển content
+  bằng planning engine hiện có và mode chạy cả hai với lỗi được cô lập.
+- Chấm điểm hook, cấu trúc, cảm xúc, retention, độ mới, tiềm năng series và khả năng sản xuất; hiển thị safety
+  gate và phương án khuyên chọn.
+
+### Handoff AI Video
+- Handoff chỉ lấy idea/script accepted, giữ provenance, evidence, memory, must-have, avoid và limitations.
+- Tạo project AI Video ở trạng thái draft qua primitive hiện có, materialize source blocks và Project Memory
+  cards, rồi deep-link `/ai-video?projectId=<id>`; không tự chạy planning hoặc generation.
+- Khi Research Memory có revision mới, handoff/project AI Video cũ được đánh stale để người dùng chủ động
+  handoff hoặc chạy lại, không tự sửa hay tự generate nội dung đã sản xuất.
+- Thêm cờ `VOICEBOX_FEATURE_RESEARCH` và `VITE_FEATURE_RESEARCH` để tắt route/menu mới mà không ảnh hưởng các
+  project AI Video đã handoff.
+
+### Video Inspiration
+- Thêm thao tác nghiên cứu sâu một lần bấm, chạy `high_quality` ở nền rồi mở form AI Video bằng analysis-only draft; không tạo project, không auto-run và không ghi đè cấu hình đầu ra của người dùng.
+- Thêm pipeline tạo 2–3 candidate, chọn bằng checkbox, chấm điểm batch và tổng hợp 1–3 bản cuối có revision, provenance, fingerprint và cache theo stage.
+- Các stage dài dùng workflow pool chung, heartbeat 30 giây, ngưỡng stale có thể cấu hình và kill switch `VOICEBOX_FEATURE_VIDEO_INSPIRATION_VARIANTS` cho phần batch/multi-version.
+
 ## [0.5.0] - 2026-04-22
 
 **The Capture release.** Voicebox stops being just a voice-cloning studio and becomes a full AI voice studio. Hold a key anywhere on your machine, speak, release — the transcript lands in the focused text field. Flip the primitive around and any MCP-aware agent — Claude Code, Cursor, Spacebot — speaks back through an on-screen pill in one of your cloned voices. A local LLM sits between the two, so transcripts come out clean and voice profiles can carry a personality that reshapes what the agent says before it gets spoken.

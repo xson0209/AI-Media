@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -10,10 +12,86 @@ from sqlalchemy.orm import Session
 
 from .. import config
 from .. import models
-from ..database import VideoInspirationFrame as DBVideoInspirationFrame, get_db
+from ..database import VideoInspirationFrame as DBVideoInspirationFrame, VideoInspirationJob as DBVideoInspirationJob, get_db
 from ..services import video_inspiration, video_inspiration_runs, video_project_memory, video_quality
+from ..services.task_queue import create_background_task
+from ..services import video_workflow_pool
 
 router = APIRouter(prefix="/video-inspiration", tags=["video-inspiration"])
+_variant_runs_lock = threading.RLock()
+_variant_runs: set[str] = set()
+
+async def _variant_heartbeat(job_id: str, stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            db_iter = get_db()
+            db = next(db_iter)
+            try:
+                row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+                if row is not None and row.status == "rewriting":
+                    row.updated_at = video_inspiration._now()
+                    db.commit()
+            finally:
+                db_iter.close()
+
+async def _run_variant_stage(operation: str, job_id: str, data: object) -> None:
+    db_iter = get_db()
+    db = next(db_iter)
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(_variant_heartbeat(job_id, heartbeat_stop))
+    try:
+        fn = {
+            "candidates": video_inspiration.generate_variant_candidates,
+            "score": video_inspiration.score_variant_candidates,
+            "synthesize": video_inspiration.synthesize_variant_versions,
+        }[operation]
+        async with video_workflow_pool.workflow_slot(
+            work_key=f"video-inspiration:{job_id}",
+            workflow_type="video_inspiration",
+            operation_name=f"variant_{operation}",
+        ):
+            await asyncio.to_thread(fn, job_id, data, db)
+    except Exception as exc:
+        row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+        if row is not None:
+            video_inspiration._fail_job(row, db, exc)
+    finally:
+        heartbeat_stop.set()
+        await heartbeat_task
+        with _variant_runs_lock:
+            _variant_runs.discard(job_id)
+        db_iter.close()
+
+def _queue_variant_stage(operation: str, job_id: str, data: object, db: Session) -> models.VideoInspirationJobResponse | None:
+    row = db.query(DBVideoInspirationJob).filter(DBVideoInspirationJob.id == job_id).first()
+    if row is None:
+        return None
+    if not video_inspiration.variant_pipeline_enabled():
+        raise video_inspiration.VideoInspirationError("Tính năng nhiều phiên bản đang được tạm tắt.", error_code="VIDEO_INSPIRATION_VARIANTS_DISABLED", status_code=503)
+    with _variant_runs_lock:
+        if job_id in _variant_runs:
+            raise video_inspiration.VideoInspirationError("Job này đang chạy một stage biến thể. Hãy chờ stage hiện tại hoàn tất.", error_code="VIDEO_INSPIRATION_VARIANT_STAGE_ACTIVE", status_code=409)
+        if row.status in video_inspiration.ACTIVE_JOB_STATUSES or row.status not in {"analyzed", "rewritten"}:
+            raise video_inspiration.VideoInspirationError("Cần có phân tích hoàn tất trước khi chạy stage biến thể.", error_code="VIDEO_INSPIRATION_VARIANTS_ANALYSIS_REQUIRED", status_code=409)
+        _variant_runs.add(job_id)
+    row.status = "rewriting"
+    row.current_step = {
+        "candidates": "variant_generation",
+        "score": "variant_scoring",
+        "synthesize": "variant_synthesis",
+    }[operation]
+    row.progress = 0.90
+    row.updated_at = video_inspiration._now()
+    db.commit()
+    try:
+        create_background_task(_run_variant_stage(operation, job_id, data))
+    except BaseException:
+        with _variant_runs_lock:
+            _variant_runs.discard(job_id)
+        raise
+    return video_inspiration.get_job(job_id, db)
 
 def _raise_error(exc: video_inspiration.VideoInspirationError) -> None:
     raise HTTPException(
@@ -112,6 +190,80 @@ async def analyze_video_inspiration_job(
         raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
     return job
 
+@router.post("/jobs/{job_id}/deep-research", response_model=models.VideoInspirationJobResponse, status_code=202)
+async def deep_research_video_inspiration_job(
+    job_id: str,
+    data: models.VideoInspirationAnalyzeRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """Start the high-quality analysis profile used by the one-click AI Video handoff."""
+    try:
+        request = data or models.VideoInspirationAnalyzeRequest(analysis_mode="high_quality", handoff_to_ai_video=True)
+        request.analysis_mode = "high_quality"
+        request.handoff_to_ai_video = True
+        job = video_inspiration_runs.schedule_analyze(job_id, request, db)
+    except video_inspiration.VideoInspirationError as exc:
+        _raise_error(exc)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+    return job
+
+@router.post("/jobs/{job_id}/variants/candidates", response_model=models.VideoInspirationJobResponse, status_code=202)
+async def generate_video_inspiration_variants(
+    job_id: str,
+    data: models.VideoInspirationVariantGenerateRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        job = _queue_variant_stage("candidates", job_id, data or models.VideoInspirationVariantGenerateRequest(), db)
+    except video_inspiration.VideoInspirationError as exc:
+        _raise_error(exc)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+    return job
+
+@router.post("/jobs/{job_id}/variants/score", response_model=models.VideoInspirationJobResponse, status_code=202)
+async def score_video_inspiration_variants(
+    job_id: str,
+    data: models.VideoInspirationVariantScoreRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        job = _queue_variant_stage("score", job_id, data or models.VideoInspirationVariantScoreRequest(), db)
+    except video_inspiration.VideoInspirationError as exc:
+        _raise_error(exc)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+    return job
+
+@router.post("/jobs/{job_id}/variants/synthesize", response_model=models.VideoInspirationJobResponse, status_code=202)
+async def synthesize_video_inspiration_variants(
+    job_id: str,
+    data: models.VideoInspirationVariantSynthesisRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        job = _queue_variant_stage("synthesize", job_id, data or models.VideoInspirationVariantSynthesisRequest(), db)
+    except video_inspiration.VideoInspirationError as exc:
+        _raise_error(exc)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+    return job
+
+@router.post("/jobs/{job_id}/variants/select", response_model=models.VideoInspirationJobResponse)
+async def select_video_inspiration_variant(
+    job_id: str,
+    data: models.VideoInspirationVariantSelectRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        job = video_inspiration.select_variant_version(job_id, data, db)
+    except video_inspiration.VideoInspirationError as exc:
+        _raise_error(exc)
+    if job is None:
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+    return job
+
 @router.put("/jobs/{job_id}/transcript", response_model=models.VideoInspirationJobResponse)
 async def update_video_inspiration_transcript(
     job_id: str,
@@ -173,14 +325,14 @@ async def create_video_inspiration_handoff(job_id: str, db: Session = Depends(ge
     except video_project_memory.VideoProjectMemoryError as exc:
         _raise_memory_error(exc)
     if handoff is None:
-        raise HTTPException(status_code=404, detail={"message": "KhÃ´ng tÃ¬m tháº¥y job video cáº£m há»©ng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
     return handoff
 
 @router.get("/jobs/{job_id}/handoffs", response_model=models.VideoInspirationHandoffListResponse)
 async def list_video_inspiration_handoffs(job_id: str, db: Session = Depends(get_db)):
     job = video_inspiration.get_job(job_id, db)
     if job is None:
-        raise HTTPException(status_code=404, detail={"message": "KhÃ´ng tÃ¬m tháº¥y job video cáº£m há»©ng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
     return video_project_memory.list_handoffs_for_job(job_id, db)
 
 @router.post("/jobs/{job_id}/quality/reports", response_model=models.VideoQualityReportResponse)
@@ -223,7 +375,7 @@ async def update_video_inspiration_direction(
 ):
     job = video_inspiration.update_direction(job_id, data, db)
     if job is None:
-        raise HTTPException(status_code=404, detail={"message": "KhÃ´ng tÃ¬m tháº¥y job video cáº£m há»©ng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
+        raise HTTPException(status_code=404, detail={"message": "Không tìm thấy job video cảm hứng.", "error_code": "VIDEO_INSPIRATION_NOT_FOUND"})
     return job
 
 @router.post("/jobs/{job_id}/rewrite", response_model=models.VideoInspirationJobResponse, status_code=202)

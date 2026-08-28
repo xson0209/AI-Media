@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import unicodedata
 import uuid
+from concurrent.futures import FIRST_COMPLETED, CancelledError, Future, ThreadPoolExecutor, wait
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +23,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -34,7 +36,7 @@ from ..database import (
     VideoSubtitle as DBVideoSubtitle,
     get_db,
 )
-from . import video_observability, video_series_memory, video_storage
+from . import video_observability, video_series_memory, video_speech, video_storage, video_watermark_cleanup
 from .task_queue import create_background_task
 
 MAX_CLIP_SIZE_BYTES = 700 * 1024 * 1024
@@ -46,6 +48,16 @@ _STDERR_LIMIT = 4000
 _NORMALIZE_CACHE_VERSION = "normalize-v1"
 RENDER_CACHE_MAX_MB_ENV = "VOICEBOX_RENDER_CACHE_MAX_MB"
 RENDER_CACHE_MAX_AGE_DAYS_ENV = "VOICEBOX_RENDER_CACHE_MAX_AGE_DAYS"
+CLIP_WORKERS_ENV = "VOICEBOX_RENDER_CLIP_WORKERS"
+# A watermark cleanup worker draws ~3 of 16 CPU threads, yet 8 concurrent clips on those
+# same 16 threads still scaled 7,98x — so oversubscribing the nominal 3-threads-per-worker
+# budget costs nothing measurable. One worker per two threads is what reproduces the
+# measured-good configuration (6 workers on a 16-thread machine, 5,98x).
+_CPU_THREADS_PER_CLIP_WORKER = 2
+# Scaling was still near-linear at 8, but that was measured on an otherwise idle machine and
+# every extra worker is another process worth of peak RAM. 6 is the highest count actually
+# exercised end-to-end (18 clips, 78,6 giây, 18/18 thành công).
+_MAX_CLIP_WORKERS = 6
 _render_lock = asyncio.Lock()
 _SFX_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac"}
 _ENHANCED_ARTIFACTS = (
@@ -58,6 +70,29 @@ _ENHANCED_ARTIFACTS = (
 )
 _EDGE_FADE_TRANSITIONS = {"crossfade", "dip_to_black", "dip_to_white", "flash"}
 _SAFE_HARD_CUT_TRANSITIONS = {"hard_cut", "match_cut"}
+
+# The three clip audio levels. All three are wired: `clip_audio_mode` in the render settings
+# carries the level, and the older boolean `mute_clip_audio` stays as its mirror so settings
+# written before the level existed still resolve.
+CLIP_AUDIO_MODE_DROP = "drop"
+CLIP_AUDIO_MODE_BED = "bed"
+CLIP_AUDIO_MODE_CLIP_ONLY = "clip_only"
+CLIP_AUDIO_MODES = (CLIP_AUDIO_MODE_DROP, CLIP_AUDIO_MODE_BED, CLIP_AUDIO_MODE_CLIP_ONLY)
+
+# Per-segment decisions of the original-audio bed table.
+BED_DECISION_SKIP_NATIVE_SPEECH = "skip_native_speech"
+BED_DECISION_FULL = "full"
+BED_DECISION_DUCKED = "ducked"
+BED_DECISION_SILENT_NO_CLIP_AUDIO = "silent_no_clip_audio"
+
+# Starting points for the bed mix; tune after listening to a real render.
+CLIP_AUDIO_BED_VOLUME = 0.28
+# Measured against a -18 dBFS voice on the bundled FFmpeg: this pair ducks the bed by
+# ~9.8 dB while the voice plays and restores it fully afterwards.
+CLIP_AUDIO_BED_DUCK_THRESHOLD = 0.0316
+CLIP_AUDIO_BED_DUCK_RATIO = 3.0
+CLIP_AUDIO_BED_DUCK_ATTACK_MS = 5.0
+CLIP_AUDIO_BED_DUCK_RELEASE_MS = 250.0
 
 
 class VideoRenderError(ValueError):
@@ -464,6 +499,24 @@ def mark_render_outputs_stale(project_id: str, db: Session) -> None:
     _mark_render_outputs_stale(project_id, db)
 
 
+def _mark_native_clip_audio_dependents_stale(
+    project: DBVideoProject,
+    shot: DBVideoShot,
+    db: Session,
+) -> None:
+    if not video_speech.uses_veo_native_speech(project):
+        return
+    from . import video_state, video_subtitles
+
+    shot.subtitle_status = "stale"
+    video_subtitles.mark_subtitle_stale(
+        project.id,
+        db,
+        reason="Clip Veo tiếng Việt thay đổi nên timing phụ đề cần tạo lại.",
+    )
+    video_state.mark_package_stale(project, db)
+
+
 def upload_shot_clip(
     project_id: str,
     shot_id: str,
@@ -471,6 +524,7 @@ def upload_shot_clip(
     filename: str,
     content_type: str | None,
     data: bytes,
+    provider: str | None = None,
     db: Session,
 ) -> models.VideoShotClipResponse | None:
     result = _get_project_shot(project_id, shot_id, db)
@@ -488,6 +542,11 @@ def upload_shot_clip(
     suffix = Path(filename or "clip.mp4").suffix.lower() or mimetypes.guess_extension(content_type or "") or ".mp4"
     if suffix not in {".mp4", ".mov", ".m4v", ".webm", ".mkv"}:
         raise VideoRenderError("Định dạng clip chưa được hỗ trợ. Hãy dùng MP4, MOV, WEBM hoặc MKV.", error_code="VIDEO_RENDER_CLIP_UNSUPPORTED")
+    # Only a provider the watermark registry knows is worth storing; anything else stays
+    # None so `mark_for_provider` keeps its existing "scan every detector" fallback.
+    normalized_provider = str(provider or "").strip().lower() or None
+    if normalized_provider is not None and video_watermark_cleanup.mark_for_provider(normalized_provider) == "auto":
+        normalized_provider = None
     clip_id = str(uuid.uuid4())
     clip_dir = video_storage.get_project_subdir(project_id, "shot_clips")
     path = clip_dir / f"clip-{shot.shot_order:03d}-{clip_id}{suffix}"
@@ -510,6 +569,10 @@ def upload_shot_clip(
         mime_type=content_type,
         size_bytes=len(data),
         is_active=True,
+        # The provider is only a hint for watermark cleanup: it narrows the mark scan to
+        # one detector instead of all six. An unknown value falls back to scanning every
+        # detector, so a wrong hint costs cleanup coverage but never corrupts the clip.
+        provider=normalized_provider,
         created_at=now,
         updated_at=now,
     )
@@ -530,6 +593,7 @@ def upload_shot_clip(
         row.status = "failed"
         row.failure_reason = str(exc)
     _mark_render_outputs_stale(project_id, db)
+    _mark_native_clip_audio_dependents_stale(project, shot, db)
     db.commit()
     db.refresh(row)
     return _clip_response(row)
@@ -612,6 +676,7 @@ def import_provider_clip(
         row.status = "failed"
         row.failure_reason = str(exc)
     _mark_render_outputs_stale(project_id, db)
+    _mark_native_clip_audio_dependents_stale(project, shot, db)
     db.commit()
     db.refresh(row)
     return _clip_response(row)
@@ -632,6 +697,8 @@ def delete_shot_clip(project_id: str, shot_id: str, db: Session) -> bool | None:
     clip.updated_at = datetime.utcnow()
     video_storage.remove_artifact_file(clip.file_path)
     _mark_render_outputs_stale(project_id, db)
+    project, shot = result
+    _mark_native_clip_audio_dependents_stale(project, shot, db)
     db.commit()
     return True
 
@@ -783,26 +850,52 @@ def _active_clips(project_id: str, db: Session) -> dict[str, DBVideoShotClip]:
     return clips
 
 
+def active_clips_for_project(project_id: str, db: Session) -> dict[str, DBVideoShotClip]:
+    """Return the active clip per shot for speech/subtitle/package consumers."""
+    return _active_clips(project_id, db)
+
+
 def shot_requires_narration(shot: DBVideoShot) -> bool:
     return bool((shot.english_narration or "").strip())
 
 
-def resolve_shot_duration(shot: DBVideoShot) -> float | None:
+def resolve_shot_duration(
+    shot: DBVideoShot,
+    *,
+    project: DBVideoProject | None = None,
+    clip: DBVideoShotClip | None = None,
+    clip_audio_mode: str | None = None,
+) -> float | None:
+    if clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY:
+        # The clip's own audio is what plays at this level, so the clip length is the only
+        # timer that keeps picture and sound together. The script duration is the fallback
+        # for a clip whose duration was never probed.
+        if clip is not None and clip.duration_seconds and clip.duration_seconds > 0:
+            return float(clip.duration_seconds)
+        return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
     if shot_requires_narration(shot):
+        if project is not None and video_speech.uses_veo_native_speech(project):
+            return float(clip.duration_seconds) if clip and clip.duration_seconds and clip.duration_seconds > 0 else None
         return float(shot.audio_duration) if shot.audio_duration and shot.audio_duration > 0 else None
     return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
 
 
-def build_timeline_manifest(project_id: str, db: Session) -> list[models.VideoRenderTimelineShot]:
+def build_timeline_manifest(
+    project_id: str,
+    db: Session,
+    *,
+    clip_audio_mode: str | None = None,
+) -> list[models.VideoRenderTimelineShot]:
+    project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     shots = _ordered_shots(project_id, db)
     clips = _active_clips(project_id, db)
     cursor = 0.0
     timeline: list[models.VideoRenderTimelineShot] = []
     for shot in shots:
-        duration = resolve_shot_duration(shot)
+        clip = clips.get(shot.id)
+        duration = resolve_shot_duration(shot, project=project, clip=clip, clip_audio_mode=clip_audio_mode)
         if duration is None:
             continue
-        clip = clips.get(shot.id)
         start = cursor
         end = start + duration
         timeline.append(
@@ -1101,6 +1194,8 @@ def get_render_readiness(
     project_id: str,
     db: Session,
     settings: models.VideoRenderSettings | None = None,
+    *,
+    watermark_runtime: video_watermark_cleanup.WatermarkRuntimeStatus | None = None,
 ) -> models.VideoRenderReadinessResponse | None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is None:
@@ -1114,6 +1209,57 @@ def get_render_readiness(
     missing_voice: list[str] = []
     missing_timer: list[str] = []
     warnings: list[models.VideoRenderWarning] = []
+    watermark_cleanup_ready = True
+    watermark_cleanup_revision: str | None = None
+    watermark_cleanup_failure_reason: str | None = None
+    watermark_backends: list[models.VideoRenderWatermarkBackendStatus] = []
+    if settings.watermark_cleanup:
+        # Probe every supported backend so the UI can flag unavailable choices up
+        # front. Only spawned while cleanup is enabled; disabled cleanup must not
+        # start any worker. A caller-provided runtime always wins for the
+        # selected backend so render jobs reuse their single probe.
+        selected_backend = settings.watermark_backend
+        for backend in video_watermark_cleanup.SUPPORTED_CLEANUP_BACKENDS:
+            if watermark_runtime is not None and backend == selected_backend:
+                runtime = watermark_runtime
+            elif watermark_runtime is not None:
+                # Render path already has what it needs; skip extra spawns.
+                continue
+            else:
+                runtime = video_watermark_cleanup.get_runtime_status(
+                    backend=backend,
+                    ffmpeg=tools.ffmpeg,
+                    ffprobe=tools.ffprobe,
+                )
+            watermark_backends.append(
+                models.VideoRenderWatermarkBackendStatus(
+                    backend=backend,
+                    ready=runtime.ready,
+                    failure_reason=runtime.failure_reason,
+                    error_code=runtime.error_code,
+                    revision=runtime.revision,
+                    model_cache=runtime.model_cache,
+                )
+            )
+            # Blocking is decided by the selected backend alone: an optional
+            # backend that is not installed must not block a working one.
+            if backend == selected_backend:
+                watermark_cleanup_ready = runtime.ready
+                watermark_cleanup_revision = runtime.revision
+                watermark_cleanup_failure_reason = runtime.failure_reason
+                if runtime.ready and runtime.model_cache == video_watermark_cleanup.MODEL_CACHE_NOT_CACHED:
+                    warnings.append(
+                        models.VideoRenderWarning(
+                            code="VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED",
+                            message=(
+                                f"Backend {backend} chưa có model trong cache: lần dựng đầu cần mạng để tải "
+                                f"khoảng {video_watermark_cleanup.MIGAN_MODEL_DOWNLOAD_MB} MB nên sẽ lâu hơn."
+                            ),
+                        )
+                    )
+    native_speech = video_speech.uses_veo_native_speech(project)
+    clip_audio_mode = clip_audio_mode_for_settings(settings)
+    clip_only = clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY
     has_sound_metadata = any(bool(getattr(shot, "sound_design_json", None)) for shot in shots)
     if has_sound_metadata and settings.enhanced_render and settings.enhanced_audio:
         ready_assets = [asset for asset in (list_render_sfx_assets(project_id, db) or []) if asset.status == "ready"]
@@ -1140,12 +1286,34 @@ def get_render_readiness(
         )
 
     for shot in shots:
-        duration = resolve_shot_duration(shot)
-        if shot_requires_narration(shot) and (shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration):
-            missing_voice.append(shot.id)
+        clip = clips.get(shot.id)
+        duration = resolve_shot_duration(shot, project=project, clip=clip, clip_audio_mode=clip_audio_mode)
+        if clip_only:
+            # This level never reads the voice track, so a shot without a voice cannot block
+            # the render. A clip with no audio stream only means that segment plays silent.
+            if clip is not None and clip.status == "ready" and not clip.has_audio:
+                warnings.append(
+                    models.VideoRenderWarning(
+                        shot_id=shot.id,
+                        code="VIDEO_RENDER_CLIP_ONLY_AUDIO_MISSING",
+                        message=f"Phân đoạn {shot.shot_order:02d} sẽ im lặng vì clip không có audio để dùng làm tiếng gốc.",
+                    )
+                )
+        elif shot_requires_narration(shot):
+            if native_speech:
+                if clip is not None and clip.status == "ready" and not clip.has_audio:
+                    missing_voice.append(shot.id)
+                    warnings.append(
+                        models.VideoRenderWarning(
+                            shot_id=shot.id,
+                            code="VIDEO_RENDER_VEO_NATIVE_AUDIO_MISSING",
+                            message=f"Segment {shot.shot_order:02d} là tiếng Việt nhưng clip Veo không có audio lời thoại.",
+                        )
+                    )
+            elif shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration:
+                missing_voice.append(shot.id)
         if duration is None:
             missing_timer.append(shot.id)
-        clip = clips.get(shot.id)
         if clip is None:
             missing_clip.append(shot.id)
         elif clip.status != "ready":
@@ -1178,11 +1346,17 @@ def get_render_readiness(
     if invalid_clip:
         reasons.append("Một số clip chưa đọc được hoặc chưa hợp lệ.")
     if missing_voice:
-        reasons.append("Thiếu giọng đọc hoàn tất cho một số shot có narration.")
+        reasons.append(
+            "Clip Veo của một số segment tiếng Việt không có audio lời thoại."
+            if native_speech
+            else "Thiếu giọng đọc hoàn tất cho một số shot có narration."
+        )
     if missing_timer:
         reasons.append("Một số shot thiếu thời lượng render.")
     if missing_subtitle:
         reasons.append("Chưa có phụ đề hoàn tất để burn vào video.")
+    if settings.watermark_cleanup and not watermark_cleanup_ready:
+        reasons.append(watermark_cleanup_failure_reason or "Watermark worker chưa sẵn sàng.")
 
     return models.VideoRenderReadinessResponse(
         project_id=project_id,
@@ -1193,9 +1367,14 @@ def get_render_readiness(
         and not invalid_clip
         and not missing_voice
         and not missing_timer
-        and not missing_subtitle,
+        and not missing_subtitle
+        and watermark_cleanup_ready,
         ffmpeg_ready=tools.ffmpeg_ready,
         ffprobe_ready=tools.ffprobe_ready,
+        watermark_cleanup_ready=watermark_cleanup_ready,
+        watermark_cleanup_revision=watermark_cleanup_revision,
+        watermark_cleanup_failure_reason=watermark_cleanup_failure_reason,
+        watermark_backends=watermark_backends,
         missing_clip_shot_ids=missing_clip,
         invalid_clip_shot_ids=invalid_clip,
         missing_voice_shot_ids=missing_voice,
@@ -1209,6 +1388,29 @@ def get_render_readiness(
 
 def latest_render_job(project_id: str, db: Session) -> DBVideoRenderJob | None:
     return db.query(DBVideoRenderJob).filter(DBVideoRenderJob.project_id == project_id).order_by(DBVideoRenderJob.created_at.desc()).first()
+
+
+def render_settings_for_project(project_id: str, db: Session) -> models.VideoRenderSettings:
+    """The settings an unattended render should use for this project.
+
+    Unattended flows run in the backend and cannot see the UI, so they reuse the settings
+    of the project's most recent render — the ones the user last chose when they pressed
+    render. Without this they always built with defaults, which is why an MP4 from the
+    automated flow never carried the original clip audio no matter what the user picked.
+
+    A project that has never been rendered falls back to the defaults, keeping today's
+    behaviour. `force` is deliberately not carried over: it skips the readiness gate, and
+    a one-off override should not go on doing that silently on every later unattended run.
+    """
+    job = latest_render_job(project_id, db)
+    if job is None or not job.settings_json:
+        return models.VideoRenderSettings()
+    try:
+        settings = models.VideoRenderSettings.model_validate_json(job.settings_json)
+    except ValidationError:
+        # Settings written by an older build may no longer validate; defaults still render.
+        return models.VideoRenderSettings()
+    return settings.model_copy(update={"force": False})
 
 
 def list_render_jobs(project_id: str, db: Session) -> list[models.VideoRenderJobResponse]:
@@ -1546,8 +1748,10 @@ def build_enhanced_audio_mix_command(
             f"volume={volume:.3f},adelay={delay_ms}|{delay_ms}[sfx{index}]"
         )
         mix_inputs.append(f"[sfx{index}]")
+    # normalize=0 keeps the voice bed at its own level; FFmpeg defaults to true, which
+    # divides every input (including the voice) by the number of mixed inputs.
     filters.append(
-        f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0,"
+        f"{''.join(mix_inputs)}amix=inputs={len(mix_inputs)}:duration=first:dropout_transition=0:normalize=0,"
         f"atrim=duration={total_duration_seconds:.3f}[mixed]"
     )
     cmd.extend(["-filter_complex", ";".join(filters), "-map", "[mixed]", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", str(output_path)])
@@ -1876,6 +2080,94 @@ def _write_enhanced_render_artifacts(
         "items": items,
     }
 
+@dataclass(frozen=True)
+class _ClipRenderInput:
+    """Everything one clip needs, copied off the ORM rows on the coordinating thread.
+
+    Reading an ORM attribute can emit a refresh query, and `_update_job` commits — which
+    expires every loaded instance. So a worker thread that touched `clip.file_path` would
+    issue a query on the shared `Session`, which is not safe across threads. Copying the
+    plain values here keeps the workers away from the database entirely.
+    """
+
+    index: int
+    shot_id: str
+    clip_file_path: str
+    clip_provider: str | None
+    clip_duration_seconds: float | None
+    target_duration_seconds: float
+
+
+@dataclass
+class _ClipRenderResult:
+    """What one clip contributes back to the coordinating thread."""
+
+    index: int
+    normalized_path: Path
+    normalized_cache_hit: bool
+    cleanup_result: dict[str, Any] | None = None
+
+
+def _process_clip_for_render(
+    *,
+    clip_input: _ClipRenderInput,
+    project_id: str,
+    settings: models.VideoRenderSettings,
+    tools: FFmpegTools,
+    watermark_runtime: video_watermark_cleanup.WatermarkRuntimeStatus | None,
+    resolution: tuple[int, int],
+) -> _ClipRenderResult:
+    """Clean and normalize a single clip. Safe to run on a worker thread.
+
+    Deliberately free of database access and progress updates so the same function backs
+    both the sequential and the parallel path.
+    """
+    clip_path = video_storage.resolve_artifact_storage_path(clip_input.clip_file_path)
+    if clip_path is None or not clip_path.exists():
+        raise VideoRenderError("File clip video không còn tồn tại.", error_code="VIDEO_RENDER_CLIP_FILE_MISSING")
+    video_input_path = clip_path
+    cleanup_result: dict[str, Any] | None = None
+    if settings.watermark_cleanup:
+        try:
+            video_input_path, cleanup_result = video_watermark_cleanup.cleanup_clip_with_cache(
+                project_id=project_id,
+                shot_id=clip_input.shot_id,
+                input_path=clip_path,
+                provider=clip_input.clip_provider,
+                backend=settings.watermark_backend,
+                runtime=watermark_runtime,
+                ffmpeg=tools.ffmpeg,
+                ffprobe=tools.ffprobe,
+            )
+        except video_watermark_cleanup.VideoWatermarkCleanupError as exc:
+            raise VideoRenderError(str(exc), error_code=exc.error_code) from exc
+    normalized_path, cache_hit = _normalize_clip_with_cache(
+        project_id=project_id,
+        ffmpeg=tools.ffmpeg or "ffmpeg",
+        input_path=video_input_path,
+        target_duration=clip_input.target_duration_seconds,
+        clip_duration=clip_input.clip_duration_seconds,
+        width=resolution[0],
+        height=resolution[1],
+        fps=settings.fps,
+        fit_mode=settings.fit_mode,
+        background_color=settings.background_color,
+        freeze_short_clip=settings.duration_mode == "freeze",
+    )
+    return _ClipRenderResult(
+        index=clip_input.index,
+        normalized_path=normalized_path,
+        normalized_cache_hit=cache_hit,
+        cleanup_result=cleanup_result,
+    )
+
+
+def _clip_stage_label(*, done: int, total: int, watermark_cleanup: bool) -> str:
+    if watermark_cleanup:
+        return f"Đang làm sạch dấu AI và chuẩn hoá clip {done}/{total}"
+    return f"Đang chuẩn hoá clip {done}/{total}"
+
+
 def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     settings = models.VideoRenderSettings.model_validate_json(job.settings_json or "{}")
     tools = detect_tools()
@@ -1884,68 +2176,203 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == job.project_id).first()
     if project is None:
         raise VideoRenderError("Không tìm thấy dự án video.", error_code="VIDEO_PROJECT_NOT_FOUND")
-    readiness = get_render_readiness(project.id, db, settings)
+    # Render chạy nhiều phút và commit nhiều lần; mỗi commit expire ORM instance nên mọi
+    # lần đọc `project.*` sau đó là một SELECT mới. Trong worker thread của pool bên dưới,
+    # SELECT đó chạy trên Session không thuộc thread đó và raise ObjectDeletedError.
+    # Vì vậy snapshot các scalar cần dùng ngay tại đây, trước commit đầu tiên.
+    project_id = project.id
+    project_title = project.title
+    project_aspect_ratio = project.aspect_ratio
+    project_series_id = project.series_id
+    project_target_language = project.target_language
+    watermark_runtime: video_watermark_cleanup.WatermarkRuntimeStatus | None = None
+    if settings.watermark_cleanup:
+        watermark_runtime = video_watermark_cleanup.get_runtime_status(
+            backend=settings.watermark_backend,
+            ffmpeg=tools.ffmpeg,
+            ffprobe=tools.ffprobe,
+        )
+    readiness = get_render_readiness(
+        project_id,
+        db,
+        settings,
+        watermark_runtime=watermark_runtime,
+    )
     if readiness is None or (not readiness.ready and not settings.force):
         reason = "; ".join(readiness.missing_reasons if readiness else []) or "Project chưa đủ điều kiện dựng MP4."
         raise VideoRenderError(reason, error_code="VIDEO_RENDER_NOT_READY")
-    shots = _ordered_shots(project.id, db)
-    clips = _active_clips(project.id, db)
-    timeline = build_timeline_manifest(project.id, db)
+    if settings.watermark_cleanup and (watermark_runtime is None or not watermark_runtime.ready):
+        raise VideoRenderError(
+            (watermark_runtime.failure_reason if watermark_runtime else None) or "Watermark worker chưa sẵn sàng.",
+            error_code=(watermark_runtime.error_code if watermark_runtime else None)
+            or "VIDEO_RENDER_WATERMARK_WORKER_NOT_READY",
+        )
+    shots = _ordered_shots(project_id, db)
+    clips = _active_clips(project_id, db)
+    clip_audio_mode = clip_audio_mode_for_settings(settings)
+    # Resolved before the timeline because the clip-only level times its shots from the clip
+    # instead of the voice, which decides which shots the timeline can even carry.
+    timeline = build_timeline_manifest(project_id, db, clip_audio_mode=clip_audio_mode)
     if not timeline:
         raise VideoRenderError("Project chưa có timeline hợp lệ để render.", error_code="VIDEO_RENDER_EMPTY_TIMELINE")
 
-    output_dir = video_storage.get_project_subdir(project.id, "render_outputs") / job.id
-    intermediate_dir = video_storage.get_project_subdir(project.id, "render_intermediates") / job.id
+    output_dir = video_storage.get_project_subdir(project_id, "render_outputs") / job.id
+    intermediate_dir = video_storage.get_project_subdir(project_id, "render_intermediates") / job.id
     output_dir.mkdir(parents=True, exist_ok=True)
     intermediate_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "timeline-manifest.json"
+    watermark_manifest: dict[str, Any] = {
+        "enabled": settings.watermark_cleanup,
+        "backend": settings.watermark_backend,
+        "runtime_revision": watermark_runtime.revision if watermark_runtime else None,
+        "items": [],
+    }
     manifest_payload = {
-        "project_id": project.id,
-        "project_title": project.title,
+        "project_id": project_id,
+        "project_title": project_title,
         "settings": settings.model_dump(),
         "sound_design_note": "SFX/BGM trong manifest là chỉ dẫn dựng nếu chưa có audio asset thật được mix vào MP4.",
+        "watermark_cleanup": watermark_manifest,
         "timeline": [item.model_dump() for item in timeline],
     }
     manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     job.timeline_manifest_path = video_storage.to_artifact_storage_path(manifest_path)
     _update_job(job, db, status="running", progress=0.05, current_step="Đang chuẩn bị timeline", started=True)
 
-    resolution = _resolve_resolution(project.aspect_ratio, settings.resolution)
+    resolution = _resolve_resolution(project_aspect_ratio, settings.resolution)
     normalized_paths: list[Path] = []
-    render_cache_summary = {"normalized_hits": 0, "normalized_misses": 0}
+    render_cache_summary = {
+        "normalized_hits": 0,
+        "normalized_misses": 0,
+        "watermark_hits": 0,
+        "watermark_misses": 0,
+    }
     shots_by_id = {shot.id: shot for shot in shots}
     enhanced_plan: dict[str, Any] | None = None
     if settings.enhanced_render:
-        sfx_assets = list_render_sfx_assets(project.id, db) or []
+        sfx_assets = list_render_sfx_assets(project_id, db) or []
         enhanced_plan = build_enhanced_render_plan(project, timeline, shots_by_id, sfx_assets, settings)
         _update_job(job, db, progress=0.08, current_step="Đang lập enhanced render plan")
+    # Read every clip row up front, on this thread, so worker threads never touch the
+    # Session. A missing clip is a timeline problem, not a per-clip failure.
+    clip_inputs: list[_ClipRenderInput] = []
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
         clip = clips.get(shot.id)
         if clip is None:
             raise VideoRenderError("Thiếu clip video cho timeline.", error_code="VIDEO_RENDER_CLIP_MISSING")
-        clip_path = video_storage.resolve_artifact_storage_path(clip.file_path)
-        if clip_path is None or not clip_path.exists():
-            raise VideoRenderError("File clip video không còn tồn tại.", error_code="VIDEO_RENDER_CLIP_FILE_MISSING")
-        normalized_path, cache_hit = _normalize_clip_with_cache(
-            project_id=project.id,
-            ffmpeg=tools.ffmpeg or "ffmpeg",
-            input_path=clip_path,
-            target_duration=item.duration_seconds,
-            clip_duration=clip.duration_seconds,
-            width=resolution[0],
-            height=resolution[1],
-            fps=settings.fps,
-            fit_mode=settings.fit_mode,
-            background_color=settings.background_color,
-            freeze_short_clip=settings.duration_mode == "freeze",
+        clip_inputs.append(
+            _ClipRenderInput(
+                index=index,
+                shot_id=shot.id,
+                clip_file_path=clip.file_path,
+                clip_provider=clip.provider,
+                clip_duration_seconds=clip.duration_seconds,
+                target_duration_seconds=item.duration_seconds,
+            )
         )
-        if cache_hit:
+
+    total_clips = len(clip_inputs)
+    worker_count = resolve_clip_worker_count(total_clips)
+    results_by_index: dict[int, _ClipRenderResult] = {}
+    failures_by_index: dict[int, VideoRenderError] = {}
+    completed = 0
+
+    def run_one(clip_input: _ClipRenderInput) -> _ClipRenderResult:
+        # project_id là biến local đã snapshot: worker thread không được chạm vào ORM
+        # instance `project` (đã expire sau commit) vì Session không thuộc thread này.
+        return _process_clip_for_render(
+            clip_input=clip_input,
+            project_id=project_id,
+            settings=settings,
+            tools=tools,
+            watermark_runtime=watermark_runtime,
+            resolution=resolution,
+        )
+
+    def record(index: int, outcome: _ClipRenderResult | VideoRenderError) -> None:
+        """Merge one clip's outcome and move the progress bar. Main thread only."""
+        nonlocal completed
+        completed += 1
+        if isinstance(outcome, VideoRenderError):
+            failures_by_index[index] = outcome
+            return
+        results_by_index[index] = outcome
+        _update_job(
+            job,
+            db,
+            progress=0.1 + (0.45 * completed / max(1, total_clips)),
+            current_step=_clip_stage_label(
+                done=completed,
+                total=total_clips,
+                watermark_cleanup=settings.watermark_cleanup,
+            ),
+        )
+
+    if worker_count <= 1:
+        for clip_input in clip_inputs:
+            try:
+                record(clip_input.index, run_one(clip_input))
+            except VideoRenderError as exc:
+                record(clip_input.index, exc)
+                break
+    else:
+        pending = iter(clip_inputs)
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="render-clip") as pool:
+            in_flight: dict[Future[_ClipRenderResult], int] = {}
+
+            def submit_next() -> bool:
+                clip_input = next(pending, None)
+                if clip_input is None:
+                    return False
+                in_flight[pool.submit(run_one, clip_input)] = clip_input.index
+                return True
+
+            for _ in range(worker_count):
+                if not submit_next():
+                    break
+            while in_flight:
+                finished, _ = wait(set(in_flight), return_when=FIRST_COMPLETED)
+                completed_batch: list[tuple[int, _ClipRenderResult | VideoRenderError]] = []
+                for done_future in finished:
+                    index = in_flight.pop(done_future)
+                    try:
+                        outcome: _ClipRenderResult | VideoRenderError = done_future.result()
+                    except VideoRenderError as exc:
+                        outcome = exc
+                    except CancelledError:  # pragma: no cover - only reachable on shutdown
+                        continue
+                    completed_batch.append((index, outcome))
+
+                # A wait can return several futures at once. Record the whole batch before
+                # replenishing the pool; otherwise set iteration order could submit another
+                # clip after one of those already-finished futures had failed.
+                for index, outcome in completed_batch:
+                    record(index, outcome)
+                if not failures_by_index:
+                    for _ in completed_batch:
+                        submit_next()
+
+    if failures_by_index:
+        # Report the earliest clip so the message is stable regardless of finish order.
+        raise failures_by_index[min(failures_by_index)]
+
+    ordered_results = [results_by_index[clip_input.index] for clip_input in clip_inputs]
+    normalized_paths = [result.normalized_path for result in ordered_results]
+    for result in ordered_results:
+        if result.normalized_cache_hit:
             render_cache_summary["normalized_hits"] += 1
         else:
             render_cache_summary["normalized_misses"] += 1
-        normalized_paths.append(normalized_path)
-        _update_job(job, db, progress=0.1 + (0.45 * index / max(1, len(timeline))), current_step=f"Đang chuẩn hóa clip {index}/{len(timeline)}")
+        if result.cleanup_result is None:
+            continue
+        watermark_manifest["items"].append(result.cleanup_result)
+        if result.cleanup_result.get("cache_hit"):
+            render_cache_summary["watermark_hits"] += 1
+        else:
+            render_cache_summary["watermark_misses"] += 1
+
+    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     video_concat = intermediate_dir / "video-concat.mp4"
     video_paths_for_concat = normalized_paths
@@ -1965,19 +2392,75 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     _concat_media(tools.ffmpeg or "ffmpeg", video_paths_for_concat, video_concat, stream_copy=True)
     _update_job(job, db, progress=0.6, current_step="Đang ghép video")
 
-    audio_segments = _build_audio_segments(tools.ffmpeg or "ffmpeg", timeline, shots_by_id, intermediate_dir)
-    audio_concat = intermediate_dir / "audio.wav"
-    _concat_media(tools.ffmpeg or "ffmpeg", audio_segments, audio_concat, stream_copy=False, audio=True)
-    audio_for_mux = audio_concat
+    clip_audio_bed_summary: dict[str, Any] = {"applied": False, "mode": clip_audio_mode}
+    if clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY:
+        # No voice timeline is built here: the clip audio itself is the main track at its
+        # original level, so there is nothing to duck against and nothing to mix.
+        audio_base, clip_only_summary = _build_clip_only_audio(
+            tools.ffmpeg or "ffmpeg",
+            project,
+            timeline,
+            shots_by_id,
+            clips,
+            intermediate_dir,
+        )
+        clip_audio_bed_summary = {**clip_only_summary, "mode": clip_audio_mode}
+        if not clip_only_summary.get("clip_audio_segments"):
+            _record_clip_only_audio_all_silent(
+                job=job,
+                db=db,
+                project_id=project_id,
+                enhanced_plan=enhanced_plan,
+            )
+        _update_job(job, db, progress=0.7, current_step="Đang dựng tiếng gốc làm audio chính")
+    else:
+        audio_segments = _build_audio_segments(
+            tools.ffmpeg or "ffmpeg",
+            project_target_language,
+            timeline,
+            shots_by_id,
+            clips,
+            intermediate_dir,
+        )
+        audio_concat = intermediate_dir / "audio.wav"
+        _concat_media(tools.ffmpeg or "ffmpeg", audio_segments, audio_concat, stream_copy=False, audio=True)
+        audio_base = audio_concat
+        # The original-audio bed runs independently of enhanced render and SFX/BGM mixing.
+        if clip_audio_mode == CLIP_AUDIO_MODE_BED:
+            try:
+                audio_base, bed_summary = _mix_clip_audio_bed(
+                    tools.ffmpeg or "ffmpeg",
+                    project,
+                    timeline,
+                    shots_by_id,
+                    clips,
+                    audio_concat,
+                    intermediate_dir,
+                )
+                clip_audio_bed_summary = {**bed_summary, "mode": clip_audio_mode}
+                if audio_base != audio_concat:
+                    _update_job(job, db, progress=0.7, current_step="Đang trộn tiếng gốc làm nền")
+            except VideoRenderError as exc:
+                audio_base = audio_concat
+                clip_audio_bed_summary = {"applied": False, "mode": clip_audio_mode, "reason": "failed"}
+                _record_clip_audio_bed_fallback(
+                    job=job,
+                    db=db,
+                    project_id=project_id,
+                    enhanced_plan=enhanced_plan,
+                    message=f"Không dựng/trộn được tiếng gốc làm nền nên giữ audio voice cơ bản: {exc}",
+                    exc=exc,
+                )
+    audio_for_mux = audio_base
     if enhanced_plan is not None and settings.enhanced_audio:
         try:
             audio_for_mux = _mix_enhanced_audio(
                 tools.ffmpeg or "ffmpeg",
-                audio_concat,
+                audio_base,
                 enhanced_plan,
                 intermediate_dir / "audio-enhanced.wav",
             )
-            if audio_for_mux != audio_concat:
+            if audio_for_mux != audio_base:
                 _update_job(job, db, progress=0.73, current_step="Đang mix SFX/BGM thật")
         except VideoRenderError as exc:
             enhanced_plan.setdefault("fallbacks", []).append(
@@ -1987,7 +2470,9 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
                 }
             )
             enhanced_plan.setdefault("warnings", []).append("Audio mix fallback về voice cơ bản.")
-            audio_for_mux = audio_concat
+            audio_for_mux = audio_base
+    manifest_payload["clip_audio_bed"] = clip_audio_bed_summary
+    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_job(job, db, progress=0.75, current_step="Đang ghép voice")
     (output_dir / "render-cache-summary.json").write_text(
         json.dumps(render_cache_summary, ensure_ascii=False, indent=2),
@@ -2004,10 +2489,19 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
                 error_code="VIDEO_RENDER_SUBTITLE_FILTER_MISSING",
             )
         subtitle_ass_path = intermediate_dir / "subtitles.ass"
-        _write_ass_subtitle(project.id, subtitle_ass_path, db, resolution)
+        _write_ass_subtitle(project_id, subtitle_ass_path, db, resolution)
         job.subtitle_ass_path = video_storage.to_artifact_storage_path(subtitle_ass_path)
+        _update_job(job, db, progress=0.8, current_step="Đang chuẩn bị phụ đề để nhúng")
 
     output_path = output_dir / "final.mp4"
+    # Burn-in re-encodes the whole video here, so this is a long step that used to leave the
+    # bar frozen at 75% until the job finished.
+    _update_job(
+        job,
+        db,
+        progress=0.85,
+        current_step="Đang nhúng phụ đề và xuất file cuối" if subtitle_ass_path else "Đang ghép và xuất file cuối",
+    )
     final_cmd = build_final_mux_command(
         ffmpeg=tools.ffmpeg or "ffmpeg",
         video_path=video_concat,
@@ -2052,19 +2546,78 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     job.completed_at = datetime.utcnow()
     job.updated_at = job.completed_at
     db.commit()
+    # MP4 đã xong và job đã commit "completed". Cập nhật series-memory chỉ là bước phụ:
+    # mọi lỗi ở đây (kể cả khi ghi log cũng lỗi) không được phép làm job thành "failed".
     try:
-        video_series_memory.record_rendered_episode(project.id, db)
+        video_series_memory.record_rendered_episode(project_id, db)
     except Exception as exc:
-        db.rollback()
+        with suppress(Exception):
+            db.rollback()
+        with suppress(Exception):
+            video_observability.log_event(
+                db,
+                step_name="series_memory_update",
+                status="warning",
+                project_id=project_id,
+                error_code="AI_VIDEO_SERIES_MEMORY_UPDATE_FAILED",
+                exc=exc,
+                message="Render đã hoàn tất nhưng không cập nhật được file series-memory.md.",
+                technical_details={"series_id": project_series_id, "render_job_id": job.id},
+            )
+
+
+def _record_clip_audio_bed_fallback(
+    *,
+    job: DBVideoRenderJob,
+    db: Session,
+    project_id: str,
+    enhanced_plan: dict[str, Any] | None,
+    message: str,
+    exc: BaseException | None = None,
+) -> None:
+    """Record a bed fallback reason without depending on the enhanced render plan."""
+    if enhanced_plan is not None:
+        enhanced_plan.setdefault("fallbacks", []).append({"kind": "clip_audio_bed", "message_vi": message})
+        enhanced_plan.setdefault("warnings", []).append("Tiếng gốc làm nền fallback về voice cơ bản.")
+    with suppress(Exception):
         video_observability.log_event(
             db,
-            step_name="series_memory_update",
+            step_name="render_clip_audio_bed",
             status="warning",
-            project_id=project.id,
-            error_code="AI_VIDEO_SERIES_MEMORY_UPDATE_FAILED",
+            project_id=project_id,
+            error_code="VIDEO_RENDER_CLIP_AUDIO_BED_FALLBACK",
             exc=exc,
-            message="Render đã hoàn tất nhưng không cập nhật được file series-memory.md.",
-            technical_details={"series_id": project.series_id, "render_job_id": job.id},
+            message=message,
+            technical_details={"render_job_id": job.id},
+        )
+
+
+def _record_clip_only_audio_all_silent(
+    *,
+    job: DBVideoRenderJob,
+    db: Session,
+    project_id: str,
+    enhanced_plan: dict[str, Any] | None,
+) -> None:
+    """Warn that a clip-only render found no usable audio anywhere on the timeline.
+
+    Silence is a valid result the user may want, so this never blocks the render — but an
+    MP4 with no sound at all is worth saying out loud instead of leaving them to guess.
+    """
+    message = (
+        "Mức Âm thanh gốc: không phân đoạn nào có tiếng gốc dùng được nên MP4 đầu ra sẽ không có tiếng."
+    )
+    if enhanced_plan is not None:
+        enhanced_plan.setdefault("warnings", []).append(message)
+    with suppress(Exception):
+        video_observability.log_event(
+            db,
+            step_name="render_clip_only_audio",
+            status="warning",
+            project_id=project_id,
+            error_code="VIDEO_RENDER_CLIP_ONLY_AUDIO_ALL_SILENT",
+            message=message,
+            technical_details={"render_job_id": job.id},
         )
 
 
@@ -2125,6 +2678,20 @@ def build_normalize_clip_command(
     background_color: str,
     freeze_short_clip: bool = True,
 ) -> list[str]:
+    """Build the per-clip normalize command.
+
+    Stays on `libx264` on purpose. The bundled FFmpeg does carry `h264_nvenc` and CUDA
+    hwaccel, so switching looks like free speed — but measured on a real 8-second 1080p60
+    clip through this exact filter chain, NVENC was *slower*: `h264_nvenc` 6,38 giây vs
+    `libx264 -preset veryfast` 4,24 giây. Clips this short spend more time setting up the
+    NVENC session than they save, and libx264 sets no `-threads` so it already uses every
+    core. Normalize is also only ~3 giây/clip out of a job dominated by watermark cleanup,
+    so even a 2x win here would be noise.
+
+    What would change the conclusion: clips far longer than 8 seconds, or a resolution far
+    above 1080p — either shifts the balance away from per-session setup cost. Re-measure
+    both encoders on the real clip length before switching; do not switch on principle.
+    """
     shortage = max(0.0, target_duration - float(clip_duration or 0))
     if fit_mode == "pad":
         scale_filter = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={background_color}"
@@ -2204,6 +2771,29 @@ def _render_cache_max_age_days() -> int:
         return max(0, int(os.environ.get(RENDER_CACHE_MAX_AGE_DAYS_ENV, "14")))
     except ValueError:
         return 14
+
+def resolve_clip_worker_count(clip_count: int) -> int:
+    """How many clips to process at once, never more than there are clips to process.
+
+    The environment override wins when it parses to a positive integer; anything else
+    (empty, non-numeric, zero, negative) falls back to the CPU-derived value rather than
+    failing the job. The result is always at least 1, and 1 means the sequential path.
+    """
+    raw = os.environ.get(CLIP_WORKERS_ENV)
+    override: int | None = None
+    if raw:
+        try:
+            parsed = int(raw.strip())
+        except ValueError:
+            override = None
+        else:
+            override = parsed if parsed > 0 else None
+    if override is not None:
+        workers = override
+    else:
+        cpu_threads = os.cpu_count() or 1
+        workers = min(_MAX_CLIP_WORKERS, cpu_threads // _CPU_THREADS_PER_CLIP_WORKER)
+    return max(1, min(workers, max(1, clip_count)))
 
 def _render_cache_roots(project_id: str | None) -> list[Path]:
     if project_id:
@@ -2313,18 +2903,35 @@ def clear_render_intermediate_cache(project_id: str | None = None, db: Session |
         "project_id": project_id,
     }
 
-def _build_audio_segments(ffmpeg: str, timeline: list[models.VideoRenderTimelineShot], shots_by_id: dict[str, DBVideoShot], output_dir: Path) -> list[Path]:
+def _build_audio_segments(
+    ffmpeg: str,
+    # Nhận thẳng target_language (str) thay vì ORM instance: hàm này chạy sau nhiều lần
+    # commit nên đọc attribute của instance đã expire sẽ raise ObjectDeletedError.
+    target_language: str | None,
+    timeline: list[models.VideoRenderTimelineShot],
+    shots_by_id: dict[str, DBVideoShot],
+    clips: dict[str, DBVideoShotClip],
+    output_dir: Path,
+) -> list[Path]:
     segments: list[Path] = []
+    native_speech = video_speech.uses_veo_native_speech(target_language)
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
         out_path = output_dir / f"audio-{index:03d}.wav"
-        audio_path = video_storage.resolve_artifact_storage_path(shot.audio_path)
-        if item.has_narration and audio_path is not None and audio_path.exists():
+        if native_speech and item.has_narration:
+            clip = clips.get(shot.id)
+            clip_path = video_storage.resolve_artifact_storage_path(clip.file_path) if clip else None
+            if clip is None or clip.status != "ready" or not clip.has_audio or clip_path is None or not clip_path.exists():
+                raise VideoRenderError(
+                    f"Segment {shot.shot_order:02d} thiếu audio tiếng Việt trong clip Veo.",
+                    error_code="VIDEO_RENDER_VEO_NATIVE_AUDIO_MISSING",
+                )
             cmd = [
                 ffmpeg,
                 "-y",
                 "-i",
-                str(audio_path),
+                str(clip_path),
+                "-vn",
                 "-af",
                 f"apad,atrim=duration={item.duration_seconds:.3f}",
                 "-ac",
@@ -2336,22 +2943,329 @@ def _build_audio_segments(ffmpeg: str, timeline: list[models.VideoRenderTimeline
                 str(out_path),
             ]
         else:
-            cmd = [
-                ffmpeg,
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=channel_layout=stereo:sample_rate=48000",
-                "-t",
-                f"{item.duration_seconds:.3f}",
-                "-c:a",
-                "pcm_s16le",
-                str(out_path),
-            ]
+            audio_path = video_storage.resolve_artifact_storage_path(shot.audio_path)
+            if item.has_narration and audio_path is not None and audio_path.exists():
+                cmd = [
+                    ffmpeg,
+                    "-y",
+                    "-i",
+                    str(audio_path),
+                    "-af",
+                    f"apad,atrim=duration={item.duration_seconds:.3f}",
+                    "-ac",
+                    "2",
+                    "-ar",
+                    "48000",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(out_path),
+                ]
+            else:
+                cmd = [
+                    ffmpeg,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=channel_layout=stereo:sample_rate=48000",
+                    "-t",
+                    f"{item.duration_seconds:.3f}",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(out_path),
+                ]
         _run_command(cmd, timeout=300)
         segments.append(out_path)
     return segments
+
+
+def clip_audio_mode_for_settings(settings: models.VideoRenderSettings) -> str:
+    """Resolve the clip audio level of a render settings blob.
+
+    `clip_audio_mode` wins whenever it carries a value. Settings written before that field
+    existed only carry `mute_clip_audio`, so the level is inferred from the boolean instead
+    of falling back to the default: reading a stored bed job as "drop" would strip the
+    original audio out of every later render of that project without any error.
+    """
+    mode = (getattr(settings, "clip_audio_mode", None) or "").strip()
+    if mode in CLIP_AUDIO_MODES:
+        return mode
+    if bool(getattr(settings, "mute_clip_audio", True)):
+        return CLIP_AUDIO_MODE_DROP
+    return CLIP_AUDIO_MODE_BED
+
+
+def clip_audio_bed_decision(
+    *,
+    native_speech: bool,
+    has_narration: bool,
+    clip: DBVideoShotClip | None,
+    clip_path: Path | None,
+    clip_audio_mode: str = CLIP_AUDIO_MODE_BED,
+) -> str:
+    """Decide whether a segment gets original clip audio, and at which level.
+
+    Ducking is applied once over the whole timeline with the voice track as the sidechain
+    signal, so a "full" segment simply has no voice signal to duck against.
+
+    At the clip-only level the project speech source is deliberately ignored: there is no
+    voice timeline to double up against, so skipping a narrated segment would silence
+    exactly the segments that carry speech.
+    """
+    clip_only = clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY
+    if native_speech and has_narration and not clip_only:
+        # The voice track IS this clip's audio; adding it again would comb-filter the voice.
+        return BED_DECISION_SKIP_NATIVE_SPEECH
+    if clip is None or clip.status != "ready" or not clip.has_audio or clip_path is None or not clip_path.exists():
+        return BED_DECISION_SILENT_NO_CLIP_AUDIO
+    if has_narration and not clip_only:
+        return BED_DECISION_DUCKED
+    return BED_DECISION_FULL
+
+
+def clip_audio_bed_decision_uses_clip_audio(decision: str) -> bool:
+    return decision in {BED_DECISION_FULL, BED_DECISION_DUCKED}
+
+
+def build_clip_audio_bed_segment_command(
+    *,
+    ffmpeg: str,
+    clip_path: Path | None,
+    output_path: Path,
+    duration_seconds: float,
+    use_clip_audio: bool,
+) -> list[str] | None:
+    """Build one bed segment matching the timeline segment duration.
+
+    `clip_path` must be the ORIGINAL clip, never the watermark-cleanup derivative.
+    Returns None when the segment duration is not usable.
+    """
+    if duration_seconds <= 0:
+        return None
+    if use_clip_audio and clip_path is not None:
+        return [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(clip_path),
+            "-vn",
+            "-af",
+            # apad extends short clip audio with silence, atrim cuts longer audio back.
+            f"apad,atrim=duration={duration_seconds:.3f}",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "-c:a",
+            "pcm_s16le",
+            str(output_path),
+        ]
+    return [
+        ffmpeg,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-t",
+        f"{duration_seconds:.3f}",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-c:a",
+        "pcm_s16le",
+        str(output_path),
+    ]
+
+
+def build_clip_audio_bed_mix_command(
+    *,
+    ffmpeg: str,
+    voice_path: Path,
+    bed_path: Path,
+    output_path: Path,
+    total_duration_seconds: float,
+    bed_volume: float = CLIP_AUDIO_BED_VOLUME,
+) -> list[str]:
+    """Duck the bed against the voice track and mix once over the whole timeline."""
+    volume = max(0.0, min(float(bed_volume), 0.85))
+    # sidechaincompress drops its own tail when either input reaches EOF, which cut the bed
+    # short before the end of the timeline. Padding BOTH of its inputs past the total
+    # duration keeps real bed audio to the end; the final atrim sets the exact length.
+    pad_duration = total_duration_seconds + 1.0
+    filters = [
+        "[0:a]aformat=sample_rates=48000:channel_layouts=stereo,asplit=2[voice_mix][voice_raw]",
+        f"[voice_raw]apad=whole_dur={pad_duration:.3f}[voice_sc]",
+        f"[1:a]aformat=sample_rates=48000:channel_layouts=stereo,volume={volume:.3f},"
+        f"apad=whole_dur={pad_duration:.3f}[bed_raw]",
+        # Voice is the sidechain (control) signal; the bed is the compressed signal.
+        f"[bed_raw][voice_sc]sidechaincompress="
+        f"threshold={CLIP_AUDIO_BED_DUCK_THRESHOLD:.6f}:ratio={CLIP_AUDIO_BED_DUCK_RATIO:.3f}"
+        f":attack={CLIP_AUDIO_BED_DUCK_ATTACK_MS:.2f}:release={CLIP_AUDIO_BED_DUCK_RELEASE_MS:.2f}"
+        ":detection=rms:link=maximum:level_sc=1[bed_ducked]",
+        # normalize=0 keeps the voice at its own level regardless of input count.
+        f"[voice_mix][bed_ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        f"atrim=duration={total_duration_seconds:.3f}[mixed]",
+    ]
+    return [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(voice_path),
+        "-i",
+        str(bed_path),
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        "[mixed]",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-c:a",
+        "pcm_s16le",
+        str(output_path),
+    ]
+
+
+def _build_clip_audio_bed_segments(
+    ffmpeg: str,
+    project: DBVideoProject,
+    timeline: list[models.VideoRenderTimelineShot],
+    shots_by_id: dict[str, DBVideoShot],
+    clips: dict[str, DBVideoShotClip],
+    output_dir: Path,
+    *,
+    clip_audio_mode: str = CLIP_AUDIO_MODE_BED,
+) -> tuple[list[Path], list[str]]:
+    """Build the clip audio timeline; returns segment paths and per-segment decisions."""
+    segments: list[Path] = []
+    decisions: list[str] = []
+    native_speech = video_speech.uses_veo_native_speech(project)
+    for index, item in enumerate(timeline, start=1):
+        shot = shots_by_id[item.shot_id]
+        clip = clips.get(shot.id)
+        # Always resolve from the original clip, never from the watermark derivative.
+        clip_path = video_storage.resolve_artifact_storage_path(clip.file_path) if clip else None
+        decision = clip_audio_bed_decision(
+            native_speech=native_speech,
+            has_narration=bool(item.has_narration),
+            clip=clip,
+            clip_path=clip_path,
+            clip_audio_mode=clip_audio_mode,
+        )
+        out_path = output_dir / f"bed-{index:03d}.wav"
+        cmd = build_clip_audio_bed_segment_command(
+            ffmpeg=ffmpeg,
+            clip_path=clip_path,
+            output_path=out_path,
+            duration_seconds=float(item.duration_seconds or 0.0),
+            use_clip_audio=clip_audio_bed_decision_uses_clip_audio(decision),
+        )
+        if cmd is None:
+            continue
+        _run_command(cmd, timeout=300)
+        segments.append(out_path)
+        decisions.append(decision)
+    return segments, decisions
+
+
+def _mix_clip_audio_bed(
+    ffmpeg: str,
+    project: DBVideoProject,
+    timeline: list[models.VideoRenderTimelineShot],
+    shots_by_id: dict[str, DBVideoShot],
+    clips: dict[str, DBVideoShotClip],
+    voice_path: Path,
+    output_dir: Path,
+) -> tuple[Path, dict[str, Any]]:
+    """Return the bed-mixed audio path plus a summary; voice_path when nothing to mix."""
+    # Total duration comes from the timeline so the bed never depends on enhanced render.
+    total_duration = sum(max(0.0, float(item.duration_seconds or 0.0)) for item in timeline)
+    if total_duration <= 0:
+        return voice_path, {"applied": False, "reason": "empty_timeline"}
+    segments, decisions = _build_clip_audio_bed_segments(
+        ffmpeg,
+        project,
+        timeline,
+        shots_by_id,
+        clips,
+        output_dir,
+    )
+    summary: dict[str, Any] = {
+        "applied": False,
+        "total_duration_seconds": round(total_duration, 3),
+        "decisions": decisions,
+        "clip_audio_segments": sum(1 for decision in decisions if clip_audio_bed_decision_uses_clip_audio(decision)),
+    }
+    if not segments:
+        summary["reason"] = "no_bed_segments"
+        return voice_path, summary
+    if not summary["clip_audio_segments"]:
+        # Every segment is silent, so skip the duck+mix entirely and keep the voice timeline.
+        summary["reason"] = "bed_all_silent"
+        return voice_path, summary
+    bed_concat = output_dir / "clip-audio-bed.wav"
+    _concat_media(ffmpeg, segments, bed_concat, stream_copy=False, audio=True)
+    bed_mixed = output_dir / "audio-with-clip-bed.wav"
+    cmd = build_clip_audio_bed_mix_command(
+        ffmpeg=ffmpeg,
+        voice_path=voice_path,
+        bed_path=bed_concat,
+        output_path=bed_mixed,
+        total_duration_seconds=total_duration,
+    )
+    _run_command(cmd, timeout=900)
+    summary["applied"] = True
+    summary["reason"] = "mixed"
+    return bed_mixed, summary
+
+
+def _build_clip_only_audio(
+    ffmpeg: str,
+    project: DBVideoProject,
+    timeline: list[models.VideoRenderTimelineShot],
+    shots_by_id: dict[str, DBVideoShot],
+    clips: dict[str, DBVideoShotClip],
+    output_dir: Path,
+) -> tuple[Path, dict[str, Any]]:
+    """Build the original clip audio timeline that becomes the render's main audio track.
+
+    Unlike the bed level there is no voice timeline to mix against, so the concatenated clip
+    audio is the output audio at its original level: no volume drop, no ducking, no amix.
+    A segment whose clip carries no audio stream contributes silence instead of failing.
+    """
+    total_duration = sum(max(0.0, float(item.duration_seconds or 0.0)) for item in timeline)
+    if total_duration <= 0:
+        raise VideoRenderError(
+            "Timeline không có thời lượng hợp lệ để dựng tiếng gốc.",
+            error_code="VIDEO_RENDER_EMPTY_TIMELINE",
+        )
+    segments, decisions = _build_clip_audio_bed_segments(
+        ffmpeg,
+        project,
+        timeline,
+        shots_by_id,
+        clips,
+        output_dir,
+        clip_audio_mode=CLIP_AUDIO_MODE_CLIP_ONLY,
+    )
+    if not segments:
+        raise VideoRenderError(
+            "Không dựng được phân đoạn tiếng gốc nào cho timeline.",
+            error_code="VIDEO_RENDER_CLIP_ONLY_AUDIO_EMPTY",
+        )
+    clip_audio_segments = sum(1 for decision in decisions if clip_audio_bed_decision_uses_clip_audio(decision))
+    concat_path = output_dir / "clip-only-audio.wav"
+    _concat_media(ffmpeg, segments, concat_path, stream_copy=False, audio=True)
+    return concat_path, {
+        "applied": True,
+        "total_duration_seconds": round(total_duration, 3),
+        "decisions": decisions,
+        "clip_audio_segments": clip_audio_segments,
+        "reason": "clip_audio_only" if clip_audio_segments else "clip_audio_all_silent",
+    }
 
 
 def _write_ass_subtitle(project_id: str, path: Path, db: Session, resolution: tuple[int, int]) -> None:

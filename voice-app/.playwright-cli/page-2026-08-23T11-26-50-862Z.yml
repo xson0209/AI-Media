@@ -1,0 +1,103 @@
+- generic [ref=f3e3]:
+  - generic [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - img "Voicebox" [ref=f3e7]
+      - generic [ref=f3e8]:
+        - link "Tạo giọng" [ref=f3e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=f3e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=f3e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=f3e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=f3e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=f3e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=f3e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=f3e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Prompt video sản phẩm" [ref=f3e43] [cursor=pointer]:
+          - /url: /product-video
+        - link "Phân tích truyện tranh" [ref=f3e48] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=f3e53] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=f3e56] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=f3e60] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f3e64]: v0.5.0
+    - main [ref=f3e66]:
+      - generic [ref=f3e68]:
+        - navigation [ref=f3e69]:
+          - link "Chung" [ref=f3e70] [cursor=pointer]:
+            - /url: /settings
+          - link "Tạo giọng" [ref=f3e71] [cursor=pointer]:
+            - /url: /settings/generation
+          - link "Ghi âm" [ref=f3e72] [cursor=pointer]:
+            - /url: /settings/captures
+          - link "MCP" [ref=f3e73] [cursor=pointer]:
+            - /url: /settings/mcp
+          - link "AI planning" [ref=f3e74] [cursor=pointer]:
+            - /url: /settings/ai-planning
+          - link "Nhật ký thay đổi" [ref=f3e75] [cursor=pointer]:
+            - /url: /settings/changelog
+          - link "Giới thiệu" [ref=f3e76] [cursor=pointer]:
+            - /url: /settings/about
+        - generic [ref=f3e78]:
+          - generic [ref=f3e79]:
+            - generic [ref=f3e80]:
+              - heading "AI planning / Codex" [level=3] [ref=f3e81]
+              - paragraph [ref=f3e82]: Cấu hình model dùng chung cho AI Video, Story Studio, tạo truyện, tạo kịch bản và các bước AI planning khác.
+              - generic [ref=f3e83]:
+                - generic [ref=f3e84]:
+                  - generic [ref=f3e85]:
+                    - generic [ref=f3e86]:
+                      - text: Preset model
+                      - paragraph [ref=f3e87]: Chọn cấu hình trước khi chạy. Bấm “Lưu và test Codex” để lưu cấu hình rồi gửi prompt “xin chào” tới Codex.
+                    - generic [ref=f3e88]: "Đang lưu: gpt-5.6-sol · ultra"
+                  - generic [ref=f3e91]:
+                    - generic [ref=f3e92]:
+                      - generic [ref=f3e93]: Preset AI planning
+                      - combobox "Preset AI planning Chất lượng cao nhất, phù hợp khi cần kịch bản/prompt kỹ nhưng có thể chậm." [disabled] [ref=f3e94]:
+                        - option "gpt-5.5 · xhigh"
+                        - option "gpt-5.6-sol · ultra" [selected]
+                        - option "gpt-5.6-sol · xhigh"
+                        - option "gpt-5.6-luna · xhigh"
+                        - option "gpt-5.6-terra · ultra"
+                        - option "gpt-5.6-terra · xhigh"
+                      - generic [ref=f3e95]: Chất lượng cao nhất, phù hợp khi cần kịch bản/prompt kỹ nhưng có thể chậm.
+                    - generic [ref=f3e96]:
+                      - button "Lưu và test Codex" [ref=f3e97]
+                      - button "Test lại" [ref=f3e98]
+                - generic [ref=f3e99]:
+                  - generic [ref=f3e101]:
+                    - text: Thông tin kết nối
+                    - paragraph [ref=f3e102]: Đường dẫn Codex và timeout backend đang dùng cho bài test.
+                  - generic [ref=f3e104]:
+                    - generic [ref=f3e105]:
+                      - term [ref=f3e106]: Codex path
+                      - definition [ref=f3e107]: Chưa cấu hình
+                    - generic [ref=f3e108]:
+                      - term [ref=f3e109]: Timeout
+                      - definition [ref=f3e110]: 600s
+            - paragraph [ref=f3e116]: Chưa test cấu hình hiện tại.
+          - complementary [ref=f3e117]:
+            - generic [ref=f3e118]:
+              - heading "Cách dùng" [level=3] [ref=f3e119]
+              - list [ref=f3e120]:
+                - listitem [ref=f3e121]: Chọn preset model phù hợp.
+                - listitem [ref=f3e122]: Bấm “Lưu và test Codex”.
+                - listitem [ref=f3e123]: Nếu Codex trả về text, cấu hình được xem là dùng được cho AI Video và Story Studio.
+            - generic [ref=f3e124]:
+              - paragraph [ref=f3e125]: Lưu ý hiệu năng
+              - paragraph [ref=f3e126]:
+                - code [ref=f3e127]: ultra
+                - text: có thể chậm khi provider đang tải cao. Nếu test lâu hoặc fail, thử
+                - code [ref=f3e128]: xhigh
+                - text: trước.
+  - region "Notifications (F8)":
+    - list

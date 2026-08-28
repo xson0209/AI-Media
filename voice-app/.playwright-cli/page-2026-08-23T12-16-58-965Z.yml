@@ -1,0 +1,36 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Prompt video sản phẩm" [ref=e43] [cursor=pointer]:
+          - /url: /product-video
+        - link "Phân tích truyện tranh" [ref=e48] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e53] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=e56] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e60] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e64]: v0.5.0
+    - main [ref=e66]:
+      - generic [ref=e67]: Đang mở luồng video sản phẩm...
+  - region "Notifications (F8)":
+    - list

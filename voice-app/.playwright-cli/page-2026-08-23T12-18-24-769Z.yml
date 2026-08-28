@@ -1,0 +1,143 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Prompt video sản phẩm" [ref=e43] [cursor=pointer]:
+          - /url: /product-video
+        - link "Phân tích truyện tranh" [ref=e48] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e53] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=e56] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e60] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e64]: v0.5.0
+    - main [ref=e66]:
+      - generic [ref=e70]:
+        - complementary [ref=e71]:
+          - heading "Video sản phẩm" [level=1] [ref=e78]
+          - button "Dự án mới" [ref=e79]
+          - list [ref=e81]:
+            - listitem [ref=e82]:
+              - button "Combo bình giữ nhiệt 9:16 8 clip" [ref=e83]:
+                - generic [ref=e84]: Combo bình giữ nhiệt
+                - generic [ref=e85]:
+                  - generic [ref=e86]: 9:16
+                  - generic [ref=e87]: 8 clip
+        - generic [ref=e89]:
+          - generic [ref=e90]:
+            - generic [ref=e91]:
+              - generic [ref=e92]: Sản phẩm và ý tưởng
+              - 'textbox "Ví dụ: hộp khô gà cay, nhấn vị cay và tiện mang đi, combo 2 hộp 99K" [ref=e93]': "Sức khỏe đường ruột: 6 thói quen đơn giản giúp hệ tiêu hóa khỏe mạnh mỗi ngày, ăn chậm, uống đủ nước, bổ sung chất xơ và vận động nhẹ"
+              - paragraph [ref=e94]: Mô tả sản phẩm, điểm bán, và thông điệp muốn truyền.
+            - generic [ref=e95]:
+              - generic [ref=e96]:
+                - generic [ref=e97]: Ngôn ngữ video
+                - combobox [ref=e98]:
+                  - generic: Tiếng Việt
+              - generic [ref=e101]:
+                - generic [ref=e102]: Tỉ lệ video
+                - combobox [ref=e103]:
+                  - generic: Dọc 9:16
+              - generic [ref=e106]:
+                - generic [ref=e107]: Thể loại
+                - combobox [ref=e108]:
+                  - generic: Quảng cáo / bán hàng
+              - generic [ref=e111]:
+                - generic [ref=e112]: Thời lượng mục tiêu
+                - combobox [ref=e113]:
+                  - generic: 30 giây
+                - paragraph [ref=e116]: 30s → 4 clip × 8s = 32s thực tế
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - generic [ref=e119]: Mode thoại
+                - combobox [ref=e120]:
+                  - generic: Thuyết minh
+              - generic [ref=e123]:
+                - generic [ref=e124]: Mật độ thoại
+                - combobox [ref=e125]:
+                  - generic: Ít thoại
+              - generic [ref=e128]:
+                - generic [ref=e129]: CTA
+                - combobox [ref=e130]:
+                  - generic: Trực tiếp
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - generic [ref=e135]: Cách chạy
+                - generic [ref=e136]: Tự chạy sau khi tạo
+              - generic [ref=e137]:
+                - button "Dựng nhanh" [pressed] [ref=e138]
+                - button "Thủ công" [ref=e139]
+            - generic [ref=e140]:
+              - generic [ref=e141]:
+                - generic [ref=e142]: Mức tự động
+                - generic [ref=e143]: Tự chạy hết
+              - generic [ref=e144]:
+                - button "Duyệt từng chặng Dừng sau khi lập kế hoạch" [ref=e145]:
+                  - generic [ref=e146]:
+                    - generic [ref=e147]: Duyệt từng chặng
+                    - generic [ref=e148]: Dừng sau khi lập kế hoạch
+                - button "Tự chạy hết Tự sinh prompt pack nội bộ" [pressed] [ref=e150]:
+                  - generic [ref=e151]:
+                    - generic [ref=e152]: Tự chạy hết
+                    - generic [ref=e153]: Tự sinh prompt pack nội bộ
+            - generic [ref=e155]:
+              - generic [ref=e156]:
+                - generic [ref=e157]: Đầu ra tự chạy
+                - generic [ref=e158]: Prompt pack tải xuống
+              - generic [ref=e159]:
+                - button "Sẵn sàng dựng MP4 Sinh prompt và chuẩn bị bridge; bạn vẫn upload clip rồi bấm Dựng MP4" [ref=e160]:
+                  - generic [ref=e161]:
+                    - generic [ref=e162]: Sẵn sàng dựng MP4
+                    - generic [ref=e163]: Sinh prompt và chuẩn bị bridge; bạn vẫn upload clip rồi bấm Dựng MP4
+                - button "Prompt pack thoại Sinh prompt để kiểm tra và tải xuống; không chạy provider/TTS" [active] [pressed] [ref=e165]:
+                  - generic [ref=e166]:
+                    - generic [ref=e167]: Prompt pack thoại
+                    - generic [ref=e168]: Sinh prompt để kiểm tra và tải xuống; không chạy provider/TTS
+                - button "Chỉ câu lệnh video Chỉ lập kế hoạch cảnh, dừng trước bước sinh prompt" [ref=e170]:
+                  - generic [ref=e171]:
+                    - generic [ref=e172]: Chỉ câu lệnh video
+                    - generic [ref=e173]: Chỉ lập kế hoạch cảnh, dừng trước bước sinh prompt
+            - generic [ref=e175]:
+              - generic [ref=e176]: Phong cách
+              - combobox [ref=e177]:
+                - generic: UGC cầm sản phẩm ngoài đường
+              - 'textbox "Mô tả phong cách bằng tiếng Anh: chủ thể, chuyển động camera, chuyển động hậu cảnh, ánh sáng." [ref=e180]': "Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. Background is softly out of focus and clearly in motion while the product stays sharp. Lighting: warm natural daylight, soft shadow, no harsh glare across the label surface."
+              - paragraph [ref=e181]: Chọn preset để điền sẵn rồi sửa thoải mái, hoặc chọn Tự nhập để viết từ đầu.
+            - generic [ref=e182]:
+              - generic [ref=e183]:
+                - generic [ref=e184]: Số câu lệnh
+                - spinbutton [ref=e185]: "4"
+                - paragraph [ref=e186]: Số clip/prompt sẽ lập kế hoạch.
+              - generic [ref=e187]:
+                - generic [ref=e188]: Giây/câu lệnh
+                - combobox [ref=e189]:
+                  - generic: 8 giây
+                - paragraph [ref=e192]: Flow chỉ nhận 4, 6, 8 hoặc 10 giây.
+              - generic [ref=e193]:
+                - generic [ref=e194]: Cảnh nhỏ
+                - spinbutton [ref=e195]: "3"
+                - paragraph [ref=e196]: Số nhịp hình bên trong một clip. 1 đến 5.
+            - paragraph [ref=e197]:
+              - generic [ref=e200]: Luồng này dùng prompt sản phẩm riêng. Chế độ tự chạy chỉ lập kế hoạch và sinh prompt nội bộ — không tự gửi Veo, Chrome, TTS, phụ đề hay render. Sau đó bạn có thể tự dùng Flow, hoặc upload clip vào phần dựng MP4 bên dưới. Sẽ có 4 prompt cần dùng.
+          - button "Tạo dự án" [ref=e215]
+  - region "Notifications (F8)":
+    - list

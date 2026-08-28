@@ -1,0 +1,1302 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - link:
+              - /url: /generate
+            - link:
+              - /url: /stories
+            - link:
+              - /url: /captures
+            - link:
+              - /url: /voices
+            - link:
+              - /url: /effects
+            - link:
+              - /url: /video-inspiration
+            - link:
+              - /url: /comic-series-analysis
+            - link:
+              - /url: /story-studio
+            - link:
+              - /url: /ai-video
+            - link:
+              - /url: /models
+            - link:
+              - /url: /settings
+          - generic: v0.5.0
+        - main:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=1]: Dự án câu lệnh video
+                            - paragraph: Nhập tiếng Việt, AI phát triển kịch bản, chia video thành các đoạn câu lệnh theo cấu hình và giữ mạch liền nhau giữa các phân đoạn.
+                        - generic:
+                          - generic:
+                            - generic: Tên dự án
+                            - textbox:
+                              - /placeholder: "Ví dụ: Cú trở lại ở World Cup"
+                            - generic: Có thể để trống, hệ thống sẽ lấy từ ý tưởng chính.
+                          - generic:
+                            - generic: Hồ sơ giọng
+                            - combobox
+                            - generic: "Đang chọn: Thoai 1 Vietnamese"
+                        - generic:
+                          - generic:
+                            - generic: Ý tưởng chính
+                            - textbox
+                            - generic: Nêu video muốn làm bằng tiếng Việt. Đây là nguồn bắt buộc.
+                          - generic:
+                            - generic: Kịch bản thô
+                            - textbox
+                            - generic: Dán kịch bản, đoạn thoại hoặc ghi chú dài nếu đã có.
+                          - generic:
+                            - generic: Nhân vật và bối cảnh
+                            - textbox
+                            - generic: "Ghi chi tiết cần giữ nhất quán: nhân vật, trang phục, đạo cụ, địa điểm."
+                          - generic:
+                            - generic: Phong cách video
+                            - textbox
+                            - generic: "Ví dụ: cinematic, documentary, fast cuts, warm light, realistic."
+                          - generic:
+                            - generic: Bắt buộc phải có
+                            - textbox
+                            - generic: Các ý không được bỏ khi AI phát triển lại nội dung.
+                          - generic:
+                            - generic: Cần tránh
+                            - textbox
+                            - generic: Những chi tiết, giọng văn hoặc hình ảnh không muốn xuất hiện.
+                          - generic:
+                            - generic: Phong cách hình ảnh
+                            - textbox: cinematic realistic video, natural light, consistent character details, fast editorial pacing
+                            - generic: "Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation."
+                  - generic:
+                    - generic:
+                      - generic:
+                        - paragraph: Dự án đang chọn
+                        - paragraph: Người Que - Tập 01
+                        - paragraph: Người Que · Tập 01 · Tập 01 · Cấu hình đoạn câu lệnh trực tiếp
+                      - generic:
+                        - generic:
+                          - generic: 6 phân đoạn đã lưu
+                          - generic: 6 câu lệnh cấu hình
+                          - generic: 10s/câu lệnh
+                          - generic: 3 cảnh nhỏ/câu lệnh
+                          - generic: 18 cảnh nhỏ
+                        - generic:
+                          - button: Đổi tên
+                          - button: Xoá dữ liệu đã tạo
+                          - button: Xóa dự án
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Bộ nhớ dự án
+                            - paragraph: 0 thẻ · 0 beat đích
+                      - generic:
+                        - button: Truyện
+                        - button: Shot
+                        - button: Câu lệnh
+                        - button: Giọng đọc
+                        - button: Phụ đề
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=3]: Thẻ nhớ đã duyệt
+                        - generic: Chưa có bộ nhớ dự án. Dự án tạo từ bước chuyển tiếp Video Inspiration sẽ tự sinh thẻ nhớ đã duyệt.
+                      - generic:
+                        - generic:
+                          - heading [level=3]: Dòng thời gian đích
+                        - generic: Chưa có dòng thời gian đích. Bản chuyển tiếp hợp lệ sẽ tái cấu trúc beat theo cấu hình dự án thay vì sao chép dòng thời gian nguồn.
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Báo cáo chất lượng
+                            - paragraph: Chưa kiểm tra
+                      - generic:
+                        - button: Chạy kiểm tra
+                    - generic: Chưa có báo cáo. Bấm Chạy kiểm tra để đánh giá gói phân tích, chuyển tiếp, bộ nhớ dự án, bản nháp, kịch bản, phân đoạn, câu lệnh, giọng đọc, phụ đề và nhất quán toàn luồng trước khi dựng hoặc đóng gói.
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Nguồn nội dung
+                            - paragraph: 1 đoạn đang lưu
+                    - generic:
+                      - generic:
+                        - generic:
+                          - paragraph: "#1 · idea"
+                          - paragraph: Tập 1. Căn nhà tồi tàn
+                        - button: Xoá đoạn
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Tự động tạo nguyên liệu
+                            - paragraph: Câu lệnh video, nội dung đăng, giọng đọc và phụ đề .srt
+                      - generic: Đã xong
+                    - generic:
+                      - generic:
+                        - generic:
+                          - button:
+                            - generic: Duyệt từng chặng
+                            - generic: Dừng ở kịch bản và câu lệnh
+                          - button [pressed]:
+                            - generic: Tự chạy hết
+                            - generic: Tự duyệt bước giữa
+                        - generic:
+                          - button
+                          - button [pressed]
+                          - button
+                          - button
+                      - generic:
+                        - button: Auto chạy
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic: Đã xong
+                              - generic: Câu lệnh + giọng đọc + SRT
+                              - generic: Duyệt từng chặng
+                            - paragraph: Nguyên liệu lõi đã sẵn sàng
+                            - paragraph: Câu lệnh 0/6, giọng 4/6, cần tạo lại phụ đề.
+                            - paragraph: Bạn có thể kiểm tra câu lệnh, nghe giọng, tải phụ đề hoặc qua bảng dựng MP4.
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic: Tiến độ
+                                - generic: 100%
+                              - progressbar
+                        - generic:
+                          - generic:
+                            - paragraph: Viết nền câu chuyện
+                            - paragraph: Ý tưởng, tính nhất quán và kịch bản chi tiết.
+                          - generic:
+                            - generic: 6 phân đoạn
+                            - paragraph: Chia thành phân đoạn
+                            - paragraph: Mỗi đoạn có hành động, camera, lời kể và nhịp dựng.
+                          - generic:
+                            - generic: 0/6
+                            - paragraph: Tạo câu lệnh video
+                            - paragraph: Câu lệnh gốc để sao chép sang công cụ tạo video.
+                          - generic:
+                            - paragraph: Nội dung đăng
+                            - paragraph: Tiêu đề, mô tả, hashtag và câu lệnh thumbnail cho YouTube, TikTok, Facebook.
+                          - generic:
+                            - generic: 4/6
+                            - paragraph: Tạo giọng đọc
+                            - paragraph: Giọng đọc cho các phân đoạn có lời kể.
+                          - generic:
+                            - generic: Cần tạo lại phụ đề
+                            - paragraph: Tạo phụ đề
+                            - paragraph: File .srt theo giọng đọc đã tạo.
+                      - generic: Nguyên liệu lõi và bộ nội dung đăng đã sẵn sàng. Dựng MP4 vẫn dùng bảng dựng riêng.
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Truyện, nhất quán và kịch bản
+                            - paragraph: Phải duyệt phần này trước khi tạo phân cảnh
+                      - generic:
+                        - button: AI phát triển kịch bản
+                        - button: Viết lại
+                        - button: Duyệt kịch bản
+                    - generic:
+                      - generic:
+                        - generic:
+                          - paragraph: Chiến lược kịch bản
+                          - paragraph: Bản tiếng Việt để duyệt; nếu video cuối là Tiếng Việt, phần sản xuất vẫn theo ngôn ngữ video.
+                          - generic: "Bản tiếng Việt: Tập mở đầu dùng cấu trúc short quốc tế: hook cực nhanh bằng hình ảnh căn nhà gần sập giữa mưa, sau đó đặt câu hỏi: tại sao Nam lại chọn bước vào nơi này? Xung đột chính là Nam cần một mái nhà nhưng căn nhà quá tồi tàn, nguy hiểm và có vẻ đang che giấu điều gì đó. Emotional arc đi từ hài hước, sợ hãi, thất vọng sang kiên trì và hy vọng. Mỗi segment có một phát hiện mới: cửa bung, mái dột, sàn gãy, ảnh cũ, hộp bí mật, rồi ánh đèn ấm đầu tiên. Payoff cuối là Nam không có một căn nhà hoàn hảo, nhưng có một nơi để bắt đầu. Câu kết mềm mở ra tập sau bằng dấu hiệu bí ẩn trong hộp gỗ. Bản tiếng Anh dùng cho video: Episode 1 opens with a fast global-short hook: a nearly collapsing house in the rain, and Nam stepping toward it anyway. The core conflict is simple and visual: Nam needs shelter, but the house is broken, unsafe, and hiding a secret. The emotional arc moves from humor and fear to frustration, persistence, and quiet hope. Each segment reveals a new problem or clue: the broken door, leaking roof, weak floor, old photo, hidden box, and finally the first warm light inside the house. The payoff is not a perfect home, but a beginning. The soft ending invites the next episode through a small mystery hidden under the floorboards."
+                        - generic:
+                          - paragraph: Ghi chú nhất quán
+                          - paragraph: Bản tiếng Việt giúp kiểm tra nhân vật, bối cảnh, phong cách và tính nhất quán.
+                          - generic: "Bản tiếng Việt: Giữ Nam là nhân vật duy nhất nổi bật trong tập: cơ thể người que màu xám than #6A6A6A, đầu tròn lớn hơn bình thường 15%, mắt trắng lớn biểu cảm, không tóc, không mũi, không tai, miệng là nét cong đơn giản, có vết nứt trắng nhỏ bên trái đầu. Trang phục xuyên suốt: hoodie xanh navy, quần short đen, sneaker trắng, khăn quàng vàng; sau khi vào nhà có thể dính bụi, nước mưa và vết bẩn nhưng không được đổi thiết kế. Căn nhà là nhà gỗ/cũ ở rìa thị trấn, mái dột, tường nứt, sàn ọp ẹp, cửa lệch bản lề, đồ vật phủ bụi nhưng có tỷ lệ thật. Phong cách hình ảnh là cinematic 3D animation chất lượng cao, ánh sáng tự nhiên, volumetric rain/fog/dust, camera luôn có chuyển động mượt như dolly, handheld, orbit, crane. Không có chữ trên màn hình, không logo, không watermark. Tập kết thúc trong cùng căn nhà, sau khi Nam tạo được một góc nhỏ có ánh sáng ấm và tìm thấy hộp gỗ bí ẩn. Bản tiếng Anh dùng cho video: Keep Nam as the single recognizable main character: charcoal gray stick-figure body #6A6A6A, round head 15% larger than normal, large expressive white eyes, no hair, no nose, no ears, a simple curved mouth, and a small white crack on the left side of his head. His outfit stays consistent: navy hoodie, black shorts, white sneakers, and a yellow scarf. After entering the house, he may become wet, dusty, and dirty, but his design must not change. The house is an old wooden home on the edge of town with a leaking roof, cracked walls, creaking floors, a crooked door, and realistic dusty objects. The visual style is high-quality cinematic 3D animation with natural light, volumetric rain, fog, dust, and smooth moving camera language: dolly, handheld, orbit, crane. No on-screen text, no logo, no watermark. The episode ends in the same house after Nam creates one warm corner of safety and discovers a mysterious wooden box."
+                        - generic:
+                          - paragraph: Kịch bản chi tiết
+                          - paragraph: Bản đọc duyệt bằng tiếng Việt, kèm nội dung sản xuất theo Tiếng Việt nếu khác.
+                          - generic: "Bản tiếng Việt: Segment 1 mở bằng căn nhà tồi tàn trong mưa, cửa đập mạnh, Nam đứng bên ngoài vừa sợ vừa tò mò. Voiceover tiếng Anh đặt hook: “Most people would run from this house. Nam walked closer.” Segment 2 Nam bước vào, bị cửa kẹt làm giật mình, rồi thấy nước mưa nhỏ xuống khắp nơi. Segment 3 cậu cố sửa tạm mái dột nhưng sàn gỗ lún xuống, tạo một khoảnh khắc hài hước và nguy hiểm. Segment 4 Nam gần như bỏ cuộc khi thấy căn nhà quá hỏng, nhưng một bức ảnh cũ khiến cậu nhận ra từng có người yêu quý nơi này. Segment 5 cậu dọn bụi, kê lại bàn, vá tạm lỗ hổng và phát hiện một hộp gỗ giấu dưới tấm ván. Segment 6 Nam thắp ánh đèn đầu tiên trong nhà, mỉm cười mệt mỏi, rồi nghe tiếng động nhỏ từ chiếc hộp. Tập kết bằng cảm giác hy vọng xen bí ẩn, mở đường cho tập tiếp theo. Bản tiếng Anh dùng cho video: Segment 1 opens on a ruined house in the rain. The door slams in the wind as Nam stands outside, scared but curious. The English voiceover hooks the viewer: “Most people would run from this house. Nam walked closer.” In Segment 2, Nam steps inside, gets startled by the stuck door, and notices rain leaking everywhere. In Segment 3, he tries a quick roof repair, but the wooden floor sinks under him, turning danger into a small comedic beat. In Segment 4, Nam almost gives up, until an old photograph suggests this broken house once mattered to someone. In Segment 5, he clears dust, fixes one corner, and discovers a hidden wooden box under a loose floorboard. In Segment 6, Nam lights the first warm lamp, smiles through exhaustion, and hears a tiny sound from the box. The episode ends with hope and mystery, setting up the next chapter."
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Retention và âm thanh
+                              - paragraph: Bản tiếng Việt để kiểm tra nhịp giữ chân, pattern interrupt và sound design trước khi tạo phân đoạn.
+                            - generic: chưa có creative direction đầy đủ
+                          - generic:
+                            - generic:
+                              - paragraph: Bản đồ giữ chân
+                              - paragraph: Bản đồ giữ chân đang được giữ trong câu lệnh gốc tiếng Anh. UI chỉ hiển thị bản tiếng Việt để duyệt.
+                              - paragraph: "Mồi câu: Đọc bản tóm tắt tiếng Việt phía trên."
+                              - paragraph: "Câu hỏi giữ tò mò: Đọc bản tóm tắt tiếng Việt phía trên."
+                              - paragraph: "Payoff: Đọc bản tóm tắt tiếng Việt phía trên."
+                            - generic:
+                              - paragraph: Thiết kế âm thanh
+                              - paragraph: Sound design đang được giữ trong câu lệnh gốc tiếng Anh. UI chỉ hiển thị bản tiếng Việt để duyệt.
+                              - paragraph: "Nhạc: Đọc bản tóm tắt tiếng Việt phía trên."
+                              - paragraph: "Năng lượng: Đọc bản tóm tắt tiếng Việt phía trên."
+                              - paragraph: "Mix: Đọc bản tóm tắt tiếng Việt phía trên."
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Phân đoạn câu lệnh
+                            - paragraph: 6 phân đoạn đã lưu / 6 câu lệnh cấu hình · mỗi câu lệnh ~10s, gồm 3 cảnh nhỏ
+                      - button [disabled]: Tạo bản phân đoạn
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 01
+                              - generic: câu lệnh 10s
+                              - generic: 0-10s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 1 of 6 - Hook. 0-3.3s: camera dolly-in xuyên qua mưa tới căn nhà gỗ gần sập, cửa bật mở trên tiếng sấm. 3.3-6.7s: Nam bước vào tiền cảnh, ôm khăn quàng vàng, mắt trắng mở cực lớn. 6.7-10s: Nam gãi đầu bối rối rồi tiến một bước về phía hiên. Voiceover tiếng Anh nói rằng người khác sẽ chạy khỏi căn nhà này, nhưng Nam lại tiến gần hơn. Mood căng thẳng, có chút hài, giữ đúng Nam người que xám than, hoodie navy, quần short đen, sneaker trắng, khăn vàng và vết nứt trắng bên trái đầu."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Camera dolly-in xuyên qua mưa dày tới căn nhà gỗ tồi tàn, cửa lệch bản lề bật mở đúng nhịp sấm.
+                                - generic: · Low-angle dolly-in with slight handheld vibration on lightning.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Nam bước vào khung hình, người run nhẹ, ôm khăn quàng vàng đang bay mạnh và nhìn căn nhà bằng đôi mắt trắng cực lớn.
+                                - generic: · Medium full-body tracking from front-left, rain streaks crossing lens.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Nam nuốt sợ, gãi đầu bối rối rồi bước một bước lên hiên nhà, tạo điểm cắt nối sang bên trong.
+                                - generic: · Slow push-in toward his face, then tilt down to the stepping sneaker.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: Most people would run from this house. The roof was broken, the door was angry, and the storm sounded alive. But Nam stepped closer anyway.
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 02
+                              - generic: câu lệnh 10s
+                              - generic: 10-20s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 2 of 6 - Build-up. 0-3.3s: Nam đẩy cửa bước vào, camera handheld theo sát từ phía sau. 3.3-6.7s: cửa đóng sầm làm cậu nhảy dựng, ôm đầu, mắt mở to. 6.7-10s: cậu phát hiện nhà dột như mưa trong nhà, đặt xô cũ dưới một dòng nước rồi né thêm hai dòng khác. Voiceover tiếng Anh mô tả căn nhà không hề trống rỗng mà kêu cót két, nhỏ nước và rên rỉ như đang phàn nàn. Mood hỗn loạn duyên dáng, nối tiếp trực tiếp từ ngưỡng cửa segment trước."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Nam đẩy cánh cửa lệch bản lề và bước vào nội thất tối, camera handheld nhẹ theo sau qua ngưỡng cửa.
+                                - generic: · Over-the-shoulder handheld push through the doorway.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Cửa đóng sầm phía sau, Nam giật bắn, ôm đầu, mắt trắng mở to và miệng cong như cố không hét.
+                                - generic: · Quick snap-pan from door to Nam's face, then slight push-in reaction.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Nam nhìn quanh thấy nước dột khắp nơi, đặt xô cũ dưới một dòng nước rồi lách người né thêm hai dòng rơi từ trần.
+                                - generic: · Medium-wide tracking shot across the room with foreground drips for depth.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: Inside, the house did not feel empty. It creaked, dripped, and groaned like it was complaining. Nam said nothing, but his eyes said everything.
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 03
+                              - generic: câu lệnh 10s
+                              - generic: 20-30s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 3 of 6 - Obstacle. 0-3.3s: Nam kéo một tấm ván cũ và giơ lên như ý tưởng vá mái rất thông minh. 3.3-6.7s: cậu trèo lên ghế ọp ẹp, với tay lên trần trong cú orbit nhẹ. 6.7-10s: sàn gỗ gãy, một chân tụt xuống, cậu quơ tay rồi kéo sneaker trắng ra khỏi lỗ. Voiceover tiếng Anh nói Nam có kế hoạch sửa chỗ dột trước, nhưng căn nhà có kế hoạch khác và sàn cố nuốt giày cậu. Mood hồi hộp, hài hình thể, vẫn giữ nguy hiểm vừa đủ."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Nam kéo tấm ván cũ qua sàn, giơ lên như tìm ra giải pháp vá mái đầu tiên.
+                                - generic: · Low tracking shot following the plank scrape, then tilt up to Nam's face.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Nam trèo lên ghế cũ, khăn vàng vướng nhẹ rồi tuột ra, tay dài với lên lỗ dột trong trần.
+                                - generic: · Slow orbit around chair and Nam, maintaining full-body silhouette in 9:16.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Tấm sàn bên dưới gãy rắc, chân Nam tụt xuống, cậu quơ tay giữ thăng bằng rồi kéo sneaker trắng ra khỏi lỗ.
+                                - generic: · Sudden downward camera dip with the collapse, then quick close push on his shocked eyes.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: "Nam had one brilliant plan: fix the leak first. The house had another plan. One wrong step, and the floor tried to swallow his shoe."
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 04
+                              - generic: câu lệnh 10s
+                              - generic: 30-40s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 4 of 6 - Emotional turn. 0-3.3s: Nam ngồi xuống cạnh tường nứt, ôm đầu gối, gần như bỏ cuộc. 3.3-6.7s: khuỷu tay chạm mảng gỗ, một bức ảnh cũ phủ bụi trượt ra. 6.7-10s: Nam phủi bụi, nhìn thấy căn nhà từng ấm áp, mắt dịu lại. Voiceover tiếng Anh nói Nam suýt bỏ cuộc, rồi phát hiện dấu hiệu rằng nơi đổ nát này từng được yêu thương. Mood chậm hơn, nhân văn, tạo lý do cảm xúc để cậu tiếp tục."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Nam ngồi thấp cạnh bức tường nứt, ôm đầu gối, sneaker trắng đặt sát nhau trên sàn, vẻ mặt mệt và buồn.
+                                - generic: · Eye-level medium shot slowly lowering with him to the floor.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Khuỷu tay Nam chạm mảng gỗ mục, một bức ảnh cũ phủ bụi trượt ra từ khe tường.
+                                - generic: · Close lateral slide following the photo across the floor.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Nam nhặt ảnh lên, phủi bụi, mắt trắng dịu lại khi nhận ra căn nhà từng có bàn ăn, ánh sáng và sự ấm áp.
+                                - generic: · Close-up on photo reflection in Nam's large white eyes, then slow push to his face.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: For a moment, Nam almost gave up. Then something slid out of the wall, covered in dust. This broken place had once been loved.
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 05
+                              - generic: câu lệnh 10s
+                              - generic: 40-50s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 5 of 6 - Climax/mystery reveal. 0-3.3s: Nam quét bụi khỏi một góc phòng, quyết định sửa từng phần nhỏ. 3.3-6.7s: cậu dựng bàn, đặt xô dưới chỗ dột, kéo khăn vàng cho ngay rồi tự giơ ngón cái. 6.7-10s: cậu gõ sàn, nghe tiếng rỗng, cạy tấm ván và thấy hộp gỗ nhỏ. Voiceover tiếng Anh nói Nam ngừng cố sửa mọi thứ cùng lúc, sửa một góc trước, rồi căn nhà trao cho cậu một bí mật. Mood chuyển sang chủ động, hy vọng và tò mò."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Nam đứng dậy quyết tâm hơn, dùng chổi cũ quét bụi khỏi một góc phòng thay vì cố sửa cả căn nhà.
+                                - generic: · Quick tracking shot moving with the broom sweep across the floor.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Nam dựng lại chiếc bàn, đặt xô dưới chỗ dột, kéo khăn vàng ngay ngắn rồi giơ ngón cái với chính mình.
+                                - generic: · Medium-wide side track with quick push-in on the thumbs-up.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Nam quỳ xuống gõ sàn, nghe âm rỗng, cạy tấm ván lỏng và phát hiện một hộp gỗ nhỏ giấu bên dưới.
+                                - generic: · Low floor-level close-up, dolly into the shadow under the plank, then reveal Nam's wide eyes.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: So Nam stopped trying to fix everything. He fixed one corner. And when the floor answered with a hollow knock, the house finally gave him a secret.
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - paragraph: Phân đoạn 06
+                              - generic: câu lệnh 10s
+                              - generic: 50-60s timeline
+                              - generic: 3 cảnh nhỏ
+                              - generic: "câu lệnh: Cần tạo lại"
+                            - paragraph: Bản tiếng Việt để duyệt phân đoạn
+                            - paragraph: "Segment 6 of 6 - Payoff và cliffhanger mềm. 0-3.3s: Nam bật chiếc đèn cũ, ánh sáng vàng lan ra góc phòng đã gọn hơn. 3.3-6.7s: cậu ngồi cạnh hộp gỗ chưa mở, tựa lưng vào tường, mỉm cười mệt nhưng nhẹ nhõm. 6.7-10s: căn phòng im lại, hộp gỗ khẽ rung và phát ra âm thanh nhỏ, Nam quay đầu với mắt mở to. Voiceover tiếng Anh nói căn nhà vẫn tồi tàn, nhưng một góc đã ấm, khô và thuộc về Nam; rồi chiếc hộp phát ra tiếng động. Mood hy vọng xen bí ẩn, kết thúc không đột ngột."
+                            - generic:
+                              - generic:
+                                - generic: "0-3.3s:"
+                                - text: Nam bật chiếc đèn cũ trên bàn, ánh sáng vàng ấm lan qua góc phòng đã được dọn gọn hơn.
+                                - generic: · Close-up on lamp switch, then slow pull to reveal Nam and the cleaned corner.
+                              - generic:
+                                - generic: "3.3-6.7s:"
+                                - text: Nam ngồi xuống cạnh hộp gỗ chưa mở, tựa vào tường, mắt trắng dịu lại và mỉm cười mệt mỏi.
+                                - generic: · Warm low-angle medium shot, gentle dolly-in toward Nam's face.
+                              - generic:
+                                - generic: "6.7-10s:"
+                                - text: Không gian im hơn, hộp gỗ khẽ rung và phát ra tiếng động nhỏ; Nam quay đầu nhìn, mắt mở to vì ngạc nhiên.
+                                - generic: · Slow push from Nam's face to the box, then hold both in frame for the ending.
+                            - paragraph: Lời kể theo ngôn ngữ video (Tiếng Việt)
+                            - paragraph: By night, it was still a terrible house. But one corner was warm, dry, and his. Then the little box made a sound.
+                            - paragraph: Góc máy, cỡ cảnh và chuyển động camera được giữ trong câu lệnh gốc tiếng Anh; bản duyệt tiếng Việt nằm trong mô tả phân đoạn và cảnh nhỏ phía trên.
+                            - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                          - generic:
+                            - button: Khóa
+                            - button: Tạo lại
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - heading [level=2]: Câu lệnh video
+                            - paragraph: Câu lệnh gốc để sao chép, kèm bản giải thích tiếng Việt để đọc hiểu
+                      - generic:
+                        - button: Mở popup câu lệnh
+                        - button: Sao chép toàn bộ câu lệnh
+                        - button: Tạo câu lệnh video
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 01
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: "Segment 1 mở đầu bằng hook mạnh: camera dolly-in xuyên qua mưa tới căn nhà gỗ tồi tàn, cửa tự bật mở theo tiếng sấm. Sau đó Nam xuất hiện với đúng thiết kế người que xám than, hoodie navy, quần short đen, sneaker trắng, khăn vàng và vết nứt trắng bên trái đầu. Cậu sợ nhưng vẫn bước lên hiên. Voiceover và mọi nội dung người xem nghe/đọc đều bằng tiếng Anh. Retention nằm ở câu hỏi vì sao Nam tiến lại gần thay vì bỏ chạy, cùng hình ảnh cửa tự mở và khăn vàng nổi bật giữa cảnh bão. Chuyển cảnh là hard cut theo chuyển động bàn chân qua ngưỡng cửa. Âm thanh gồm mưa lớn, sấm, cửa gỗ đập, bước chân ướt và nhạc căng nhẹ, nhưng voiceover luôn rõ."
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 02
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: Segment 2 nối trực tiếp từ cảnh Nam bước qua cửa. Camera handheld theo sau cậu vào căn nhà tối, cửa đóng sầm khiến cậu giật bắn rồi căn phòng lộ ra như đang mưa bên trong. Nam đặt xô hứng nước và né các dòng dột, cuối segment nhìn thấy tấm ván lỏng để mở sang ý tưởng sửa nhà. Voiceover tiếng Anh giữ nhịp vừa đủ, không tạo thoại nhân vật. Retention chuyển nỗi sợ thành hài hình thể và cho thấy căn nhà gần như không thể ở được. Chuyển cảnh là action cut khi tay Nam vươn tới tấm ván. Âm thanh gồm cửa đập, nước nhỏ, xô kêu, sneaker rít nhẹ, gỗ cót két và nhạc tò mò căng vừa.
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 03
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: "Segment 3 là nỗ lực sửa nhà đầu tiên. Nam kéo tấm ván, tưởng đã có kế hoạch vá mái, rồi trèo lên ghế ọp ẹp để với lên trần. Bất ngờ sàn gãy, một chân cậu tụt xuống và cậu phải vùng vẫy kéo sneaker trắng ra. Hố sàn gãy phải được giữ lại cho continuity về sau. Voiceover tiếng Anh kể nhịp hài căng thẳng. Retention đến từ cú đảo chiều: ý tưởng sửa nhà biến thành tai nạn hài nhưng vẫn nguy hiểm. Chuyển cảnh match cut từ cú ngã sang khoảnh khắc Nam ngồi mệt. Âm thanh gồm ván cạ sàn, ghế rung, gỗ gãy, sneaker rít và khoảng lặng ngắn sau tiếng nứt."
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 04
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: Segment 4 giảm nhịp để tạo cảm xúc. Nam ngồi bên tường nứt, ôm đầu gối như sắp bỏ cuộc. Khi khuỷu tay chạm mảng gỗ mục, một bức ảnh cũ trượt ra trong tia sáng ấm. Cậu phủi bụi, nhìn ảnh và hiểu căn nhà từng có sự ấm áp. Không có chữ đọc được trên ảnh. Voiceover tiếng Anh tạo lý do cảm xúc để Nam tiếp tục. Retention đổi căn nhà từ trò đùa nguy hiểm thành nơi có quá khứ, mở vòng lặp về bí mật bên trong. Chuyển cảnh là gaze cut theo ánh mắt quyết tâm của Nam. Âm thanh hạ thấp mưa, thêm piano nhẹ, tiếng bụi trượt và giấy cọ nhỏ.
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 05
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: "Segment 5 cho thấy Nam đổi chiến lược: không sửa cả căn nhà mà dọn một góc trước. Cậu quét bụi, dựng bàn, đặt xô dưới chỗ dột, chỉnh khăn vàng và tự giơ ngón cái. Sau đó cậu gõ sàn, nghe âm rỗng, cạy tấm ván và phát hiện hộp gỗ nhỏ vẫn đóng kín. Voiceover tiếng Anh nhấn vào bài học nhỏ: sửa một góc trước. Retention vừa thưởng cho tiến bộ của Nam vừa mở bí ẩn mới: trong hộp có gì. Chuyển cảnh object match cut khi hộp được nhấc lên. Âm thanh dùng nhịp broom, xô, bàn, tiếng gõ rỗng và cue bí ẩn nhỏ, không làm lấn voiceover."
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 06
+                            - paragraph: "Trạng thái câu lệnh: Cần tạo lại"
+                          - generic:
+                            - button: Sao chép câu lệnh gốc
+                            - button: Tải câu lệnh
+                        - generic:
+                          - paragraph: Bản giải thích tiếng Việt
+                          - paragraph: Segment 6 là payoff và cliffhanger mềm. Nam bật chiếc đèn cũ, ánh sáng vàng lan qua góc phòng đã được dọn, tạo cảm giác an toàn đầu tiên trong căn nhà tồi tàn. Cậu ngồi cạnh hộp gỗ chưa mở, mỉm cười mệt nhưng nhẹ nhõm. Cuối cùng hộp rung nhẹ và phát ra âm thanh nhỏ, khiến Nam quay sang kinh ngạc. Voiceover tiếng Anh khép lại nhu cầu trú ẩn nhưng mở bí ẩn cho tập sau. Retention vừa giải quyết cảm xúc vừa giữ open loop về chiếc hộp. Chuyển cảnh là final hold, không cắt đột ngột. Âm thanh gồm click đèn, hum nhẹ, mưa nhỏ, tiếng hộp gỗ tick và một mystery sting rất nhỏ.
+                          - paragraph: Giữ chân, chuyển cảnh và âm thanh/SFX vẫn nằm trong câu lệnh gốc tiếng Anh để gửi công cụ video. Bản tiếng Việt phía trên là phần để bạn duyệt nội dung.
+                          - group:
+                            - generic: Xem câu lệnh gốc tiếng Anh để sao chép
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Nội dung đăng video
+                          - generic: Chưa có nội dung đăng
+                      - generic:
+                        - button: Tạo nội dung đăng video
+                    - tablist:
+                      - tab [selected]: YouTube
+                      - tab: TikTok
+                      - tab: Facebook
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Tiêu đề video
+                          - button [disabled]
+                        - textbox
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Mô tả
+                          - button [disabled]
+                        - textbox
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Hashtag
+                          - button [disabled]
+                        - textbox
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Prompt tạo ảnh thumbnail
+                          - button [disabled]
+                        - textbox
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Giọng và phụ đề
+                          - paragraph: "Giọng hiện tại: Thoai 1 Vietnamese"
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Hồ sơ giọng cho dự án này
+                            - paragraph: Thoai 1 Vietnamese
+                            - paragraph: "Giọng đọc sẽ tạo âm thanh theo ngôn ngữ video: Tiếng Việt."
+                          - button: Đổi giọng
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 01
+                          - paragraph: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: Most people would run from this house. The roof was broken, the door was angry, and the storm sounded alive. But Nam stepped closer anyway.
+                        - generic:
+                          - button: Tạo giọng
+                          - button: Nghe thử
+                          - button: Tải âm thanh
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 02
+                          - paragraph: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: Inside, the house did not feel empty. It creaked, dripped, and groaned like it was complaining. Nam said nothing, but his eyes said everything.
+                        - generic:
+                          - button: Tạo giọng
+                          - button: Nghe thử
+                          - button: Tải âm thanh
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 03
+                          - paragraph: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: "Nam had one brilliant plan: fix the leak first. The house had another plan. One wrong step, and the floor tried to swallow his shoe."
+                        - generic:
+                          - button: Tạo giọng
+                          - button: Nghe thử
+                          - button: Tải âm thanh
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 04
+                          - paragraph: "giọng: Đã tạo xong · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: For a moment, Nam almost gave up. Then something slid out of the wall, covered in dust. This broken place had once been loved.
+                        - generic:
+                          - button: Tạo giọng
+                          - button: Nghe thử
+                          - button: Tải âm thanh
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 05
+                          - paragraph: "giọng: Cần tạo lại · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: So Nam stopped trying to fix everything. He fixed one corner. And when the floor answered with a hollow knock, the house finally gave him a secret.
+                        - generic:
+                          - button: Tạo giọng
+                          - button [disabled]: Nghe thử
+                          - button [disabled]: Tải âm thanh
+                      - generic:
+                        - generic:
+                          - paragraph: Phân đoạn 06
+                          - paragraph: "giọng: Cần tạo lại · phụ đề: Cần tạo lại phụ đề"
+                          - paragraph: By night, it was still a terrible house. But one corner was warm, dry, and his. Then the little box made a sound.
+                        - generic:
+                          - button: Tạo giọng
+                          - button [disabled]: Nghe thử
+                          - button [disabled]: Tải âm thanh
+                      - generic:
+                        - button: Tạo phụ đề .srt
+                        - button [disabled]: Tải .srt
+                - complementary:
+                  - generic:
+                    - paragraph: Thiết lập video mới
+                    - generic:
+                      - generic:
+                        - generic: Mục đích video
+                        - combobox
+                        - generic: Ảnh hưởng tới ngôn ngữ gợi ý, giọng, kiểu thoại, lời kể, phụ đề và phong cách kịch bản.
+                      - generic:
+                        - generic:
+                          - generic: Thị trường Việt Nam
+                          - generic: gợi ý Tiếng Việt
+                        - paragraph: Tối ưu cho audience Việt Nam, lời kể tự nhiên và dễ nghe.
+                        - generic:
+                          - generic: "Giọng: hồ sơ hiện tại phù hợp với lựa chọn đang hiển thị."
+                          - generic: "Thoại: thuyết minh · vừa phải"
+                          - generic: "Phụ đề: Phụ đề tiếng Việt khớp giọng đọc."
+                          - generic: "CTA: nhẹ nhàng"
+                          - generic: "Sắc thái: Đời thường, rõ ý, tránh cảm giác dịch máy."
+                      - generic:
+                        - generic: Ngôn ngữ video
+                        - combobox
+                        - generic: Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video.
+                      - generic:
+                        - generic:
+                          - generic: Mode thoại
+                          - combobox
+                        - generic:
+                          - generic: Mật độ thoại
+                          - combobox
+                        - generic:
+                          - generic: CTA
+                          - combobox
+                      - generic:
+                        - generic:
+                          - generic: Cách chạy
+                          - generic: Tự chạy sau khi tạo
+                        - generic:
+                          - button [pressed]:
+                            - generic: Dựng nhanh
+                          - button:
+                            - generic: Thủ công
+                      - generic:
+                        - generic:
+                          - generic: Mức tự động
+                          - generic: Tự chạy hết
+                        - generic:
+                          - button:
+                            - generic:
+                              - generic: Duyệt từng chặng
+                              - generic: Dừng ở kịch bản và câu lệnh
+                          - button [pressed]:
+                            - generic:
+                              - generic: Tự chạy hết
+                              - generic: Tự duyệt bước giữa
+                      - generic:
+                        - generic:
+                          - generic: Đầu ra tự chạy
+                          - generic: Giọng + phụ đề khớp thời gian
+                        - generic:
+                          - button:
+                            - generic:
+                              - generic: Tạo MP4 bằng Veo
+                              - generic: Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4
+                          - button [pressed]:
+                            - generic:
+                              - generic: Tạo giọng + phụ đề
+                              - generic: Câu lệnh, giọng và SRT theo mốc âm thanh
+                          - button:
+                            - generic:
+                              - generic: Chỉ câu lệnh video
+                              - generic: Bỏ qua giọng/SRT để tải ảnh ngay
+                      - generic:
+                        - generic:
+                          - generic: Số câu lệnh
+                          - spinbutton: "6"
+                        - generic:
+                          - generic: Giây/câu lệnh
+                          - spinbutton: "10"
+                        - generic:
+                          - generic: Cảnh nhỏ
+                          - spinbutton: "3"
+                      - generic:
+                        - generic:
+                          - generic: Tỷ lệ
+                          - combobox
+                      - generic:
+                        - generic:
+                          - generic: Phân đoạn câu lệnh
+                          - generic: 6 câu lệnh
+                        - generic: 6 câu lệnh × 10s = 60s; 6 x 3 = 18 cảnh nhỏ. Mỗi cảnh nhỏ khoảng 3.3s.
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Codex CLI đã sẵn sàng để tạo kịch bản và prompt.
+                            - paragraph: "Cấu hình sẽ dùng: gpt-5.6-sol · low"
+                            - paragraph: "Mã yêu cầu: 57ce4966-058e-4a68-81f7-56267988d426"
+                            - link:
+                              - /url: /settings/ai-planning
+                              - text: Đổi cấu hình trong Cài đặt
+                      - button [disabled]: Tạo và dựng nhanh
+                - complementary:
+                  - generic:
+                    - generic:
+                      - paragraph: Dự án
+                      - paragraph: Trợ lý Video AI
+                    - button
+                  - generic:
+                    - generic:
+                      - generic:
+                        - paragraph: Tải máy
+                        - paragraph: Cập nhật 16:38:27
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic: CPU
+                          - generic: 35%
+                        - paragraph: 16 core logic
+                      - generic:
+                        - generic:
+                          - generic: RAM
+                          - generic: 78%
+                        - paragraph: 12.0 / 15.4 GB
+                      - generic:
+                        - generic:
+                          - generic: GPU
+                          - generic: 0%
+                        - paragraph: 0.0 / 4.0 GB
+                      - generic:
+                        - generic:
+                          - generic: Nhiệt
+                          - generic: 51°C
+                        - paragraph: NVIDIA GPU temperature
+                  - generic:
+                    - generic:
+                      - paragraph: Dự án gần đây
+                    - generic:
+                      - generic: Hàng đợi giọng đọc toàn ứng dụng
+                      - generic: 0/1 đang tạo · 0 chờ
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic: I’ll Be The Matriarch In This Life - Chapter 1 - Coffee Manga
+                          - generic: 1 tập
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Tập 02 · Chapter 2 - Tia Trở Về Tuổi Thơ
+                              - generic: 5 mục · Đã có câu lệnh
+                            - button
+                        - button: Tạo tập mới
+                      - generic:
+                        - generic:
+                          - generic: Người Que
+                          - generic: 1 tập
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Tập 01 · Tập 01
+                              - generic: 6 mục · Đã có câu lệnh
+                            - button
+                        - button: Tạo tập mới
+                      - generic:
+                        - generic:
+                          - generic: Codex E2E Story Video 20260713-101559
+                          - generic: 1 tập
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Tập 01 · The Red Ticket Under Platform 9
+                              - generic: 15 mục · Đã có câu lệnh
+                            - button
+                        - button: Tạo tập mới
+                      - generic:
+                        - paragraph: Dự án lẻ
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: "FTU Smart Campus: 4 bước tạo sự kiện và gửi Admin phê duyệt"
+                              - generic: 6 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Thang máy dừng ở tầng 13
+                              - generic: Lỗi · Chờ giọng
+                              - generic: Chạy tự động đã dừng
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Cú ngã không phải nơi ở
+                              - generic: 3 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Cú ngã không phải nơi ở
+                              - generic: 3 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Một chữ “KHÔNG” đủ để lộ sự tôn trọng
+                              - generic: 0 mục · Bản nháp
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: HCE Group - 2 minute company intro video
+                              - generic: 12 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Đăng ký giữ chỗ sự kiện FTU trên 1Hub trong 5 bước
+                              - generic: 6 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: 1Hub FTU - Hướng Dẫn Đăng Ký Sự Kiện
+                              - generic: 9 mục · Đã có kịch bản
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Người Que Thám Hiểm Thế Giới Bí Ẩn
+                              - generic: 6 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: HCE Group - Video giới thiệu công ty 2 phút
+                              - generic: 12 mục · Đã có câu lệnh
+                            - button
+                        - generic:
+                          - generic:
+                            - button:
+                              - generic: Người Que Nhặt Được Chiếc Điều Khiển Thời Gian
+                              - generic: 3 mục · Đã có câu lệnh
+                            - button
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Tải nguyên liệu
+                          - paragraph: Checklist trước khi xuất ZIP
+                    - generic:
+                      - generic:
+                        - paragraph: Chưa đủ điều kiện tạo ZIP.
+                        - list:
+                          - listitem: "Thiếu prompt video đạt chất lượng: Shot 01, Shot 02, Shot 03, Shot 04, Shot 05, Shot 06"
+                          - listitem: "Thiếu giọng đọc: Shot 05, Shot 06"
+                          - listitem: Chưa có file phụ đề .srt hoàn tất.
+                      - button [disabled]: Tạo ZIP nguyên liệu
+                      - button [disabled]: Tải tất cả
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Veo3 bằng Chrome
+                          - paragraph: Đăng nhập một lần, dùng lại hồ sơ Chrome riêng
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: "Đang dùng: Stalenguyen"
+                            - paragraph: veo3_flow · chưa đọc được gợi ý tài khoản · Tài khoản đã được xác nhận.
+                            - paragraph: "Xác minh gần nhất: 09:18 12/7/26"
+                      - generic:
+                        - button: Kiểm tra phiên
+                        - button: Đổi tài khoản
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic: Nhãn kết nối
+                            - textbox [disabled]:
+                              - /placeholder: Veo3 - Gmail chính
+                              - text: Stalenguyen
+                          - generic:
+                            - button: Sửa nhãn
+                            - button [disabled]: Đã xác nhận
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Dự án Flow đang dùng
+                            - paragraph: Chưa có liên kết dự án Flow.
+                            - paragraph: "Mô hình Flow: chưa đọc được"
+                      - generic:
+                        - generic: Tạo clip tự động
+                        - paragraph: Gửi từng câu lệnh sang Veo, tải clip về đúng phân đoạn rồi nhập vào dự án.
+                        - generic:
+                          - generic:
+                            - checkbox
+                            - generic:
+                              - generic: Tạo lại clip đã có
+                              - generic: Tắt mục này để bỏ qua phân đoạn đã có clip Veo và tránh tốn hạn mức không cần thiết.
+                          - generic:
+                            - checkbox [checked]
+                            - generic:
+                              - generic: Tự dựng MP4 sau khi đủ clip
+                              - generic: Bật để hệ thống tự chuyển sang dựng MP4 khi mọi phân đoạn đã có clip, giọng đọc và phụ đề hợp lệ.
+                          - generic:
+                            - checkbox
+                            - generic:
+                              - generic: Cho phép Codex sửa lỗi kỹ thuật
+                              - generic: Chỉ áp dụng cho lỗi chọn nút/tải xuống/liên kết dữ liệu trong app. Đăng nhập, hạn mức, thanh toán và chính sách vẫn dừng để bạn xử lý.
+                          - generic:
+                            - generic: Chính sách hạn mức
+                            - combobox
+                          - generic:
+                            - generic: Giới hạn hạn mức mỗi tác vụ
+                            - textbox:
+                              - /placeholder: Để trống nếu không giới hạn
+                        - paragraph: Mặc định Flow sẽ dùng “Phê duyệt, không hỏi lại” trong tác vụ do bạn khởi chạy, nhưng vẫn dừng nếu vượt giới hạn hạn mức hoặc cần xác minh tài khoản.
+                        - generic: Thiếu câu lệnh video đã hoàn tất cho 6 phân đoạn. Hãy tạo câu lệnh video trước khi chạy Veo.
+                        - button [disabled]: Tạo clip bằng Veo
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 01
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 02
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 03
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 04
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 05
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - paragraph: Phân đoạn 06
+                                - generic: thiếu câu lệnh
+                              - paragraph: "Câu lệnh: chưa sẵn sàng · Clip: chưa có"
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Dựng nhanh MP4
+                          - paragraph: Ghép clip, giọng đọc và phụ đề theo thời lượng thật
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 01
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 8.40s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic: Cần clip video
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 02
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 8.08s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic: Cần clip video
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 03
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 7.04s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic: Cần clip video
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 04
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 8.48s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic: Cần clip video
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 05
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 8.56s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic:
+                            - generic: Cần clip video
+                            - generic: Cần giọng đọc
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                        - generic:
+                          - generic:
+                            - paragraph: Phân đoạn 06
+                            - generic: thiếu clip video
+                          - generic:
+                            - generic:
+                              - paragraph: Thời lượng
+                              - paragraph: 8.00s
+                            - generic:
+                              - paragraph: Clip video
+                              - paragraph: chưa rõ
+                          - generic:
+                            - generic: Cần clip video
+                            - generic: Cần giọng đọc
+                          - generic:
+                            - generic:
+                              - button [disabled]: Xem clip video
+                              - button [disabled]: Tải clip video
+                            - generic:
+                              - generic: Chọn clip video
+                              - button
+                            - paragraph: MP4, MOV, WEBM hoặc MKV.
+                            - button [disabled]: Xóa clip video
+                      - generic:
+                        - generic: Thiết lập dựng
+                        - generic:
+                          - generic:
+                            - generic: Độ phân giải
+                            - combobox
+                            - generic: Có thể đổi trước khi bấm Dựng MP4.
+                          - generic:
+                            - generic: Số khung/giây (FPS)
+                            - combobox
+                            - generic: Có thể đổi trước khi bấm Dựng MP4.
+                          - generic:
+                            - generic: Khung hình
+                            - combobox
+                            - generic: Có thể đổi trước khi bấm Dựng MP4.
+                          - generic:
+                            - generic: Phụ đề
+                            - combobox
+                            - generic: Có thể đổi trước khi bấm Dựng MP4.
+                        - paragraph: Nhúng phụ đề dùng file .srt đã chia mốc theo giọng đọc và dựng chữ karaoke màu vàng theo từng từ. Nếu thời gian lệch, tạo lại phụ đề sau khi giọng đọc đã hoàn tất.
+                      - generic:
+                        - generic: Hiệu ứng giữ chân
+                        - generic:
+                          - generic:
+                            - generic: Chuyển cảnh/hiệu ứng âm thanh
+                            - checkbox [checked]
+                          - generic:
+                            - generic: Trộn hiệu ứng/nhạc nền thật
+                            - checkbox [checked]
+                          - generic:
+                            - generic: Đánh giá AI
+                            - checkbox [checked]
+                        - generic:
+                          - generic:
+                            - generic: Số vòng tự sửa
+                            - combobox
+                            - generic: Có thể đổi trước khi bấm Dựng MP4.
+                          - generic:
+                            - generic: Thêm hiệu ứng/nhạc nền
+                            - button
+                        - paragraph: Chưa có hiệu ứng/nhạc nền. Gợi ý như tiếng kính vỡ sẽ được ghi dự phòng nếu chưa tải tài nguyên thật.
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Chưa đủ điều kiện dựng MP4.
+                            - list:
+                              - listitem: Thiếu video clip cho một số shot.
+                              - listitem: Thiếu giọng đọc hoàn tất cho một số shot có narration.
+                              - listitem: Chưa có phụ đề hoàn tất để burn vào video.
+                            - list:
+                              - listitem: Enhanced audio bật nhưng project chưa có asset SFX/BGM thật; report sẽ ghi fallback rõ ràng cho các cue thiếu asset.
+                      - generic:
+                        - button [disabled]:
+                          - generic: Dựng MP4
+                        - button [disabled]:
+                          - generic: Tải MP4
+                        - button [disabled]:
+                          - generic: Tải đánh giá AI
+                        - button [disabled]:
+                          - generic: Tải bảng dòng thời gian
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Gỡ lỗi cục bộ
+                          - paragraph: Dùng khi cần gửi lỗi để sửa
+                    - group:
+                      - generic: Mở thông tin kỹ thuật
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - heading [level=2]: Sổ tay series
+                          - paragraph: Tuỳ chọn cho video dài tập
+                    - generic:
+                      - combobox
+                      - textbox:
+                        - /placeholder: Tên series
+                      - generic:
+                        - combobox
+                      - textbox:
+                        - /placeholder: Nhân vật cố định
+                      - textbox:
+                        - /placeholder: Bối cảnh/world
+                      - textbox:
+                        - /placeholder: Style hình ảnh
+                      - textbox:
+                        - /placeholder: Quy tắc nhất quán
+                      - textbox:
+                        - /placeholder: Điều cần tránh
+                      - textbox:
+                        - /placeholder: Tóm tắt tập trước
+                      - generic:
+                        - button [disabled]: Lưu series
+                        - button: Series mới
+                        - button: Cập nhật tóm tắt
+                      - generic:
+                        - generic:
+                          - generic:
+                            - paragraph: Tạo tập mới
+                            - paragraph: Điền thông tin tập trong popup trước khi tạo project.
+                          - button: Tạo tập mới
+      - list
+  - dialog [ref=e1520]:
+    - generic [ref=e1521]:
+      - generic [ref=e1522]:
+        - heading "Toàn bộ prompt video" [level=2] [ref=e1523]
+        - paragraph [ref=e1524]: 6/6 prompt đã tải. Cuộn để đọc đầy đủ trước khi copy sang tool render video.
+      - button "Copy tất cả" [active] [ref=e1526]
+    - generic [ref=e1528]:
+      - article [ref=e1529]:
+        - generic [ref=e1530]:
+          - generic [ref=e1531]:
+            - paragraph [ref=e1532]: Phân đoạn 01
+            - paragraph [ref=e1533]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1534]
+        - generic [ref=e1535]: "PROMPT VIDEO 01 BẢN DUYỆT TIẾNG VIỆT: Segment 1 mở đầu bằng hook mạnh: camera dolly-in xuyên qua mưa tới căn nhà gỗ tồi tàn, cửa tự bật mở theo tiếng sấm. Sau đó Nam xuất hiện với đúng thiết kế người que xám than, hoodie navy, quần short đen, sneaker trắng, khăn vàng và vết nứt trắng bên trái đầu. Cậu sợ nhưng vẫn bước lên hiên. Voiceover và mọi nội dung người xem nghe/đọc đều bằng tiếng Anh. Retention nằm ở câu hỏi vì sao Nam tiến lại gần thay vì bỏ chạy, cùng hình ảnh cửa tự mở và khăn vàng nổi bật giữa cảnh bão. Chuyển cảnh là hard cut theo chuyển động bàn chân qua ngưỡng cửa. Âm thanh gồm mưa lớn, sấm, cửa gỗ đập, bước chân ướt và nhạc căng nhẹ, nhưng voiceover luôn rõ. GIỮ CHÂN: Retention role: immediate danger makes viewers ask why Nam enters instead of running. Open loop: the door opens by itself, suggesting the house hides something. Visual surprise: the yellow scarf whips brightly across the dark ruined house during lightning. Pattern interrupt: a scary reveal turns into Nam's nervous, almost funny hesitation. CHUYỂN CẢNH: Transition type: hard cut with motion continuity. Trigger: Nam's foot reaches the porch threshold. Timing: exactly at 10.0s. Edit reason: carry the hook directly inside without lingering. SFX: thunder tail, wet footstep, door hinge groan. Continuity risk: keep rain direction, wet hoodie, yellow scarf position, and Nam's left-head crack consistent into segment 2. ÂM THANH/SFX: Use tense, curious, slightly whimsical cinematic pulses with low strings and soft piano ticks. Start with high-impact thunder under the self-opening door, then duck storm ambience under the English voiceover. Add cloth flutter, sneaker splash, scarf snap, low wood creak, and a tiny breath-sized dip after the door slam. No claim of finished audio assets; these are mixing and SFX directions. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 1 of 6 for an English global short, voiceover-led, balanced narration. Keep the same character, same style, same outfit, and same story state throughout: Nam is the only main character, an 18-20-year-old charcoal gray stick-figure body #6A6A6A, round head 15% larger than normal, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, and a small white crack on the left side of his head. He wears a navy hoodie, black shorts, white sneakers, and a yellow scarf. High-quality cinematic 3D animation, natural storm light, realistic physics, volumetric rain and fog, smooth camera movement, no baked-in on-screen text, no logo, no watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Low-angle dolly-in through heavy rain toward a ruined old wooden house at the edge of town. The leaking roof, cracked walls, rattling fence, and crooked door are revealed. Lightning flashes; the crooked door slams open by itself on thunder. 3.33-6.67s: Nam enters the foreground from front-left, shivering slightly, holding his bright yellow scarf as it snaps in the wind. His large white eyes widen and his simple mouth becomes a trembling curved line. Rain streaks cross the lens. 6.67-10.0s: Nam swallows fear, scratches his head in confusion, leans forward, and takes one cautious step onto the porch. Push in slowly toward his face, then tilt down to his white sneaker reaching the threshold. English voiceover: \"Most people would run from this house. The roof was broken, the door was angry, and the storm sounded alive. But Nam stepped closer anyway.\" The mood is tense, curious, slightly funny, and visually clear for fast retention. End by cutting on Nam's forward movement as his foot reaches the porch threshold, carrying motion into the next interior segment. NEGATIVE PROMPT: Do not change Nam's charcoal gray body color, head shape, white eyes, left-side white crack, navy hoodie, black shorts, white sneakers, or yellow scarf. No black body, no hair, no nose, no ears, no extra main characters, no duplicate Nam, no 2D sketch, no low-poly style, no static camera, no repeated angle, no text overlay, no wrong-language subtitles, no audio-caption mismatch, no watermark, no logo, no distorted face, no broken character proportions, no flicker, no excessive unwanted camera shake, no abrupt ending."
+      - article [ref=e1536]:
+        - generic [ref=e1537]:
+          - generic [ref=e1538]:
+            - paragraph [ref=e1539]: Phân đoạn 02
+            - paragraph [ref=e1540]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1541]
+        - generic [ref=e1542]: "PROMPT VIDEO 02 BẢN DUYỆT TIẾNG VIỆT: Segment 2 nối trực tiếp từ cảnh Nam bước qua cửa. Camera handheld theo sau cậu vào căn nhà tối, cửa đóng sầm khiến cậu giật bắn rồi căn phòng lộ ra như đang mưa bên trong. Nam đặt xô hứng nước và né các dòng dột, cuối segment nhìn thấy tấm ván lỏng để mở sang ý tưởng sửa nhà. Voiceover tiếng Anh giữ nhịp vừa đủ, không tạo thoại nhân vật. Retention chuyển nỗi sợ thành hài hình thể và cho thấy căn nhà gần như không thể ở được. Chuyển cảnh là action cut khi tay Nam vươn tới tấm ván. Âm thanh gồm cửa đập, nước nhỏ, xô kêu, sneaker rít nhẹ, gỗ cót két và nhạc tò mò căng vừa. GIỮ CHÂN: Retention role: turns fear into fast physical comedy while clarifying the house is nearly unlivable. Open loop: can Nam make the broken house safe enough to stay? Visual surprise: multiple roof leaks appear at once like an indoor rainstorm. Pattern interrupt: a scary door slam instantly becomes an exaggerated silent reaction. CHUYỂN CẢNH: Transition type: action cut. Trigger: Nam turns from the leaking ceiling toward an old wooden plank. Timing: exactly at 10.0s as his hand reaches into frame. Edit reason: start the repair attempt in segment 3 without resetting space or time. SFX: water drip cluster, quick wood creak, soft whoosh. Continuity risk: maintain wet shoulders, muddy sneaker edges, interior dust, and the same room layout. ÂM THANH/SFX: Use curious tense music with light plucked strings and cautious piano pulses. Start nervous, spike on the door slam, then become playful as leaks appear. Layer muffled rain, interior drips, creaking boards, damp room tone, wind through gaps, bucket clank, sneaker squeak, and light pluck accents. Keep English narration clear above spatial water effects. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 2 of 6 for an English global short, voiceover-led, balanced narration. Continue directly from segment 1: same character, same style, same outfit, same story state. Nam is the only main character: charcoal gray stick-figure body #6A6A6A, oversized round head, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, small white crack on the left side of his head, navy hoodie now wet from rain, black shorts, white sneakers with muddy edges, and visible yellow scarf. The setting is the same old wooden house, now inside: leaking roof, cracked walls, creaking floors, crooked door, realistic dusty objects, damp natural light, volumetric dust and moisture. No baked-in on-screen text, logo, or watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Over-the-shoulder handheld push through the crooked doorway as Nam cautiously enters. One long hand reaches forward; his white sneakers test the weak wooden floor. The wet yellow scarf droops but stays visible. 3.33-6.67s: The door slams shut behind him. Snap-pan from the door to Nam's face; he jumps, grabs his head, eyes huge, mouth curved like he is trying not to scream. Keep the left-side white crack visible. 6.67-10.0s: Medium-wide tracking shot across the room with foreground drips for depth. Nam discovers water leaking everywhere, places an old bucket under one stream, then dodges two more leaks falling from the ceiling. He notices a loose wooden plank nearby as a possible repair idea. English voiceover: \"Inside, the house did not feel empty. It creaked, dripped, and groaned like it was complaining. Nam said nothing, but his eyes said everything.\" The mood is chaotic, charming, and nervous. End by cutting as Nam turns from the leaking ceiling toward the old wooden plank and reaches into frame. NEGATIVE PROMPT: Do not reset Nam's wet state from segment 1. Do not change character color, face, proportions, outfit, footwear, or yellow scarf. No sandals, no hair, no nose, no ears, no extra people, no duplicate Nam, no readable text on objects, no text overlay, no wrong-language subtitles, no audio-caption mismatch, no watermark, no logo, no horror gore, no distorted eyes, no flicker, no overdone camera shake, no static camera."
+      - article [ref=e1543]:
+        - generic [ref=e1544]:
+          - generic [ref=e1545]:
+            - paragraph [ref=e1546]: Phân đoạn 03
+            - paragraph [ref=e1547]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1548]
+        - generic [ref=e1549]: "PROMPT VIDEO 03 BẢN DUYỆT TIẾNG VIỆT: Segment 3 là nỗ lực sửa nhà đầu tiên. Nam kéo tấm ván, tưởng đã có kế hoạch vá mái, rồi trèo lên ghế ọp ẹp để với lên trần. Bất ngờ sàn gãy, một chân cậu tụt xuống và cậu phải vùng vẫy kéo sneaker trắng ra. Hố sàn gãy phải được giữ lại cho continuity về sau. Voiceover tiếng Anh kể nhịp hài căng thẳng. Retention đến từ cú đảo chiều: ý tưởng sửa nhà biến thành tai nạn hài nhưng vẫn nguy hiểm. Chuyển cảnh match cut từ cú ngã sang khoảnh khắc Nam ngồi mệt. Âm thanh gồm ván cạ sàn, ghế rung, gỗ gãy, sneaker rít và khoảng lặng ngắn sau tiếng nứt. GIỮ CHÂN: Retention role: rewards viewers with a clear mishap after Nam's first plan. Open loop: the house is worse than expected, so viewers wonder whether Nam will quit. Visual surprise: Nam hangs awkwardly with one leg trapped above a dark floor gap. Pattern interrupt: confident repair pose becomes sudden floor collapse. CHUYỂN CẢNH: Transition type: match cut from fall to seated exhaustion. Trigger: Nam pulls his shoe free and drops backward. Timing: exactly at 10.0s on the backward drop. Edit reason: transform physical chaos into a quieter emotional beat without changing location. SFX: wood crack, soft whoosh, dusty thump, rain softens. Continuity risk: keep the new broken floor hole visible later; dust on Nam must persist. ÂM THANH/SFX: Use playful tension with plucked strings, low pizzicato, and restrained percussion ticks. Build through the repair attempt, create a sharp half-second pause at the wood crack, then add comedic release as he frees the shoe. Foley includes plank scrape, chair wobble, wood snap, dust fall, rubber sneaker squeak, and a soft landing thump. Keep impacts realistic and English narration intelligible. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 3 of 6 for an English global short, voiceover-led, balanced narration. Continue directly from segment 2: same character, same high-quality cinematic 3D style, same outfit, same wet and dusty story state. Nam remains the only main character: charcoal gray #6A6A6A stick-figure body, round head 15% larger than normal, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, small white crack on the left side of his head, navy hoodie with rain and dust on the sleeves, black shorts, white sneakers, yellow scarf. The same old wooden interior has leaking roof, cracked walls, creaking floor, dust, and realistic objects. No baked-in on-screen text, no logo, no watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Low tracking shot follows a heavy old plank scraping across the floor. Tilt up as Nam drags it, lifts it proudly, and his eyes brighten with a nervous idea. 3.33-6.67s: Nam climbs onto an old unstable chair. His yellow scarf catches lightly, then slips free. He stretches his long arm toward the ceiling leak with the plank, balancing carefully. Slow orbit around Nam and the chair, keeping his full-body silhouette visible in vertical 9:16. 6.67-10.0s: The floor below cracks sharply. One of Nam's legs drops through a broken floorboard. Camera dips suddenly with the collapse, then pushes close to his shocked white eyes as he flails, pulls his white sneaker free, and lands safely but shaken. Leave the broken floor hole visible for later continuity. English voiceover: \"Nam had one brilliant plan: fix the leak first. The house had another plan. One wrong step, and the floor tried to swallow his shoe.\" The mood is suspenseful physical comedy with real danger but no cruelty. End by match-cutting from Nam's backward drop into the next segment's seated exhaustion. NEGATIVE PROMPT: Do not change Nam's identity, body color, white eyes, crack placement, clothing, or white sneakers. No sandals, no extra characters, no duplicate Nam, no injury gore, no broken limbs, no magical repair, no clean reset of dust or wet clothing, no 2D sketch, no low-poly render, no text overlay, no wrong-language subtitles, no watermark, no logo, no distorted proportions, no flicker, no uncontrolled camera shake."
+      - article [ref=e1550]:
+        - generic [ref=e1551]:
+          - generic [ref=e1552]:
+            - paragraph [ref=e1553]: Phân đoạn 04
+            - paragraph [ref=e1554]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1555]
+        - generic [ref=e1556]: "PROMPT VIDEO 04 BẢN DUYỆT TIẾNG VIỆT: Segment 4 giảm nhịp để tạo cảm xúc. Nam ngồi bên tường nứt, ôm đầu gối như sắp bỏ cuộc. Khi khuỷu tay chạm mảng gỗ mục, một bức ảnh cũ trượt ra trong tia sáng ấm. Cậu phủi bụi, nhìn ảnh và hiểu căn nhà từng có sự ấm áp. Không có chữ đọc được trên ảnh. Voiceover tiếng Anh tạo lý do cảm xúc để Nam tiếp tục. Retention đổi căn nhà từ trò đùa nguy hiểm thành nơi có quá khứ, mở vòng lặp về bí mật bên trong. Chuyển cảnh là gaze cut theo ánh mắt quyết tâm của Nam. Âm thanh hạ thấp mưa, thêm piano nhẹ, tiếng bụi trượt và giấy cọ nhỏ. GIỮ CHÂN: Retention role: gives emotional meaning to the house so the viewer cares about the repair. Open loop: the old photo suggests hidden history inside the house. Visual surprise: a warm sunbeam lands on the photo inside the cold wet room. Pattern interrupt: the pacing slows after chaos, creating contrast and attention. CHUYỂN CẢNH: Transition type: motivated gaze cut. Trigger: Nam lifts his eyes from the photo toward the room. Timing: exactly at 10.0s on his resolved look. Edit reason: use the discovery to push directly into cleanup and repair. SFX: soft dust slide, faint piano shimmer, rain tucked low. Continuity risk: photo must remain non-readable; avoid adding labels or text. ÂM THANH/SFX: Use quiet emotional piano with softened strings and a small warm shimmer. Let energy dip after chaos, hold still for discovery, then gently rise with hope. Ambience: softer rain, slow drips, room tone, faint wood settling, dust movement. Foley: dusty photo slide, small paper scrape, gentle dust wipe. Reduce rain volume during the close-up so English narration breathes. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 4 of 6 for an English global short, voiceover-led, balanced narration. Continue from segment 3 with same character, same style, same outfit, same damaged room, and same story state. Nam is still the only main character: charcoal gray stick-figure body #6A6A6A, oversized round head, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, small white crack on the left side of his head, navy hoodie damp and dusty, black shorts, white sneakers now dirty at the soles, and yellow scarf lying softly on his chest. Same old wooden house interior: cracked wall, leaking roof, creaking floor, broken floor hole from the previous segment, dust and damp natural light. No baked-in on-screen text, no logo, no watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Eye-level medium shot slowly lowers with Nam as he drops into a seated position beside a cracked wall. He hugs his knees, white sneakers close together, eyes tired, mouth curved downward, almost defeated. 3.33-6.67s: Nam's elbow touches a rotten wooden patch. A small dusty old photograph slides out from a wall gap into a rare warm beam of light. Close lateral camera slide follows the photo across the floor. The photo has no readable text; it only shows a warmer memory of the same house. 6.67-10.0s: Nam picks up the photo, wipes dust from it, and studies it. In a close-up, the photo's warm image reflects softly in his large white eyes. His expression changes from defeat to quiet empathy, then he looks up toward the messy room with new purpose. English voiceover: \"For a moment, Nam almost gave up. Then something slid out of the wall, covered in dust. This broken place had once been loved.\" The mood slows into a human emotional turn. End with a motivated gaze cut as Nam lifts his eyes from the photo toward the room, ready to act. NEGATIVE PROMPT: Do not add readable text to the photograph. Do not change Nam's design, color, face, clothing, white sneakers, yellow scarf, or left-side crack. No extra characters, no family figures becoming separate active characters, no duplicate Nam, no reset of broken floor hole, no clean perfect room, no text overlay, no wrong-language subtitles, no logo, no watermark, no distorted eyes, no flicker, no static lifeless shot."
+      - article [ref=e1557]:
+        - generic [ref=e1558]:
+          - generic [ref=e1559]:
+            - paragraph [ref=e1560]: Phân đoạn 05
+            - paragraph [ref=e1561]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1562]
+        - generic [ref=e1563]: "PROMPT VIDEO 05 BẢN DUYỆT TIẾNG VIỆT: Segment 5 cho thấy Nam đổi chiến lược: không sửa cả căn nhà mà dọn một góc trước. Cậu quét bụi, dựng bàn, đặt xô dưới chỗ dột, chỉnh khăn vàng và tự giơ ngón cái. Sau đó cậu gõ sàn, nghe âm rỗng, cạy tấm ván và phát hiện hộp gỗ nhỏ vẫn đóng kín. Voiceover tiếng Anh nhấn vào bài học nhỏ: sửa một góc trước. Retention vừa thưởng cho tiến bộ của Nam vừa mở bí ẩn mới: trong hộp có gì. Chuyển cảnh object match cut khi hộp được nhấc lên. Âm thanh dùng nhịp broom, xô, bàn, tiếng gõ rỗng và cue bí ẩn nhỏ, không làm lấn voiceover. GIỮ CHÂN: Retention role: progress rewards the viewer, then opens a fresh question right before the ending. Open loop: what is inside the hidden wooden box? Visual surprise: a small wooden box appears beneath a floorboard in the house Nam almost abandoned. Pattern interrupt: cleanup rhythm shifts into a mystery knock. CHUYỂN CẢNH: Transition type: object match cut. Trigger: Nam's hands lift the closed wooden box from under the floor. Timing: exactly at 10.0s while the box rises through frame. Edit reason: make the box the bridge into the final warm corner. SFX: hollow knock, plank creak, low mystery resonance. Continuity risk: box must remain closed; do not reveal contents before segment 6. ÂM THANH/SFX: Use hopeful rhythmic music with light percussion, piano pulses, and a low mystery pad. Foley turns small repairs into satisfying progress: broom sweeps, bucket clank, table scrape, timed with music ticks. Give the hollow knock a clean centered low resonance, followed by a tiny silence drop before prying up the plank. Add soft wooden creak and muted shimmer for the box reveal. English voiceover remains front and clear. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 5 of 6 for an English global short, voiceover-led, balanced narration. Continue from segment 4: same character, same cinematic 3D style, same outfit, same house, same room damage, same emotional motivation. Nam is the only main character: charcoal gray #6A6A6A stick-figure body, oversized round head, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, small white crack on the left side of his head, dusty damp navy hoodie, black shorts, dirty white sneakers, and yellow scarf. The same old wooden interior remains cracked, wet, dark, and dusty except for one corner Nam begins to clean. No baked-in on-screen text, no logo, no watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Quick tracking shot moves with an old broom sweeping dust away from one corner of the room. Nam stands with focused eyes and a small determined curved smile. He is no longer trying to fix the entire house at once. 3.33-6.67s: Medium-wide side track as Nam rights a small old table, places a bucket under the main roof leak, straightens his yellow scarf, and gives himself a small thumbs-up. The rest of the house stays cracked, wet, and dark. 6.67-10.0s: Low floor-level close-up. Nam kneels and knocks on the floor near the earlier damaged boards. A hollow sound makes his eyes widen. He pries up a loose plank and reveals a small closed wooden box hidden underneath. Dolly into the shadow under the plank, then reveal Nam's surprised eyes. The box remains closed. English voiceover: \"So Nam stopped trying to fix everything. He fixed one corner. And when the floor answered with a hollow knock, the house finally gave him a secret.\" The mood becomes active, hopeful, and curious. End with an object match cut as Nam lifts the closed wooden box toward the warm lamp area for the final segment. NEGATIVE PROMPT: Do not open the wooden box in this segment. Do not reveal contents. Do not change Nam's design, body color, face, left-side crack, outfit, white sneakers, or yellow scarf. No extra people, no duplicate Nam, no magic cleanup of the whole house, no readable text, no text overlay, no wrong-language subtitles, no audio-caption mismatch, no watermark, no logo, no distorted hands or eyes, no flicker, no static camera."
+      - article [ref=e1564]:
+        - generic [ref=e1565]:
+          - generic [ref=e1566]:
+            - paragraph [ref=e1567]: Phân đoạn 06
+            - paragraph [ref=e1568]: "Trạng thái câu lệnh: Cần tạo lại"
+          - button "Copy prompt" [ref=e1569]
+        - generic [ref=e1570]: "PROMPT VIDEO 06 BẢN DUYỆT TIẾNG VIỆT: Segment 6 là payoff và cliffhanger mềm. Nam bật chiếc đèn cũ, ánh sáng vàng lan qua góc phòng đã được dọn, tạo cảm giác an toàn đầu tiên trong căn nhà tồi tàn. Cậu ngồi cạnh hộp gỗ chưa mở, mỉm cười mệt nhưng nhẹ nhõm. Cuối cùng hộp rung nhẹ và phát ra âm thanh nhỏ, khiến Nam quay sang kinh ngạc. Voiceover tiếng Anh khép lại nhu cầu trú ẩn nhưng mở bí ẩn cho tập sau. Retention vừa giải quyết cảm xúc vừa giữ open loop về chiếc hộp. Chuyển cảnh là final hold, không cắt đột ngột. Âm thanh gồm click đèn, hum nhẹ, mưa nhỏ, tiếng hộp gỗ tick và một mystery sting rất nhỏ. GIỮ CHÂN: Retention role: resolves Nam's immediate need for shelter while preserving curiosity through the box sound. Open loop: the unopened box may contain the house's hidden secret for the next episode. Visual surprise: the first warm lamp glow appears inside the ruined house just before the box moves by itself. Pattern interrupt: calm relief shifts into a tiny mystery beat. CHUYỂN CẢNH: Transition type: final hold. Trigger: the box trembles and Nam turns toward it. Timing: hold the last 1-2 seconds after the final narration beat. Edit reason: let viewers register both emotional completion and the next mystery. SFX: lamp click, soft music resolve, tiny wood tick, subtle low mystery tone. Continuity risk: low, but keep the same character, same room, same closed box, and no sudden reveal. ÂM THANH/SFX: Use warm quiet piano and pad with a very small mystery sting near the end. Energy softly rises as the lamp turns on, settles under Nam's tired smile, then lifts into suspense after a short quiet moment around 7.0-7.5s. Ambience: lighter rain, bucket drips, lamp hum, dust room tone, distant wood settling. Final box sound should be audible but not exaggerated. English voiceover remains clear through the final line. BẢN GỬI AI VIDEO: Create a 10-second 9:16 video. This is segment 6 of 6 for an English global short, voiceover-led, balanced narration. Continue from segment 5 and end inside the same house: same character, same style, same outfit, same room, same story state. Nam is the only main character: charcoal gray #6A6A6A stick-figure body, round head 15% larger than normal, large expressive white eyes, no hair, no nose, no ears, simple curved mouth, small white crack on the left side of his head, navy hoodie damp and dusty, black shorts, dirty white sneakers, and yellow scarf catching warm light. The room is still ruined, but one corner is cleaner and safer, with a bucket under the leak, a small table, an old lamp, and the closed wooden box nearby. No baked-in on-screen text, no logo, no watermark. If subtitles are generated separately, they must be English and exactly match the English voiceover. Timeline with exactly 3 continuous micro-scenes: 0.0-3.33s: Close-up on an old lamp switch. Nam turns it on. Warm yellow light spreads across the cleaned corner, catching his yellow scarf and softening the damp wooden walls. Slowly pull back to reveal Nam, the bucket, table, and closed wooden box. 3.33-6.67s: Warm low-angle medium shot. Nam sits beside the unopened wooden box, leans against the wall, exhales, and gives a tired but relieved small smile. His large white eyes soften. 6.67-10.0s: The room becomes quieter. The closed wooden box trembles once and makes a tiny sound. Nam snaps his gaze toward it; his eyes open wide in surprise. Slow push from Nam's face to the box, then hold both Nam and the closed box in frame for the ending. English voiceover: \"By night, it was still a terrible house. But one corner was warm, dry, and his. Then the little box made a sound.\" End with a soft final hold and a gentle curiosity beat, not an abrupt cutoff. Optional soft English CTA in metadata only, not baked into the image: \"Next time, the box opens.\" NEGATIVE PROMPT: Do not open the wooden box. Do not reveal contents. Do not introduce extra characters. Do not change Nam's body color, head shape, eyes, crack, outfit, white sneakers, or yellow scarf. No sandals, no clean reset of the whole room, no full repair, no readable on-screen text, no baked-in captions, no wrong-language subtitles, no audio-caption mismatch, no watermark, no logo, no distorted face, no flicker, no harsh jump scare, no abrupt ending."
+    - button "Close" [ref=e1571]

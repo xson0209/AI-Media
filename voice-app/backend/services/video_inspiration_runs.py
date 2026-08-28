@@ -253,6 +253,8 @@ def schedule_rewrite(
 
 
 async def _run_analyze(handle: _RunHandle, payload: dict) -> None:
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(_heartbeat_job(handle.job_id, heartbeat_stop))
     try:
         async with video_workflow_pool.workflow_slot(
             work_key=f"video-inspiration:{handle.job_id}",
@@ -290,7 +292,29 @@ async def _run_analyze(handle: _RunHandle, payload: dict) -> None:
         logger.exception("Video Inspiration analysis background task failed", extra={"job_id": handle.job_id})
         _mark_failed_by_id(handle.job_id, exc)
     finally:
+        heartbeat_stop.set()
+        await heartbeat_task
         _release_handle(handle)
+
+async def _heartbeat_job(job_id: str, stop: asyncio.Event) -> None:
+    """Refresh updated_at while long media/AI work is still alive.
+
+    The heartbeat contains no prompt or transcript data; it only prevents the
+    UI's stale detector from classifying a live background task as interrupted.
+    """
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            db_iter = get_db()
+            db = next(db_iter)
+            try:
+                row = _row(job_id, db)
+                if row is not None and row.status in video_inspiration.ACTIVE_JOB_STATUSES:
+                    row.updated_at = video_inspiration._now()
+                    db.commit()
+            finally:
+                db_iter.close()
 
 
 def _run_rewrite_sync(handle: _RunHandle, payload: dict) -> None:
@@ -313,6 +337,8 @@ def _run_rewrite_sync(handle: _RunHandle, payload: dict) -> None:
 
 
 async def _run_rewrite(handle: _RunHandle, payload: dict) -> None:
+    heartbeat_stop = asyncio.Event()
+    heartbeat_task = asyncio.create_task(_heartbeat_job(handle.job_id, heartbeat_stop))
     try:
         async with video_workflow_pool.workflow_slot(
             work_key=f"video-inspiration:{handle.job_id}",
@@ -328,6 +354,8 @@ async def _run_rewrite(handle: _RunHandle, payload: dict) -> None:
         logger.exception("Video Inspiration rewrite background task failed", extra={"job_id": handle.job_id})
         _mark_failed_by_id(handle.job_id, exc)
     finally:
+        heartbeat_stop.set()
+        await heartbeat_task
         _release_handle(handle)
 
 

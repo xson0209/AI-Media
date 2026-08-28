@@ -1,7 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { useParams } from '@tanstack/react-router';
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   CheckCircle2,
   CircleStop,
   FileText,
@@ -21,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SeriesPickerDialog } from '@/components/SeriesDialogs/SeriesDialogs';
 import { apiClient } from '@/lib/api/client';
 import { LANGUAGE_OPTIONS } from '@/lib/constants/languages';
 import type {
@@ -55,6 +64,10 @@ const imageAspectSizes: Record<StoryImageAspectRatio, { width: number; height: n
 };
 const storyImageAspectOptions = Object.keys(imageAspectSizes) as StoryImageAspectRatio[];
 const storyVideoAspectOptions: StoryVideoAspectRatio[] = ['9:16', '16:9', '1:1'];
+const DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT = 6;
+const DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS = 10;
+const DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT = 4;
+const COMIC_JOBS_PAGE_SIZE = 50;
 const storyMarketOptions = [
   {
     value: 'viet_nam',
@@ -96,10 +109,10 @@ function defaultHandoffOutputSettings(): StoryEpisodeOutputSettings {
       narration_density: 'dense',
       call_to_action_style: 'direct',
       target_duration_seconds: null,
-      default_shot_duration_seconds: 5,
-      prompt_segment_count: null,
-      prompt_segment_duration_seconds: null,
-      micro_scenes_per_prompt: 3,
+      default_shot_duration_seconds: null,
+      prompt_segment_count: DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT,
+      prompt_segment_duration_seconds: DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS,
+      micro_scenes_per_prompt: DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT,
     },
   };
 }
@@ -162,7 +175,7 @@ function formatSeconds(value: number): string {
 function videoDurationSummary(video: StoryEpisodeOutputSettings['video']): string {
   const promptCount = video.prompt_segment_count ?? null;
   const promptDuration = video.prompt_segment_duration_seconds ?? null;
-  const microScenes = video.micro_scenes_per_prompt || 3;
+  const microScenes = video.micro_scenes_per_prompt || DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT;
   if (promptCount && promptDuration) {
     const totalSeconds = promptCount * promptDuration;
     const secondsPerMicroScene = promptDuration / Math.max(1, microScenes);
@@ -469,6 +482,9 @@ function mutationError(...values: Array<unknown>): string | null {
 function jobErrorMessage(job: ComicJobSummary | ComicJobDetail): string | null {
   if (!job.error_code) return null;
   if (job.run_status === 'interrupted') {
+    if (job.source_type === 'url') {
+      return 'Lần tải nguồn trước bị gián đoạn. Bấm “Thử lại tải nguồn” để tiếp tục.';
+    }
     return 'Lần phân tích trước bị gián đoạn. Bấm “Phân tích truyện” để chạy lại.';
   }
   return job.error_message || ERROR_MESSAGES[job.error_code] || 'Không thể hoàn tất tác vụ này.';
@@ -486,13 +502,17 @@ function formatUnknown(value: unknown): string {
 
 export function ComicSeriesAnalysis() {
   const queryClient = useQueryClient();
+  const { analysisId: routeAnalysisId } = useParams({ strict: false });
   const [url, setUrl] = useState('');
   const [readingMode, setReadingMode] = useState('auto');
   const [rightsAttested, setRightsAttested] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(
+    () => routeAnalysisId ?? null,
+  );
   const [handoffTargetKind, setHandoffTargetKind] =
     useState<ComicHandoffTargetKind>('new_series');
   const [handoffTargetSeriesId, setHandoffTargetSeriesId] = useState('');
+  const [handoffSeriesPickerOpen, setHandoffSeriesPickerOpen] = useState(false);
   const [handoffSeriesMode, setHandoffSeriesMode] =
     useState<ComicHandoffSeriesMode>('image_story_only');
   const [handoffSeriesTitle, setHandoffSeriesTitle] = useState('');
@@ -507,16 +527,26 @@ export function ComicSeriesAnalysis() {
     () => defaultHandoffOutputSettings(),
   );
 
-  const jobsQuery = useQuery({
+  const jobsQuery = useInfiniteQuery({
     queryKey: ['comic-jobs'],
-    queryFn: () => apiClient.listComicJobs(50, 0),
+    queryFn: ({ pageParam }) => apiClient.listComicJobs(COMIC_JOBS_PAGE_SIZE, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => {
+      const loadedCount = pages.reduce((total, page) => total + page.jobs.length, 0);
+      return lastPage.jobs.length > 0 && loadedCount < lastPage.total ? loadedCount : undefined;
+    },
     refetchInterval: (query) => {
-      const jobs = query.state.data?.jobs ?? [];
+      const jobs = query.state.data?.pages.flatMap((page) => page.jobs) ?? [];
       return jobs.some((job) => job.run_status === 'queued' || job.run_status === 'running')
         ? 2500
         : false;
     },
   });
+  const jobs = useMemo(
+    () => jobsQuery.data?.pages.flatMap((page) => page.jobs) ?? [],
+    [jobsQuery.data?.pages],
+  );
+  const jobsTotal = jobsQuery.data?.pages[0]?.total ?? 0;
   const capabilitiesQuery = useQuery({
     queryKey: ['comic-capabilities'],
     queryFn: () => apiClient.getComicCapabilities(),
@@ -531,8 +561,8 @@ export function ComicSeriesAnalysis() {
     },
   });
   const selectedSummary = useMemo(
-    () => jobsQuery.data?.jobs.find((job) => job.id === selectedJobId) ?? null,
-    [jobsQuery.data?.jobs, selectedJobId],
+    () => jobs.find((job) => job.id === selectedJobId) ?? null,
+    [jobs, selectedJobId],
   );
   const currentJob = jobQuery.data ?? selectedSummary;
   const canLoadAnalysisPackage = Boolean(
@@ -586,10 +616,17 @@ export function ComicSeriesAnalysis() {
   const handoffDefaultSeriesTitle = currentJob?.title || handoffDefaultEpisodeTitle;
 
   useEffect(() => {
-    if (!selectedJobId && jobsQuery.data?.jobs[0]?.id) {
-      setSelectedJobId(jobsQuery.data.jobs[0].id);
+    if (routeAnalysisId) {
+      setSelectedJobId(routeAnalysisId);
     }
-  }, [jobsQuery.data?.jobs, selectedJobId]);
+  }, [routeAnalysisId]);
+
+  useEffect(() => {
+    if (routeAnalysisId) return;
+    if (!selectedJobId && jobs[0]?.id) {
+      setSelectedJobId(jobs[0].id);
+    }
+  }, [jobs, routeAnalysisId, selectedJobId]);
 
   useEffect(() => {
     if (!handoffTargetSeriesId) return;
@@ -619,21 +656,26 @@ export function ComicSeriesAnalysis() {
           }
         : current,
     );
-    queryClient.setQueryData<ComicJobListResponse | undefined>(['comic-jobs'], (current) =>
-      current
-        ? {
-            ...current,
-            jobs: current.jobs.map((job) =>
-              job.id === jobId
-                ? {
-                    ...job,
-                    ...patch,
-                    updated_at: new Date().toISOString(),
-                  }
-                : job,
-            ),
-          }
-        : current,
+    queryClient.setQueryData<InfiniteData<ComicJobListResponse> | undefined>(
+      ['comic-jobs'],
+      (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                jobs: page.jobs.map((job) =>
+                  job.id === jobId
+                    ? {
+                        ...job,
+                        ...patch,
+                        updated_at: new Date().toISOString(),
+                      }
+                    : job,
+                ),
+              })),
+            }
+          : current,
     );
   };
 
@@ -663,6 +705,20 @@ export function ComicSeriesAnalysis() {
   });
   const fetchMutation = useMutation({
     mutationFn: (jobId: string) => apiClient.runComicJob(jobId),
+    onMutate: (jobId) => {
+      patchComicJobInCache(jobId, {
+        run_status: 'queued',
+        current_step: 'validate_source',
+        progress: 0,
+      });
+    },
+    onSuccess: (job) => invalidateJob(job.id),
+    onSettled: (_value, _error, jobId) => {
+      if (jobId) void invalidateJob(jobId);
+    },
+  });
+  const retryMutation = useMutation({
+    mutationFn: (jobId: string) => apiClient.retryComicJob(jobId),
     onMutate: (jobId) => {
       patchComicJobInCache(jobId, {
         run_status: 'queued',
@@ -820,7 +876,7 @@ export function ComicSeriesAnalysis() {
             ...outputSettings.video,
             call_to_action_style: outputSettings.video.call_to_action_style || null,
             target_duration_seconds: outputSettings.video.target_duration_seconds || null,
-            default_shot_duration_seconds: outputSettings.video.default_shot_duration_seconds || 5,
+            default_shot_duration_seconds: outputSettings.video.default_shot_duration_seconds ?? null,
             prompt_segment_count: hasPromptSegmentSettings
               ? outputSettings.video.prompt_segment_count
               : null,
@@ -828,7 +884,8 @@ export function ComicSeriesAnalysis() {
               ? outputSettings.video.prompt_segment_duration_seconds
               : null,
             micro_scenes_per_prompt: hasPromptSegmentSettings
-              ? outputSettings.video.micro_scenes_per_prompt || 3
+              ? outputSettings.video.micro_scenes_per_prompt ||
+                DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT
               : null,
           },
         },
@@ -845,10 +902,16 @@ export function ComicSeriesAnalysis() {
   const isActive = isComicJobActive(currentJob);
   const anyBusy =
     fetchMutation.isPending ||
+    retryMutation.isPending ||
     analyzeMutation.isPending ||
     rewriteMutation.isPending ||
     handoffMutation.isPending ||
     cancelMutation.isPending;
+  const canRetry = Boolean(
+    currentJob &&
+      currentJob.source_type === 'url' &&
+      ['failed', 'interrupted', 'cancelled'].includes(currentJob.run_status),
+  );
   const canAnalyze = Boolean(
     currentJob &&
       !isActive &&
@@ -874,10 +937,12 @@ export function ComicSeriesAnalysis() {
       createUrlMutation.error,
       uploadMutation.error,
       fetchMutation.error,
+      retryMutation.error,
       analyzeMutation.error,
       rewriteMutation.error,
       handoffMutation.error,
       cancelMutation.error,
+      deleteMutation.error,
       jobQuery.error,
       packageQuery.error,
     );
@@ -909,7 +974,12 @@ export function ComicSeriesAnalysis() {
           <ComicStatusCard
             job={currentJob}
             optimizedReady={Boolean(analysisPackage?.optimized_script)}
-            busy={isActive || rewriteMutation.isPending || handoffMutation.isPending}
+            busy={
+              isActive ||
+              retryMutation.isPending ||
+              rewriteMutation.isPending ||
+              handoffMutation.isPending
+            }
           />
         </header>
 
@@ -948,10 +1018,14 @@ export function ComicSeriesAnalysis() {
                 ) : null}
               </div>
               <JobList
-                jobs={jobsQuery.data?.jobs ?? []}
+                jobs={jobs}
+                total={jobsTotal}
                 loading={jobsQuery.isLoading}
+                loadingMore={jobsQuery.isFetchingNextPage}
+                hasMore={Boolean(jobsQuery.hasNextPage)}
                 selectedJobId={selectedJobId}
                 onSelect={setSelectedJobId}
+                onLoadMore={() => void jobsQuery.fetchNextPage()}
               />
             </section>
             <CapabilityPanel caps={caps} />
@@ -1013,6 +1087,22 @@ export function ComicSeriesAnalysis() {
                             <CircleStop className="h-4 w-4" />
                           )}
                           Hủy tác vụ
+                        </Button>
+                      ) : null}
+                      {canRetry ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-11 rounded-full px-5"
+                          disabled={anyBusy}
+                          onClick={() => retryMutation.mutate(currentJob.id)}
+                        >
+                          {retryMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          Thử lại tải nguồn
                         </Button>
                       ) : null}
                       <Button
@@ -1137,6 +1227,7 @@ export function ComicSeriesAnalysis() {
                     selectedSeries={selectedHandoffSeries}
                     loadingSeries={seriesQuery.isFetching}
                     seriesError={mutationError(seriesQuery.error)}
+                    onOpenSeriesPicker={() => setHandoffSeriesPickerOpen(true)}
                     disabled={anyBusy || isActive}
                   />
                 ) : null}
@@ -1153,7 +1244,7 @@ export function ComicSeriesAnalysis() {
                     type="button"
                     variant="ghost"
                     className="text-destructive"
-                    disabled={deleteMutation.isPending}
+                    disabled={anyBusy || isActive || deleteMutation.isPending}
                     onClick={() => {
                       if (window.confirm('Xóa lần phân tích truyện này?')) {
                         deleteMutation.mutate(currentJob.id);
@@ -1167,6 +1258,21 @@ export function ComicSeriesAnalysis() {
             )}
           </main>
         </div>
+        <SeriesPickerDialog
+          open={handoffSeriesPickerOpen}
+          onOpenChange={setHandoffSeriesPickerOpen}
+          context="comic_handoff"
+          series={seriesQuery.data ?? []}
+          selectedSeriesId={handoffTargetSeriesId}
+          loading={seriesQuery.isLoading || seriesQuery.isFetching}
+          error={mutationError(seriesQuery.error)}
+          disabled={anyBusy || isActive}
+          onSelect={(series) => {
+            setHandoffTargetKind('existing_series');
+            setHandoffTargetSeriesId(series.id);
+            setHandoffSeriesPickerOpen(false);
+          }}
+        />
       </div>
     </div>
   );
@@ -1482,6 +1588,7 @@ function HandoffTargetPanel(props: {
   selectedSeries: VideoSeriesResponse | null;
   loadingSeries: boolean;
   seriesError: string | null;
+  onOpenSeriesPicker: () => void;
   disabled: boolean;
 }) {
   const newSeriesSelected = props.targetKind === 'new_series';
@@ -1511,11 +1618,11 @@ function HandoffTargetPanel(props: {
       </div>
 
       <div className="mt-5 grid min-w-0 items-start gap-4 2xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="grid min-w-0 items-start gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Chọn đích Story Studio">
+        <fieldset className="grid min-w-0 items-start gap-3 border-0 p-0 sm:grid-cols-2">
+          <legend className="sr-only">Chọn đích Story Studio</legend>
           <button
             type="button"
-            role="radio"
-            aria-checked={newSeriesSelected}
+            aria-pressed={newSeriesSelected}
             disabled={props.disabled}
             onClick={() => props.setTargetKind('new_series')}
             className={cn(
@@ -1540,8 +1647,7 @@ function HandoffTargetPanel(props: {
           </button>
           <button
             type="button"
-            role="radio"
-            aria-checked={existingSeriesSelected}
+            aria-pressed={existingSeriesSelected}
             disabled={props.disabled}
             onClick={() => props.setTargetKind('existing_series')}
             className={cn(
@@ -1564,14 +1670,15 @@ function HandoffTargetPanel(props: {
               Nối vào continuity cũ
             </span>
           </button>
-        </div>
+        </fieldset>
 
         <div className="space-y-4 rounded-xl border border-border/70 bg-background/60 p-4">
           {newSeriesSelected ? (
             <div className="space-y-3">
-              <label className="grid gap-1.5 text-sm">
+              <label htmlFor="comic-handoff-series-title" className="grid gap-1.5 text-sm">
                 <span className="font-medium">Tên series mới</span>
                 <Input
+                  id="comic-handoff-series-title"
                   value={props.seriesTitle}
                   disabled={props.disabled}
                   onChange={(event) => props.setSeriesTitle(event.target.value)}
@@ -1589,7 +1696,8 @@ function HandoffTargetPanel(props: {
                   Mặc định là truyện ảnh. Chọn hybrid nếu sau này series này cũng cần dùng cho video.
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Loại series mới">
+              <fieldset className="grid gap-2 border-0 p-0 sm:grid-cols-2">
+                <legend className="sr-only">Loại series mới</legend>
                 {(
                   [
                     ['image_story_only', 'Series truyện ảnh', 'Tối ưu cho Story Studio và tạo truyện ảnh.'],
@@ -1601,8 +1709,7 @@ function HandoffTargetPanel(props: {
                     <button
                       key={mode}
                       type="button"
-                      role="radio"
-                      aria-checked={selected}
+                      aria-pressed={selected}
                       disabled={props.disabled}
                       onClick={() => props.setSeriesMode(mode)}
                       className={cn(
@@ -1620,7 +1727,7 @@ function HandoffTargetPanel(props: {
                     </button>
                   );
                 })}
-              </div>
+              </fieldset>
             </div>
           ) : (
             <div className="space-y-3 text-sm">
@@ -1647,46 +1754,45 @@ function HandoffTargetPanel(props: {
                   phù hợp trước.
                 </p>
               ) : (
-                <div className="max-h-56 space-y-2 overflow-y-auto pr-1" role="radiogroup" aria-label="Chọn series hiện có">
-                  {props.seriesOptions.map((series) => {
-                    const selected = props.targetSeriesId === series.id;
-                    return (
-                      <button
-                        key={series.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        disabled={props.disabled}
-                        onClick={() => props.setTargetSeriesId(series.id)}
-                        className={cn(
-                          'w-full cursor-pointer rounded-lg border border-border bg-background/90 p-3 text-left shadow-sm transition duration-200 hover:border-primary/50 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60',
-                          selected && 'border-primary/80 bg-muted/45 ring-1 ring-primary/50',
-                        )}
-                      >
-                        <span className="flex items-start justify-between gap-3">
-                          <span className="min-w-0">
-                            <span className="line-clamp-2 text-sm font-medium">{series.title}</span>
-                            <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <span>{comicSeriesModeLabel(series.series_mode)}</span>
-                              <span>•</span>
-                              <span>Tập hiện tại: {series.latest_episode_number || 0}</span>
-                            </span>
-                          </span>
-                          {selected ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                          ) : null}
-                        </span>
-                      </button>
-                    );
-                  })}
+                <div className="rounded-lg border border-border bg-background/90 p-3">
+                  {props.selectedSeries ? (
+                    <div className="min-w-0">
+                      <p className="line-clamp-2 text-sm font-medium">{props.selectedSeries.title}</p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {comicSeriesModeLabel(props.selectedSeries.series_mode)} · Tập hiện tại:{' '}
+                        {props.selectedSeries.latest_episode_number || 0} ·{' '}
+                        {props.selectedSeries.character_profiles?.length ?? 0} hồ sơ nhân vật
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Mở popup để xem Bible, số tập, nhân vật và chọn series phù hợp.
+                    </p>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-3"
+                    disabled={props.disabled || props.loadingSeries}
+                    onClick={props.onOpenSeriesPicker}
+                  >
+                    {props.loadingSeries ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <BookOpen className="h-4 w-4" />
+                    )}
+                    Chọn series
+                  </Button>
                 </div>
               )}
             </div>
           )}
 
-          <label className="grid gap-1.5 text-sm">
+          <label htmlFor="comic-handoff-episode-title" className="grid gap-1.5 text-sm">
             <span className="font-medium">Tiêu đề tập</span>
             <Input
+              id="comic-handoff-episode-title"
               value={props.episodeTitle}
               disabled={props.disabled}
               onChange={(event) => props.setEpisodeTitle(event.target.value)}
@@ -1698,14 +1804,17 @@ function HandoffTargetPanel(props: {
             </span>
           </label>
 
-          <label className="grid gap-1.5 text-sm">
+          <label htmlFor="comic-handoff-episode-number" className="grid gap-1.5 text-sm">
             <span className="font-medium">Số tập</span>
             <Input
+              id="comic-handoff-episode-number"
               type="number"
               min={1}
               step={1}
               value={props.episodeNumber}
               disabled={props.disabled}
+              aria-invalid={!props.episodeNumberValid}
+              aria-describedby="comic-handoff-episode-number-help"
               onChange={(event) => props.setEpisodeNumber(event.target.value)}
               placeholder={
                 props.selectedSeries
@@ -1715,6 +1824,7 @@ function HandoffTargetPanel(props: {
               className="min-h-11 bg-card/70"
             />
             <span
+              id="comic-handoff-episode-number-help"
               className={cn(
                 'text-xs leading-relaxed',
                 props.episodeNumberValid ? 'text-muted-foreground' : 'text-destructive',
@@ -1868,9 +1978,13 @@ function HandoffEpisodeSettingsFields(props: {
             <option value="manual">{panelModeLabel('manual')}</option>
           </select>
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-image-panel-count"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Panel ảnh
           <Input
+            id="comic-output-image-panel-count"
             type="number"
             min={1}
             max={200}
@@ -1919,9 +2033,13 @@ function HandoffEpisodeSettingsFields(props: {
             ))}
           </select>
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-image-width"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Rộng
           <Input
+            id="comic-output-image-width"
             type="number"
             min={256}
             max={8192}
@@ -1939,9 +2057,13 @@ function HandoffEpisodeSettingsFields(props: {
             className="h-10 bg-background"
           />
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-image-height"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Cao
           <Input
+            id="comic-output-image-height"
             type="number"
             min={256}
             max={8192}
@@ -2132,9 +2254,13 @@ function HandoffEpisodeSettingsFields(props: {
       </div>
 
       <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-video-duration"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Thời lượng video
           <Input
+            id="comic-output-video-duration"
             type="number"
             min={5}
             max={7200}
@@ -2153,9 +2279,13 @@ function HandoffEpisodeSettingsFields(props: {
             placeholder="Auto"
           />
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-video-shot-duration"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Giây mỗi shot
           <Input
+            id="comic-output-video-shot-duration"
             type="number"
             min={1}
             max={5}
@@ -2166,16 +2296,20 @@ function HandoffEpisodeSettingsFields(props: {
                 ...current,
                 video: {
                   ...current.video,
-                  default_shot_duration_seconds: optionalPositiveInt(event.target.value) ?? 5,
+                  default_shot_duration_seconds: optionalPositiveInt(event.target.value),
                 },
               }))
             }
             className="h-10 bg-background"
           />
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-video-prompt-count"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Số prompt video
           <Input
+            id="comic-output-video-prompt-count"
             type="number"
             min={1}
             max={100}
@@ -2194,9 +2328,13 @@ function HandoffEpisodeSettingsFields(props: {
             placeholder="Auto"
           />
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-video-prompt-duration"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Giây mỗi prompt
           <Input
+            id="comic-output-video-prompt-duration"
             type="number"
             min={3}
             max={30}
@@ -2215,9 +2353,13 @@ function HandoffEpisodeSettingsFields(props: {
             placeholder="Auto"
           />
         </label>
-        <label className="grid gap-1.5 text-xs font-medium">
+        <label
+          htmlFor="comic-output-video-micro-scenes"
+          className="grid gap-1.5 text-xs font-medium"
+        >
           Cảnh nhỏ / prompt
           <Input
+            id="comic-output-video-micro-scenes"
             type="number"
             min={1}
             max={5}
@@ -2228,7 +2370,7 @@ function HandoffEpisodeSettingsFields(props: {
                 ...current,
                 video: {
                   ...current.video,
-                  micro_scenes_per_prompt: optionalPositiveInt(event.target.value) ?? 3,
+                  micro_scenes_per_prompt: optionalPositiveInt(event.target.value),
                 },
               }))
             }
@@ -2379,9 +2521,13 @@ function CreatePanel(props: {
 
 function JobList(props: {
   jobs: ComicJobSummary[];
+  total: number;
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   selectedJobId: string | null;
   onSelect: (id: string) => void;
+  onLoadMore: () => void;
 }) {
   if (props.loading) {
     return (
@@ -2441,6 +2587,20 @@ function JobList(props: {
           );
         })}
       </ul>
+      {props.hasMore ? (
+        <div className="mt-3 flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={props.loadingMore}
+            onClick={props.onLoadMore}
+          >
+            {props.loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Tải thêm ({props.jobs.length}/{props.total})
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
