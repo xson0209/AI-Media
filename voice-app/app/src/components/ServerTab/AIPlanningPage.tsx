@@ -39,6 +39,13 @@ const AI_PLANNING_PRESETS: AIPlanningPreset[] = [
     helper: 'Cân bằng hơn ultra, vẫn giữ chất lượng cao cho Story/Prompt.',
   },
   {
+    key: 'gpt-5.6-luna-xhigh',
+    model: 'gpt-5.6-luna',
+    reasoningEffort: 'xhigh',
+    label: 'gpt-5.6-luna · xhigh',
+    helper: 'Nhanh và tiết kiệm hơn cho planning/prompt hằng ngày, vẫn dùng suy luận xhigh.',
+  },
+  {
     key: 'gpt-5.6-terra-ultra',
     model: 'gpt-5.6-terra',
     reasoningEffort: 'ultra',

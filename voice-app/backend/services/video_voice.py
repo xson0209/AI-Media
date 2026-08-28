@@ -26,6 +26,7 @@ from . import (
     video_language,
     video_observability,
     video_rendering,
+    video_speech,
     video_state,
     video_storage,
     video_subtitles,
@@ -40,6 +41,17 @@ class VideoVoiceError(ValueError):
     def __init__(self, message: str, *, error_code: str = "VIDEO_VOICE_ERROR"):
         super().__init__(message)
         self.error_code = error_code
+
+def _valid_production_narration(text: str, language: str) -> bool:
+    import re
+    value = re.sub(r"\s+", " ", text or "").strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    markers = ("provenance", "video inspiration job id", "link nguồn", "đường dẫn file nguồn", "gói phân tích", "http://", "https://", "video_inspiration/", "job id", "checksum")
+    if any(marker in lowered for marker in markers):
+        return False
+    return not (video_language.normalize_video_language(language) == "en" and re.search(r"[à-ỹđ]", lowered))
 
 ENGINE_LANGUAGE_SUPPORT: dict[str, set[str]] = {
     "qwen": {"zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"},
@@ -536,6 +548,12 @@ async def create_shot_narration(
         return None
     project, shot = result
 
+    if video_speech.uses_veo_native_speech(project):
+        raise VideoVoiceError(
+            "Video tiếng Việt dùng lời thoại/audio trực tiếp trong clip Veo 3; không tạo TTS riêng cho segment này.",
+            error_code="VIDEO_VOICE_VEO_NATIVE_SPEECH",
+        )
+
     text = (shot.english_narration or "").strip()
     if not text:
         message = "Shot này chưa có narration để tạo giọng đọc."
@@ -548,6 +566,20 @@ async def create_shot_narration(
             details={"shot_order": shot.shot_order, "field": "english_narration"},
         )
         raise VideoVoiceError(message, error_code="VIDEO_VOICE_EMPTY_DIALOGUE")
+    language = _language_for_project(project, data)
+    if not _valid_production_narration(text, language):
+        message = "Narration chứa metadata/provenance hoặc sai ngôn ngữ video; đã chặn tạo giọng đọc để tránh artifact sai."
+        _log_voice_failure(
+            db,
+            project_id=project_id,
+            shot_id=shot_id,
+            message=message,
+            error_code="VIDEO_VOICE_NARRATION_INVALID",
+            details={"shot_order": shot.shot_order, "field": "english_narration", "language": language},
+        )
+        shot.voice_status = "needs_review"
+        db.commit()
+        raise VideoVoiceError(message, error_code="VIDEO_VOICE_NARRATION_INVALID")
     if shot.voice_status == "completed" and shot.generation_id and not data.force:
         return sync_shot_voice_status(project_id, shot_id, db)
 
@@ -577,7 +609,6 @@ async def create_shot_narration(
         )
         raise VideoVoiceError(message, error_code="VIDEO_VOICE_PROFILE_NOT_FOUND")
 
-    language = _language_for_project(project, data)
     engine = _resolve_generation_engine(data, profile, language)
     try:
         profiles.validate_profile_engine(profile, engine)

@@ -55,10 +55,10 @@ async def _cancel_running_generation_cancels_task():
     assert task_queue.cancel_generation("gen-running") == "running"
     await asyncio.wait_for(running_cancelled.wait(), timeout=1)
 
-def test_generation_queue_runs_two_jobs_concurrently():
-    asyncio.run(_generation_queue_runs_two_jobs_concurrently())
+def test_generation_queue_serializes_tts_jobs():
+    asyncio.run(_generation_queue_serializes_tts_jobs())
 
-async def _generation_queue_runs_two_jobs_concurrently():
+async def _generation_queue_serializes_tts_jobs():
     task_queue.init_queue(force=True, max_concurrency=2)
 
     first_started = asyncio.Event()
@@ -73,24 +73,28 @@ async def _generation_queue_runs_two_jobs_concurrently():
     task_queue.enqueue_generation("gen-second", job(second_started))
 
     await asyncio.wait_for(first_started.wait(), timeout=1)
-    await asyncio.wait_for(second_started.wait(), timeout=1)
+    await asyncio.sleep(0.05)
     snapshot = task_queue.get_generation_queue_snapshot()
 
-    assert snapshot["max_concurrency"] == 2
-    assert snapshot["running"] == 2
+    assert snapshot["max_concurrency"] == 1
+    assert snapshot["running"] == 1
+    assert snapshot["running_ids"] == ["gen-first"]
+    assert snapshot["queued_ids"] == ["gen-second"]
+    assert not second_started.is_set()
 
     release.set()
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(second_started.wait(), timeout=1)
+    await asyncio.sleep(0.05)
 
 
-def test_generation_concurrency_is_hard_capped_at_two(monkeypatch):
+def test_generation_concurrency_is_hard_capped_at_one(monkeypatch):
     monkeypatch.setenv("VOICEBOX_GENERATION_CONCURRENCY", "99")
 
-    assert task_queue.get_generation_max_concurrency() == 2
-    asyncio.run(_generation_concurrency_is_hard_capped_at_two())
+    assert task_queue.get_generation_max_concurrency() == 1
+    asyncio.run(_generation_concurrency_is_hard_capped_at_one())
 
 
-async def _generation_concurrency_is_hard_capped_at_two():
+async def _generation_concurrency_is_hard_capped_at_one():
     task_queue.init_queue(force=True, max_concurrency=99)
 
     first_started = asyncio.Event()
@@ -107,16 +111,17 @@ async def _generation_concurrency_is_hard_capped_at_two():
     task_queue.enqueue_generation("gen-third", job(third_started))
 
     await asyncio.wait_for(first_started.wait(), timeout=1)
-    await asyncio.wait_for(second_started.wait(), timeout=1)
     await asyncio.sleep(0.05)
 
     snapshot = task_queue.get_generation_queue_snapshot()
-    assert snapshot["max_concurrency"] == 2
-    assert snapshot["running"] == 2
-    assert snapshot["queued"] == 1
+    assert snapshot["max_concurrency"] == 1
+    assert snapshot["running"] == 1
+    assert snapshot["queued"] == 2
+    assert not second_started.is_set()
     assert not third_started.is_set()
 
     release.set()
+    await asyncio.wait_for(second_started.wait(), timeout=1)
     await asyncio.wait_for(third_started.wait(), timeout=1)
     await asyncio.sleep(0.05)
 
@@ -149,20 +154,24 @@ async def _stream_and_queue_share_the_same_inference_gate():
     task_queue.enqueue_generation("gen-first", queued_job(first_started))
     task_queue.enqueue_generation("gen-second", queued_job(second_started))
 
-    await asyncio.wait_for(first_started.wait(), timeout=1)
     await asyncio.sleep(0.05)
 
     snapshot = task_queue.get_generation_queue_snapshot()
-    assert snapshot["max_concurrency"] == 2
-    assert snapshot["running"] == 2
-    assert snapshot["running_ids"] == ["gen-first"]
-    assert snapshot["queued_ids"] == ["gen-second"]
+    assert snapshot["max_concurrency"] == 1
+    assert snapshot["running"] == 1
+    assert snapshot["running_ids"] == []
+    assert snapshot["queued_ids"] == ["gen-first", "gen-second"]
+    assert not first_started.is_set()
     assert not second_started.is_set()
 
     release_direct.set()
-    await asyncio.wait_for(second_started.wait(), timeout=1)
+    await asyncio.wait_for(first_started.wait(), timeout=1)
+    await asyncio.sleep(0.05)
+    assert not second_started.is_set()
 
     release_jobs.set()
+    await asyncio.wait_for(second_started.wait(), timeout=1)
+
     await direct_task
     await asyncio.sleep(0.05)
 

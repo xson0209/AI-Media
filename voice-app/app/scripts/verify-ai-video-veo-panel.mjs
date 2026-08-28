@@ -24,7 +24,7 @@ assertAll(panel, ['Đăng nhập Google kết nối Veo3', 'Đang dùng:', 'Ki�
 assertAll(panel, ['Nhãn kết nối', 'Sửa nhãn', 'Xác nhận dùng tài khoản này'], 'identity label action');
 assertAll(panel, ['getDefaultVeoProviderSession', "queryKey: ['ai-video', 'veo-session-default']"], 'default session reuse');
 assertAll(panel, ['Chờ tạo clip', 'submitting_prompt', 'waiting_generation', 'downloading', 'importing', 'completed', 'failed', 'needs_login'], 'job item progress');
-assertAll(panel, ['Retry lỗi', 'Resume', 'Hủy job'], 'retry resume cancel action');
+assertAll(panel, ['Chạy lại lỗi', 'Chạy tiếp', 'Hủy tác vụ'], 'retry resume cancel action');
 assertAll(panel, ['Phê duyệt, không hỏi lại', 'Phê duyệt thủ công từng lần', 'Phê duyệt lần này'], 'credit policy');
 assertAll(panel, ['render_job_id', "queryKey: ['ai-video', 'render']", "queryKey: ['ai-video', 'render-job-latest', projectId]"], 'auto-render invalidation');
 assertAll(types, ['not_configured', 'pending', 'VideoProviderSessionResponse', 'VideoClipGenerationJobResponse', 'VideoClipGenerationItemStatus'], 'frontend types');

@@ -98,6 +98,7 @@ async def run_startup(application: FastAPI) -> None:
             logger.info("Marked %d stale generation(s) as failed", result.rowcount)
 
         from ..services import video_auto_runs, video_clip_generation, video_inspiration_runs, video_rendering
+        from ..services.automation_hub import jobs as automation_jobs
 
         stale_render_count = video_rendering.sync_stale_running_jobs(db)
         if stale_render_count > 0:
@@ -114,6 +115,10 @@ async def run_startup(application: FastAPI) -> None:
         stale_inspiration_count = video_inspiration_runs.sync_interrupted_jobs(db)
         if stale_inspiration_count > 0:
             logger.info("Marked %d interrupted Video Inspiration job(s) as failed", stale_inspiration_count)
+
+        stale_publish_count = automation_jobs.sync_stale_running_jobs(db)
+        if stale_publish_count > 0:
+            logger.info("Marked %d interrupted Automation Hub publishing job(s)", stale_publish_count)
 
         try:
             from ..services.comic_series_analysis import runner as comic_runner
@@ -136,6 +141,14 @@ async def run_startup(application: FastAPI) -> None:
         logger.warning("Could not clean up stale generations: %s", e)
     finally:
         db.close()
+
+    try:
+        from ..services.automation_hub import config as automation_config, jobs as automation_jobs
+
+        if automation_config.get_config().enabled:
+            automation_jobs.init_worker()
+    except Exception as exc:
+        logger.warning("Could not initialize Automation Hub worker: %s", exc)
 
     backend_type = get_backend_type()
     logger.info("Backend: %s", backend_type.upper())
@@ -191,3 +204,9 @@ async def run_shutdown() -> None:
         llm.unload_llm_model()
     except Exception:
         logger.exception("Failed to unload LLM model")
+    try:
+        from ..services.automation_hub import sidecar as automation_sidecar
+
+        await automation_sidecar.stop()
+    except Exception:
+        logger.exception("Failed to stop Automation Hub sidecar")

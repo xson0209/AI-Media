@@ -35,6 +35,8 @@ from . import (
     video_planning_pool,
     video_publishing_metadata,
     video_rendering,
+    video_series_characters,
+    video_speech,
     video_storage,
     video_subtitles,
     video_voice,
@@ -72,6 +74,7 @@ STEP_ORDER = [
     "validate",
     "develop_story",
     "waiting_planning",
+    "review_character_proposals",
     "review_story",
     "generate_shots",
     "generate_prompts",
@@ -90,6 +93,7 @@ STEP_PROGRESS = {
     "validate": 0.05,
     "develop_story": 0.18,
     "waiting_planning": 0.18,
+    "review_character_proposals": 0.24,
     "review_story": 0.28,
     "generate_shots": 0.40,
     "generate_prompts": 0.53,
@@ -394,6 +398,40 @@ async def continue_auto_run(
         raise VideoAutoRunError("Auto-run hiện không ở trạng thái cần tiếp tục.", error_code="VIDEO_AUTO_RUN_INVALID_STATE")
     results = _results(row)
     if row.status == "needs_review" and row.review_stage:
+        if row.review_stage == video_series_characters.REVIEW_STAGE:
+            if not data.approved:
+                results["reviewed"][row.review_stage] = False
+                results.setdefault("review_events", []).append(
+                    {"stage": row.review_stage, "approved": False, "reviewed_at": datetime.utcnow().isoformat()}
+                )
+                row.status = "cancelled"
+                row.completed_at = datetime.utcnow()
+                row.failure_reason = "Người dùng hủy auto-run tại bước duyệt nhân vật mới."
+                _save_results(row, results)
+                db.commit()
+                return auto_run_response(row, db)
+            project = _require_project(row, db)
+            pending = video_series_characters.pending_required_proposals(project)
+            if pending:
+                raise VideoAutoRunError(
+                    f"Còn {len(pending)} nhân vật mới cần quyết định trước khi chạy tiếp.",
+                    error_code="AI_VIDEO_CHARACTER_PROPOSALS_PENDING",
+                )
+            results["reviewed"][row.review_stage] = True
+            results.setdefault("review_events", []).append(
+                {"stage": row.review_stage, "approved": True, "reviewed_at": datetime.utcnow().isoformat()}
+            )
+            flow = video_series_characters.project_character_flow(project)
+            row.current_step = str(flow.get("resume_step") or "review_story")
+            row.status = "waiting_workflow"
+            row.review_stage = None
+            row.failure_reason = None
+            row.error_code = None
+            row.updated_at = datetime.utcnow()
+            _save_results(row, results)
+            db.commit()
+            create_background_task(_run_auto_run(row.id))
+            return auto_run_response(row, db)
         results["reviewed"][row.review_stage] = bool(data.approved)
         results.setdefault("review_events", []).append(
             {"stage": row.review_stage, "approved": bool(data.approved), "reviewed_at": datetime.utcnow().isoformat()}
@@ -630,6 +668,13 @@ def _advance_auto_run_sync(run_id: str) -> dict[str, Any]:
             _needs_input(row, db, str(exc), exc.error_code)
             return {"action": "stop"}
         except Exception as exc:
+            # Phase 2 may have staged deletes/inserts before a serialization or
+            # provider error. Never commit those partial changes together with
+            # the auto-run failure state.
+            db.rollback()
+            row = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.id == run_id).first()
+            if row is None:
+                return {"action": "stop"}
             _fail_run(row, db, exc)
             return {"action": "stop"}
     finally:
@@ -655,6 +700,24 @@ def _advance_steps(row: DBVideoAutoRun, db: Session) -> dict[str, Any]:
             video_phase2.develop_story(project.id, db, force=bool(row.force))
         db.refresh(project)
         _mark_completed(row, "develop_story")
+
+    if video_series_characters.has_pending_required_proposals(project):
+        flow = video_series_characters.project_character_flow(project)
+        results = _results(row)
+        results["character_flow"] = {
+            "pending_required_count": len(video_series_characters.pending_required_proposals(project)),
+            "resume_step": flow.get("resume_step") or video_series_characters.DEFAULT_RESUME_STEP,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        _save_results(row, results)
+        _set_step(
+            row,
+            db,
+            video_series_characters.REVIEW_STEP,
+            status="needs_review",
+            review_stage=video_series_characters.REVIEW_STAGE,
+        )
+        return {"action": "stop"}
 
     if row.mode == "review_gated" and not _reviewed(row, "story"):
         _set_step(row, db, "review_story", status="needs_review", review_stage="story")
@@ -1004,7 +1067,10 @@ def _render_action(row: DBVideoAutoRun, project: DBVideoProject, db: Session) ->
                 job.failure_reason or "Render MP4 chưa hoàn tất.",
                 error_code=job.error_code or "VIDEO_AUTO_RUN_RENDER_FAILED",
             )
-    readiness = video_rendering.get_render_readiness(project.id, db, models.VideoRenderSettings())
+    # An auto run cannot see the UI, so it reuses the settings of the project's most
+    # recent render instead of always building with defaults.
+    settings = video_rendering.render_settings_for_project(project.id, db)
+    readiness = video_rendering.get_render_readiness(project.id, db, settings)
     if readiness is None:
         raise VideoAutoRunError("Không tìm thấy dự án để render MP4.", error_code="VIDEO_PROJECT_NOT_FOUND")
     if not readiness.ready:
@@ -1014,7 +1080,7 @@ def _render_action(row: DBVideoAutoRun, project: DBVideoProject, db: Session) ->
     try:
         response = video_rendering.create_render_job_for_auto_run(
             project.id,
-            models.VideoRenderJobCreateRequest(settings=models.VideoRenderSettings()),
+            models.VideoRenderJobCreateRequest(settings=settings),
             db,
         )
     except video_rendering.VideoRenderError as exc:
@@ -1026,6 +1092,8 @@ def _render_action(row: DBVideoAutoRun, project: DBVideoProject, db: Session) ->
     return {"action": "run_render_job", "job_id": response.id}
 
 def _voice_action(row: DBVideoAutoRun, project: DBVideoProject, db: Session) -> dict[str, Any] | None:
+    if video_speech.uses_veo_native_speech(project):
+        return None
     _sync_busy_shot_voice_statuses(project.id, db)
     shots = [shot for shot in _ordered_shots(project.id, db) if (shot.english_narration or "").strip()]
     if not shots:
@@ -1155,6 +1223,7 @@ def _summary(
     *,
     material_target: str = MATERIAL_TARGET_FULL,
 ) -> models.VideoAutoRunSummary:
+    project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     shots = _ordered_shots(project_id, db)
     prompt_shot_ids = {
         item[0]
@@ -1163,7 +1232,18 @@ def _summary(
         .all()
     }
     narrated = [shot for shot in shots if (shot.english_narration or "").strip()]
-    voice_completed = [shot for shot in narrated if shot.voice_status == "completed" and shot.audio_path and shot.audio_duration]
+    if video_speech.uses_veo_native_speech(project):
+        clips = video_rendering.active_clips_for_project(project_id, db)
+        voice_completed = [
+            shot
+            for shot in narrated
+            if (clip := clips.get(shot.id)) is not None
+            and clip.status == "ready"
+            and clip.has_audio
+            and clip.duration_seconds
+        ]
+    else:
+        voice_completed = [shot for shot in narrated if shot.voice_status == "completed" and shot.audio_path and shot.audio_duration]
     subtitle = db.query(DBVideoSubtitle).filter(DBVideoSubtitle.project_id == project_id).first()
     package = db.query(DBVideoPackageExport).filter(DBVideoPackageExport.project_id == project_id).order_by(DBVideoPackageExport.created_at.desc()).first()
     prompt_completed = [shot for shot in shots if shot.id in prompt_shot_ids and shot.prompt_status == "completed"]
@@ -1222,7 +1302,11 @@ def auto_run_response(row: DBVideoAutoRun, db: Session) -> models.VideoAutoRunRe
     results = _results(row)
     material_target = _material_target(row)
     completed_steps = list(dict.fromkeys(results.get("completed_steps", [])))
-    pending_steps = [step for step in _step_order(row) if step not in completed_steps and step not in TRANSIENT_STEPS]
+    pending_steps = (
+        []
+        if row.status == "completed"
+        else [step for step in _step_order(row) if step not in completed_steps and step not in TRANSIENT_STEPS]
+    )
     return models.VideoAutoRunResponse(
         id=row.id,
         project_id=row.project_id,

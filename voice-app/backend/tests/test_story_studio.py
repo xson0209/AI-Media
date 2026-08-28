@@ -15,6 +15,7 @@ from backend.database.models import StoryEpisode as DBStoryEpisode
 from backend.database.models import StoryEpisodeSourceChunk as DBStoryEpisodeSourceChunk
 from backend.database.models import StoryEpisodeSourceDocument as DBStoryEpisodeSourceDocument
 from backend.database.models import StoryScenarioCandidate as DBStoryScenarioCandidate
+from backend.database.models import StoryAdaptation as DBStoryAdaptation
 from backend.database.models import VideoAutoRun as DBVideoAutoRun
 from backend.database.models import VideoProject as DBVideoProject
 from backend.database.models import VideoRenderJob as DBVideoRenderJob
@@ -298,6 +299,20 @@ def _candidate_payload(strategy_type: str, index: int = 1, **overrides):
     data["strategy_label"] = story_studio._strategy_label(strategy_type)
     data.update(overrides)
     return data
+
+
+def test_story_candidate_validation_error_is_valid_utf8():
+    payload = _candidate_payload("visual_action")
+
+    with pytest.raises(story_studio.StoryStudioError) as exc:
+        story_studio._validate_candidate_script(
+            payload,
+            episode=SimpleNamespace(),
+            strategy_type="hook_retention",
+        )
+
+    assert str(exc.value) == "Candidate không đúng strategy hook_retention."
+
 
 def _evaluation_payload():
     reviews = []
@@ -1351,6 +1366,19 @@ def test_hybrid_story_video_handoff_creates_linked_ai_video_project(db):
 
 def test_image_story_video_handoff_from_truyen_anh_prompts_creates_ai_video_project(db):
     _series, episode, image_adaptation = _story_episode_with_image_prompts(db, output_intent="truyen_anh")
+    episode_row = db.get(DBStoryEpisode, episode.id)
+    assert episode_row is not None
+    legacy_settings = dict(episode_row.output_settings_json or {})
+    legacy_settings["video"] = {
+        **legacy_settings.get("video", {}),
+        "default_shot_duration_seconds": 5,
+        "prompt_segment_count": None,
+        "prompt_segment_duration_seconds": None,
+        "micro_scenes_per_prompt": 3,
+        "target_duration_seconds": None,
+    }
+    episode_row.output_settings_json = legacy_settings
+    db.commit()
 
     video_adaptation = story_studio.create_video_adaptation(
         episode.id,
@@ -1378,6 +1406,41 @@ def test_image_story_video_handoff_from_truyen_anh_prompts_creates_ai_video_proj
     assert project is not None
     assert project.story_episode_id == episode.id
     assert project.series_id == episode.series_id
+    assert project.default_shot_duration_seconds is None
+    assert project.prompt_segment_count == 6
+    assert project.prompt_segment_duration_seconds == 10
+    assert project.micro_scenes_per_prompt == 4
+    assert project.target_duration_seconds == 60
+    assert payload["handoff_settings"]["default_shot_duration_seconds"] is None
+    assert payload["handoff_settings"]["prompt_segment_count"] == 6
+    assert payload["handoff_settings"]["prompt_segment_duration_seconds"] == 10
+    assert payload["handoff_settings"]["micro_scenes_per_prompt"] == 4
+
+    project.default_shot_duration_seconds = 5
+    project.prompt_segment_count = None
+    project.prompt_segment_duration_seconds = None
+    project.micro_scenes_per_prompt = 3
+    project.target_duration_seconds = None
+    db.commit()
+    reopened = story_studio.create_video_adaptation(
+        episode.id,
+        models.StoryVideoHandoffRequest(
+            open_existing=True,
+            source_mode="image_story_prompts",
+            start_auto_run=False,
+        ),
+        db,
+    )
+    assert reopened is not None
+    assert reopened.linked_video_project_id == project.id
+    db.refresh(project)
+    assert project.default_shot_duration_seconds is None
+    assert project.prompt_segment_count == 6
+    assert project.prompt_segment_duration_seconds == 10
+    assert project.micro_scenes_per_prompt == 4
+    assert project.target_duration_seconds == 60
+    assert reopened.payload_json["handoff_settings"]["prompt_segment_count"] == 6
+
     source_blocks = (
         db.query(DBVideoSourceBlock)
         .filter(DBVideoSourceBlock.project_id == project.id)
@@ -1809,3 +1872,55 @@ def test_video_adaptation_reports_linked_ai_video_mp4_from_render_job(db):
     assert refreshed_video.payload_json["latest_mp4_path"] == "renders/story-video.mp4"
     assert refreshed_video.payload_json["latest_mp4_download_url"].endswith("/download")
     assert refreshed_video.payload_json["latest_render_job"]["status"] == "completed"
+
+
+def test_video_adaptation_refreshes_linked_auto_run_status(db):
+    series = video_projects.create_series(
+        models.VideoSeriesCreate(title="Auto-run status", series_mode="hybrid"),
+        db,
+    )
+    episode = story_studio.create_episode(
+        series.id,
+        models.StoryEpisodeCreate(output_intent="video_truyen", source_input="Một tập video."),
+        db,
+    )
+    story_studio.select_master_story(
+        episode.id,
+        models.StoryCandidateSelectionRequest(master_story_json=_valid_master(title="Video tập 1")),
+        db,
+    )
+    story_studio.approve_master_story(episode.id, models.StoryApprovalRequest(approved=True), db)
+    video_adaptation = story_studio.create_video_adaptation(
+        episode.id,
+        models.StoryVideoHandoffRequest(open_existing=True),
+        db,
+    )
+    run = DBVideoAutoRun(
+        project_id=video_adaptation.linked_video_project_id,
+        mode="full_auto",
+        status="completed",
+        current_step="completed",
+        progress=1.0,
+        step_results_json={"material_target": "prompts_only", "completed_steps": ["completed"]},
+        completed_at=datetime.utcnow(),
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    adaptation_row = db.get(DBStoryAdaptation, video_adaptation.id)
+    adaptation_row.payload_json = {
+        **adaptation_row.payload_json,
+        "auto_run_id": run.id,
+        "auto_run_status": "queued",
+        "auto_run_step": "validate",
+    }
+    db.commit()
+
+    refreshed = story_studio.get_episode(episode.id, db)
+    refreshed_video = next(item for item in refreshed.adaptations if item.kind == "video_story")
+
+    assert refreshed_video.payload_json["auto_run_id"] == run.id
+    assert refreshed_video.payload_json["auto_run_status"] == "completed"
+    assert refreshed_video.payload_json["auto_run_step"] == "completed"
+    assert refreshed_video.payload_json["auto_run_progress"] == 1.0

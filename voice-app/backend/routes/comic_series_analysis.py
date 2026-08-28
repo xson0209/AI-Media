@@ -66,7 +66,7 @@ async def list_jobs(
     jobs = service.list_jobs(db, limit=limit, offset=offset)
     return schemas.ComicJobListResponse(
         jobs=[schemas.job_summary(j) for j in jobs],
-        total=len(jobs),
+        total=service.count_jobs(db),
         limit=limit,
         offset=offset,
     )
@@ -149,7 +149,11 @@ async def retry_job(job_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/jobs/{job_id}")
 async def delete_job(job_id: str, db: Session = Depends(get_db)):
-    if not service.delete_job(db, job_id):
+    try:
+        deleted = service.delete_job(db, job_id)
+    except ComicAnalysisError as exc:
+        _raise(exc)
+    if not deleted:
         _get_job_or_404(db, job_id)
     return {"deleted": True, "job_id": job_id}
 

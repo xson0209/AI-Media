@@ -1,3 +1,4 @@
+import importlib.machinery
 import json
 import sys
 import types
@@ -8,6 +9,7 @@ from sqlalchemy import inspect
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+    torch_stub.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
 
     class _Tensor:
         def element_size(self):
@@ -17,6 +19,7 @@ if "torch" not in sys.modules:
             return 0
 
     torch_stub.Tensor = _Tensor
+    torch_stub.nn = types.SimpleNamespace(Module=object)
     torch_stub.load = lambda *args, **kwargs: None
     torch_stub.save = lambda *args, **kwargs: None
     sys.modules["torch"] = torch_stub

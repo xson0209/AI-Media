@@ -45,6 +45,9 @@ def run_migrations(engine) -> None:
     _migrate_ai_video_assistant(engine)
     _migrate_video_inspiration(engine)
     _migrate_comic_series_analysis(engine)
+    _migrate_research_scoring(engine)
+    _migrate_automation_hub(engine)
+    _migrate_product_video(engine)
     _migrate_mcp_bindings(engine, inspector, tables)
     tables = set(inspect(engine).get_table_names())
     _normalize_storage_paths(engine, tables)
@@ -826,6 +829,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 transition_json JSON,
                 sound_design_json JSON,
                 micro_scenes_json JSON,
+                speech_cues_json JSON,
                 retainability_quality_check JSON,
                 locked BOOLEAN NOT NULL DEFAULT 0,
                 status VARCHAR NOT NULL DEFAULT 'draft',
@@ -1138,6 +1142,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             "transition_json": "JSON",
             "sound_design_json": "JSON",
             "micro_scenes_json": "JSON",
+            "speech_cues_json": "JSON",
             "retainability_quality_check": "JSON",
             "revision": "INTEGER NOT NULL DEFAULT 1",
         }
@@ -1695,6 +1700,36 @@ def _migrate_comic_series_analysis(engine) -> None:
             logger.info("Ensured Comic Series Analysis indexes")
 
 
+def _migrate_research_scoring(engine) -> None:
+    """Add ranking, completeness and provenance fields to research scores.
+
+    Migrations run before ``Base.metadata.create_all``. A fresh database does
+    not have the Research tables yet, so this helper intentionally becomes a
+    no-op there; ``create_all`` then creates the complete current schema.
+    """
+    inspector = inspect(engine)
+    if "research_scores" not in set(inspector.get_table_names()):
+        return
+
+    columns = _get_columns(inspector, "research_scores")
+    additions = {
+        "rank": "rank INTEGER",
+        "tie_group": "tie_group INTEGER",
+        "completeness_status": "completeness_status VARCHAR NOT NULL DEFAULT 'incomplete'",
+        "stale_reason": "stale_reason TEXT",
+        "improvement_actions_json": "improvement_actions_json JSON",
+        "tradeoffs_json": "tradeoffs_json JSON",
+        "safety_gate_json": "safety_gate_json JSON",
+        "provider_metadata_json": "provider_metadata_json JSON",
+        "cost_json": "cost_json JSON",
+        "user_override_revision": "user_override_revision INTEGER NOT NULL DEFAULT 0",
+        "user_override_at": "user_override_at DATETIME",
+    }
+    for name, column_sql in additions.items():
+        if name not in columns:
+            _add_column(engine, "research_scores", column_sql, name)
+
+
 def _create_comic_tables(engine) -> None:
     """Create the Comic Series Analysis tables from ORM metadata if missing.
 
@@ -1755,6 +1790,46 @@ def _supports_drop_column(engine) -> bool:
     return tuple(int(p) for p in sqlite3.sqlite_version.split(".")[:3]) >= (3, 35, 0)
 
 
+def _migrate_automation_hub(engine) -> None:
+    """Create the isolated Automation Hub tables and indexes idempotently."""
+    from .models import (
+        AutomationAsset,
+        AutomationConnection,
+        AutomationPublishAttempt,
+        AutomationPublishJob,
+        Base,
+    )
+
+    tables = [
+        AutomationConnection.__table__,
+        AutomationAsset.__table__,
+        AutomationPublishJob.__table__,
+        AutomationPublishAttempt.__table__,
+    ]
+    Base.metadata.create_all(bind=engine, tables=tables, checkfirst=True)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_automation_connections_platform_status "
+            "ON automation_connections(platform, status)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_automation_assets_sha256 "
+            "ON automation_assets(sha256)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_automation_publish_jobs_status_schedule "
+            "ON automation_publish_jobs(status, scheduled_at, created_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_automation_publish_jobs_connection "
+            "ON automation_publish_jobs(connection_id, status)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_automation_publish_attempts_job "
+            "ON automation_publish_attempts(job_id, attempt_number)"
+        ))
+
+
 def _normalize_storage_paths(engine, tables: set[str]) -> None:
     """Normalize stored file paths to be relative to the configured data dir."""
     from pathlib import Path
@@ -1790,6 +1865,7 @@ def _normalize_storage_paths(engine, tables: set[str]) -> None:
         ("comic_source_documents", "raw_html_quarantine_path"),
         ("comic_source_assets", "original_path"),
         ("story_episode_source_assets", "original_path"),
+        ("automation_assets", "stored_path"),
     ]
 
     total_fixed = 0
@@ -1819,3 +1895,45 @@ def _normalize_storage_paths(engine, tables: set[str]) -> None:
         if total_fixed > 0:
             conn.commit()
             logger.info("Normalized %d stored file paths", total_fixed)
+
+
+def _migrate_product_video(engine) -> None:
+    """Create the isolated Product Video tables and indexes idempotently."""
+    from .models import (
+        Base,
+        ProductVideoProject,
+        ProductVideoShot,
+        ProductVideoShotPrompt,
+    )
+
+    tables = [
+        ProductVideoProject.__table__,
+        ProductVideoShot.__table__,
+        ProductVideoShotPrompt.__table__,
+    ]
+    Base.metadata.create_all(bind=engine, tables=tables, checkfirst=True)
+    product_project_columns = _get_columns(inspect(engine), "product_video_projects")
+    with engine.begin() as conn:
+        # Additive fields are guarded for both the shipped SQLite database and
+        # server-backed dialects used by tests/deployments.
+        additions = {
+            "render_project_id": "render_project_id VARCHAR",
+            "creation_mode": "creation_mode VARCHAR NOT NULL DEFAULT 'quick'",
+            "automation_mode": "automation_mode VARCHAR NOT NULL DEFAULT 'full_auto'",
+            "output_target": "output_target VARCHAR NOT NULL DEFAULT 'render_ready'",
+        }
+        for name, column_sql in additions.items():
+            if name not in product_project_columns:
+                conn.execute(text(f"ALTER TABLE product_video_projects ADD COLUMN {column_sql}"))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_product_video_shots_project_order "
+            "ON product_video_shots(project_id, shot_order)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_product_video_shot_prompts_project "
+            "ON product_video_shot_prompts(project_id, shot_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_product_video_projects_render_project "
+            "ON product_video_projects(render_project_id)"
+        ))

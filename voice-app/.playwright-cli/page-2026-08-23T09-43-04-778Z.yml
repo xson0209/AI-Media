@@ -1,0 +1,99 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - img "Voicebox" [ref=e7]
+      - generic [ref=e8]:
+        - link "Tạo giọng" [ref=e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Prompt video sản phẩm" [ref=e43] [cursor=pointer]:
+          - /url: /product-video
+        - link "Phân tích truyện tranh" [ref=e48] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=e53] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=e56] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=e60] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=e64]: v0.5.0
+    - main [ref=e66]:
+      - generic [ref=e70]:
+        - complementary [ref=e71]:
+          - heading "Video sản phẩm" [level=1] [ref=e78]
+          - button "Dự án mới" [ref=e79]
+          - list [ref=e81]:
+            - listitem [ref=e82]:
+              - button "Combo bình giữ nhiệt 9:16 8 clip" [active] [ref=e83]:
+                - generic [ref=e84]: Combo bình giữ nhiệt
+                - generic [ref=e85]:
+                  - generic [ref=e86]: 9:16
+                  - generic [ref=e87]: 8 clip
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - generic [ref=e90]:
+              - generic [ref=e91]:
+                - generic [ref=e92]: Sản phẩm và ý tưởng
+                - 'textbox "Ví dụ: hộp khô gà cay, nhấn vị cay và tiện mang đi, combo 2 hộp 99K" [ref=e93]': Combo bình giữ nhiệt
+                - paragraph [ref=e94]: Mô tả sản phẩm, điểm bán, và thông điệp muốn truyền.
+              - generic [ref=e95]:
+                - generic [ref=e96]:
+                  - generic [ref=e97]: Ngôn ngữ video
+                  - combobox [ref=e98]:
+                    - generic: Tiếng Việt
+                - generic [ref=e101]:
+                  - generic [ref=e102]: Tỉ lệ video
+                  - combobox [ref=e103]:
+                    - generic: Dọc 9:16
+                - generic [ref=e106]:
+                  - generic [ref=e107]: Thể loại
+                  - combobox [ref=e108]:
+                    - generic: Quảng cáo / bán hàng
+                - generic [ref=e111]:
+                  - generic [ref=e112]: Thời lượng mục tiêu
+                  - combobox [ref=e113]:
+                    - generic: 60 giây
+                  - paragraph [ref=e116]: 60s → 8 clip × 8s = 64s thực tế
+              - generic [ref=e117]:
+                - generic [ref=e118]: Phong cách
+                - combobox [ref=e119]:
+                  - generic: UGC cầm sản phẩm ngoài đường
+                - 'textbox "Mô tả phong cách bằng tiếng Anh: chủ thể, chuyển động camera, chuyển động hậu cảnh, ánh sáng." [ref=e122]': "Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. Background is softly out of focus and clearly in motion while the product stays sharp. Lighting: warm natural daylight, soft shadow, no harsh glare across the label surface."
+                - paragraph [ref=e123]: Chọn preset để điền sẵn rồi sửa thoải mái, hoặc chọn Tự nhập để viết từ đầu.
+              - generic [ref=e124]:
+                - generic [ref=e125]:
+                  - generic [ref=e126]: Độ dài mỗi clip
+                  - combobox [ref=e127]:
+                    - generic: 8 giây
+                  - paragraph [ref=e130]: Flow chỉ nhận 4, 6, 8 hoặc 10 giây.
+                - generic [ref=e131]:
+                  - generic [ref=e132]: Cảnh nhỏ mỗi clip
+                  - spinbutton [ref=e133]: "3"
+                  - paragraph [ref=e134]: Số nhịp hình bên trong một clip. 1 đến 5.
+              - paragraph [ref=e135]:
+                - generic [ref=e138]: Luồng này chỉ sinh prompt. Bạn tự mở Google Flow, chọn mode Ingredients to Video, upload ảnh sản phẩm, rồi dán từng prompt vào. Sẽ có 8 prompt cần dán.
+            - generic [ref=e139]:
+              - button "Lập kế hoạch 8 cảnh" [ref=e140]
+              - button "Lưu cấu hình" [ref=e141]
+              - button "Sinh prompt" [ref=e142]
+              - button "Xóa" [ref=e143]
+          - generic [ref=e144]:
+            - heading "Prompt pack" [level=2] [ref=e145]
+            - generic [ref=e146]:
+              - paragraph [ref=e150]: Chưa có prompt nào
+              - paragraph [ref=e151]: Chạy bước lập kế hoạch cảnh trước, rồi bấm Sinh prompt. Prompt xong mới copy được sang Google Flow.
+  - region "Notifications (F8)":
+    - list

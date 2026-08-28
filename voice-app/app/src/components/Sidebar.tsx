@@ -1,5 +1,5 @@
 import { Link, useMatchRoute } from '@tanstack/react-router';
-import { AudioLines, BookImage, BookOpenText, Box, Captions, Clapperboard, FileVideo, type LucideIcon, Mic, Settings, Volume2, Wand2 } from 'lucide-react';
+import { AudioLines, BookImage, BookOpenCheck, BookOpenText, Box, Captions, Clapperboard, FileVideo, type LucideIcon, Mic, Package, Settings, Volume2, Wand2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import voiceboxLogo from '@/assets/voicebox-logo.png';
@@ -8,6 +8,8 @@ import { usePlatform } from '@/platform/PlatformContext';
 import type { UpdateStatus } from '@/platform/types';
 import { usePlayerStore } from '@/stores/playerStore';
 import { version } from '../../package.json';
+
+const researchFeatureEnabled = import.meta.env.VITE_FEATURE_RESEARCH !== 'false';
 
 interface SidebarProps {
   isMacOS?: boolean;
@@ -26,9 +28,11 @@ const tabs: Array<{
   { id: 'voices', path: '/voices', icon: Mic, labelKey: 'nav.voices' },
   { id: 'effects', path: '/effects', icon: Wand2, labelKey: 'nav.effects' },
   { id: 'video-inspiration', path: '/video-inspiration', icon: FileVideo, label: 'Lấy cảm hứng từ video' },
+  { id: 'research', path: '/research', icon: BookOpenCheck, label: 'Nghiên cứu ý tưởng' },
+  { id: 'ai-video', path: '/ai-video', icon: Clapperboard, label: 'Dự án prompt video' },
+  { id: 'product-video', path: '/product-video', icon: Package, label: 'Prompt video sản phẩm' },
   { id: 'comic-series-analysis', path: '/comic-series-analysis', icon: BookImage, label: 'Phân tích truyện tranh' },
   { id: 'story-studio', path: '/story-studio', icon: BookOpenText, label: 'Story Studio' },
-  { id: 'ai-video', path: '/ai-video', icon: Clapperboard, label: 'Dự án prompt video' },
   { id: 'models', path: '/models', icon: Box, labelKey: 'nav.models' },
   { id: 'settings', path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
@@ -56,7 +60,7 @@ export function Sidebar({ isMacOS }: SidebarProps) {
 
       {/* Navigation Buttons */}
       <div className="flex flex-col gap-3">
-        {tabs.map((tab, index) => {
+        {tabs.filter((tab) => researchFeatureEnabled || tab.id !== 'research').map((tab, index) => {
           const Icon = tab.icon;
           const isActive =
             tab.path === '/'

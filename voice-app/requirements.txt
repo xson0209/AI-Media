@@ -9,6 +9,7 @@ python-multipart
 huggingface_hub
 beautifulsoup4
 lxml
+cryptography>=42.0.0
 pillow-heif>=0.18.0
 pillow-avif-plugin>=1.4.6
 defusedxml>=0.7.1

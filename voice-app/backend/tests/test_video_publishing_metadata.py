@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.machinery
 import sys
 import types
 from datetime import datetime
@@ -9,6 +10,7 @@ from sqlalchemy import inspect
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+    torch_stub.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
 
     class _Tensor:
         def element_size(self):
@@ -18,6 +20,7 @@ if "torch" not in sys.modules:
             return 0
 
     torch_stub.Tensor = _Tensor
+    torch_stub.nn = types.SimpleNamespace(Module=object)
     torch_stub.load = lambda *args, **kwargs: None
     torch_stub.save = lambda *args, **kwargs: None
     sys.modules["torch"] = torch_stub
@@ -161,6 +164,48 @@ def test_video_publishing_metadata_table_and_missing_response(db):
     assert response.project_id == project.id
     assert response.target_language == "vi"
     assert response.platforms == {}
+
+
+def test_generate_metadata_allows_incomplete_prompt_pack(db, monkeypatch):
+    project, shot = _seed_phase2_project(db)
+    shot.prompt_status = "needs_review"
+    db.commit()
+    monkeypatch.setattr(
+        video_publishing_metadata.video_phase2,
+        "_run_structured_codex",
+        lambda _db, _project, _prompt, _schema, *, step_name: _all_payload(),
+    )
+
+    response = video_publishing_metadata.generate_publishing_metadata(
+        project.id,
+        models.VideoPublishingMetadataGenerateRequest(platform="all", force=True),
+        db,
+    )
+
+    assert response is not None
+    assert response.status == "completed"
+    assert set(response.platforms) == {"youtube", "tiktok", "facebook"}
+
+
+def test_generate_metadata_allows_project_without_shots(db, monkeypatch):
+    project, _shot = _seed_phase2_project(db)
+    db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project.id).delete()
+    db.query(DBVideoShot).filter(DBVideoShot.project_id == project.id).delete()
+    db.commit()
+    monkeypatch.setattr(
+        video_publishing_metadata.video_phase2,
+        "_run_structured_codex",
+        lambda _db, _project, _prompt, _schema, *, step_name: _all_payload(),
+    )
+
+    response = video_publishing_metadata.generate_publishing_metadata(
+        project.id,
+        models.VideoPublishingMetadataGenerateRequest(platform="all", force=True),
+        db,
+    )
+
+    assert response is not None
+    assert response.status == "completed"
 
 
 def test_map_codex_payload_accepts_three_platforms_and_normalizes_hashtags():

@@ -35,6 +35,12 @@ import {
   type ReactNode,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  SeriesCreateDialog,
+  type SeriesCreateNextAction,
+  type SeriesDraftInput,
+  SeriesPickerDialog,
+} from '@/components/SeriesDialogs/SeriesDialogs';
 import { apiClient } from '@/lib/api/client';
 import { ALL_LANGUAGES, LANGUAGE_OPTIONS } from '@/lib/constants/languages';
 import type {
@@ -166,6 +172,9 @@ const imageAspectSizes: Record<StoryImageAspectRatio, { width: number; height: n
 
 const storyVideoAspectOptions: StoryVideoAspectRatio[] = ['9:16', '16:9', '1:1'];
 const storyImageAspectOptions = Object.keys(imageAspectSizes) as StoryImageAspectRatio[];
+const DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT = 6;
+const DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS = 10;
+const DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT = 4;
 
 function defaultEpisodeOutputSettings(): StoryEpisodeOutputSettings {
   return {
@@ -185,10 +194,10 @@ function defaultEpisodeOutputSettings(): StoryEpisodeOutputSettings {
       narration_density: 'dense',
       call_to_action_style: 'direct',
       target_duration_seconds: null,
-      default_shot_duration_seconds: 5,
-      prompt_segment_count: null,
-      prompt_segment_duration_seconds: null,
-      micro_scenes_per_prompt: 3,
+      default_shot_duration_seconds: null,
+      prompt_segment_count: DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT,
+      prompt_segment_duration_seconds: DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_DURATION_SECONDS,
+      micro_scenes_per_prompt: DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT,
     },
   };
 }
@@ -385,7 +394,7 @@ function formatSeconds(value: number): string {
 function videoDurationSummary(video: StoryEpisodeOutputSettings['video']): string {
   const promptCount = video.prompt_segment_count ?? null;
   const promptDuration = video.prompt_segment_duration_seconds ?? null;
-  const microScenes = video.micro_scenes_per_prompt || 3;
+  const microScenes = video.micro_scenes_per_prompt || DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT;
   if (promptCount && promptDuration) {
     const totalSeconds = promptCount * promptDuration;
     const secondsPerMicroScene = promptDuration / Math.max(1, microScenes);
@@ -693,6 +702,8 @@ export function StoryStudio() {
   const [promptLibraryOpen, setPromptLibraryOpen] = useState(false);
   const [promptLibrarySnapshot, setPromptLibrarySnapshot] = useState<PanelPayload[] | null>(null);
   const [copiedPromptKey, setCopiedPromptKey] = useState<string | null>(null);
+  const [seriesPickerOpen, setSeriesPickerOpen] = useState(false);
+  const [seriesCreateDialogOpen, setSeriesCreateDialogOpen] = useState(false);
   const [autoRunStep, setAutoRunStep] = useState<string | null>(null);
   const [profileSuggestion, setProfileSuggestion] = useState<SeriesCharacterProfileCreate | null>(
     null,
@@ -849,18 +860,52 @@ export function StoryStudio() {
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'series'] });
   };
 
+  const selectStorySeries = (series: VideoSeriesResponse) => {
+    setSelectedSeriesId(series.id);
+    setSelectedEpisodeId('');
+    setProfileSuggestion(null);
+    setStorySuggestion(null);
+    setSeriesPickerOpen(false);
+    setNotice('Đã chọn series cho Story Studio.');
+  };
+
   const createSeries = useMutation({
-    mutationFn: () => {
-      if (!seriesDraft.title.trim()) throw new Error('Tên series là bắt buộc.');
-      return apiClient.createVideoSeries({
-        title: seriesDraft.title.trim(),
+    mutationFn: (variables: {
+      draft?: SeriesDraftInput;
+      nextAction?: SeriesCreateNextAction;
+    } = {}) => {
+      const source = variables.draft ?? {
+        title: seriesDraft.title,
         series_mode: seriesDraft.series_mode,
+        character_bible: '',
+        world_bible: '',
+        style_bible: '',
+        continuity_rules: '',
+        negative_rules: '',
+        previous_episode_summary: '',
+      };
+      if (!source.title.trim()) throw new Error('Tên series là bắt buộc.');
+      return apiClient.createVideoSeries({
+        title: source.title.trim(),
+        series_mode: source.series_mode,
+        character_bible: source.character_bible.trim() || null,
+        world_bible: source.world_bible.trim() || null,
+        style_bible: source.style_bible.trim() || null,
+        continuity_rules: source.continuity_rules.trim() || null,
+        negative_rules: source.negative_rules.trim() || null,
+        previous_episode_summary: source.previous_episode_summary.trim() || null,
       });
     },
-    onSuccess: (series) => {
+    onSuccess: (series, variables) => {
       setSelectedSeriesId(series.id);
       setSeriesDraft({ title: '', series_mode: 'image_story_only' });
-      setNotice('Đã tạo series cho Story Studio.');
+      setSeriesCreateDialogOpen(false);
+      setSeriesPickerOpen(false);
+      if (variables?.nextAction === 'manage_characters') {
+        setNotice('Đã tạo series. Bạn có thể thêm hồ sơ nhân vật ở panel bên phải.');
+      } else {
+        setNotice('Đã tạo series cho Story Studio.');
+      }
       invalidateStory();
     },
     onError: (error) => setNotice(getErrorMessage(error)),
@@ -1015,7 +1060,7 @@ export function StoryStudio() {
             ...outputSettings.video,
             call_to_action_style: outputSettings.video.call_to_action_style || null,
             target_duration_seconds: outputSettings.video.target_duration_seconds || null,
-            default_shot_duration_seconds: outputSettings.video.default_shot_duration_seconds || 5,
+            default_shot_duration_seconds: outputSettings.video.default_shot_duration_seconds ?? null,
             prompt_segment_count: hasPromptSegmentSettings
               ? outputSettings.video.prompt_segment_count
               : null,
@@ -1023,7 +1068,8 @@ export function StoryStudio() {
               ? outputSettings.video.prompt_segment_duration_seconds
               : null,
             micro_scenes_per_prompt: hasPromptSegmentSettings
-              ? outputSettings.video.micro_scenes_per_prompt || 3
+              ? outputSettings.video.micro_scenes_per_prompt ||
+                DEFAULT_STORY_VIDEO_MICRO_SCENES_PER_PROMPT
               : null,
           },
         },
@@ -1428,78 +1474,47 @@ export function StoryStudio() {
       <div className="grid min-h-0 flex-1 gap-4 pb-4 xl:grid-cols-[300px_minmax(0,1fr)_300px] xl:overflow-hidden 2xl:grid-cols-[320px_minmax(0,1fr)_320px]">
         <aside className="min-h-0 overflow-auto rounded-lg border border-border/80 bg-card/80 p-4 shadow-[0_16px_36px_-32px_rgba(0,0,0,0.55)] [scrollbar-gutter:stable] xl:order-1">
           <SectionTitle icon={BookOpen} title="Chuỗi" />
-          <div className="mt-4 grid gap-2">
-            {seriesQuery.isLoading ? <SkeletonText /> : null}
-            {(seriesQuery.data ?? []).map((series) => (
-              <button
-                key={series.id}
-                type="button"
-                onClick={() => {
-                  setSelectedSeriesId(series.id);
-                  setSelectedEpisodeId('');
-                  setProfileSuggestion(null);
-                  setStorySuggestion(null);
-                }}
-                className={cn(
-                  'min-h-12 cursor-pointer rounded-lg border px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                  effectiveSeriesId === series.id
-                    ? 'border-primary/40 bg-primary/10 text-foreground'
-                    : 'border-border/70 bg-background/70 text-muted-foreground hover:bg-muted/40',
-                )}
-              >
-                <span className="block font-medium text-foreground">{series.title}</span>
-                <span className="mt-1 block text-xs">
-                  {seriesModeLabel(series.series_mode)} · {series.story_episode_count} tập truyện ·{' '}
-                  {series.video_episode_count} tập video
-                </span>
-              </button>
-            ))}
-            {!seriesQuery.isLoading && !seriesQuery.data?.length ? (
-              <p className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
-                Chưa có series truyện ảnh hoặc hybrid.
+          <div className="mt-4 rounded-lg border border-border/70 bg-background/70 p-3">
+            {seriesQuery.isLoading ? (
+              <SkeletonText />
+            ) : selectedSeries ? (
+              <div className="grid gap-2 text-sm">
+                <p className="font-semibold text-foreground">{selectedSeries.title}</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {seriesModeLabel(selectedSeries.series_mode)} ·{' '}
+                  {selectedSeries.story_episode_count} tập truyện ·{' '}
+                  {selectedSeries.video_episode_count} tập video ·{' '}
+                  {selectedSeries.character_profiles?.length ?? 0} hồ sơ nhân vật
+                </p>
+                <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                  {selectedSeries.character_bible?.trim() ||
+                    selectedSeries.world_bible?.trim() ||
+                    'Series này chưa có preview Bible.'}
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Chưa có series truyện ảnh hoặc hybrid được chọn.
               </p>
-            ) : null}
-          </div>
+            )}
 
-          <div className="mt-5 border-t border-border/70 pt-4">
-            <p className="text-sm font-semibold">Tạo series mới</p>
-            <div className="mt-3 grid gap-2">
-              <FieldLabel label="Tên series">
-                <input
-                  value={seriesDraft.title}
-                  onChange={(event) =>
-                    setSeriesDraft((current) => ({ ...current, title: event.target.value }))
-                  }
-                  className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
-                  placeholder="Ví dụ: Thị trấn sau màn mưa"
-                />
-              </FieldLabel>
-              <FieldLabel label="Chế độ">
-                <select
-                  value={seriesDraft.series_mode}
-                  onChange={(event) =>
-                    setSeriesDraft((current) => ({
-                      ...current,
-                      series_mode: event.target.value as SeriesMode,
-                    }))
-                  }
-                  className="h-10 rounded-lg border border-input bg-background px-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
-                >
-                  <option value="image_story_only">Series truyện ảnh</option>
-                  <option value="hybrid">Series truyện + video</option>
-                </select>
-              </FieldLabel>
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
-                className="mt-1 justify-self-start"
-                disabled={createSeries.isPending || !seriesDraft.title.trim()}
-                onClick={() => createSeries.mutate()}
+                variant="outline"
+                onClick={() => setSeriesPickerOpen(true)}
+                disabled={createSeries.isPending}
               >
-                {createSeries.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
+                <BookOpen className="h-4 w-4" />
+                Chọn series
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSeriesCreateDialogOpen(true)}
+                disabled={createSeries.isPending}
+              >
+                <Plus className="h-4 w-4" />
                 Tạo series
               </Button>
             </div>
@@ -2260,7 +2275,7 @@ export function StoryStudio() {
                               video: {
                                 ...current.output_settings.video,
                                 default_shot_duration_seconds:
-                                  optionalPositiveInt(event.target.value) ?? 5,
+                                  optionalPositiveInt(event.target.value),
                               },
                             },
                           }))
@@ -2325,7 +2340,7 @@ export function StoryStudio() {
                               ...current.output_settings,
                               video: {
                                 ...current.output_settings.video,
-                                micro_scenes_per_prompt: optionalPositiveInt(event.target.value) ?? 3,
+                                micro_scenes_per_prompt: optionalPositiveInt(event.target.value),
                               },
                             },
                           }))
@@ -3292,6 +3307,33 @@ export function StoryStudio() {
           )}
         </main>
       </div>
+      <SeriesPickerDialog
+        open={seriesPickerOpen}
+        onOpenChange={setSeriesPickerOpen}
+        context="story_studio"
+        series={seriesQuery.data ?? []}
+        selectedSeriesId={effectiveSeriesId}
+        loading={seriesQuery.isLoading || seriesQuery.isFetching}
+        error={seriesQuery.error ? getErrorMessage(seriesQuery.error) : null}
+        disabled={busy}
+        onSelect={selectStorySeries}
+        onCreateNew={() => {
+          setSeriesPickerOpen(false);
+          setSeriesCreateDialogOpen(true);
+        }}
+      />
+      <SeriesCreateDialog
+        open={seriesCreateDialogOpen}
+        onOpenChange={setSeriesCreateDialogOpen}
+        context="story_studio"
+        defaultMode="image_story_only"
+        saving={createSeries.isPending}
+        error={createSeries.error ? getErrorMessage(createSeries.error) : null}
+        nextActions={['select', 'manage_characters']}
+        defaultNextAction="select"
+        submitLabel="Tạo series"
+        onSubmit={(draft, nextAction) => createSeries.mutate({ draft, nextAction })}
+      />
       <PromptLibraryModal
         open={promptLibraryOpen}
         panels={promptLibraryPanels}
@@ -3320,26 +3362,93 @@ function PromptLibraryModal({
   onClose: () => void;
   onCopy: (key: string, value: string) => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    previouslyFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusFrame = window.requestAnimationFrame(() => dialogRef.current?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+
+      const focusableElements = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (!focusableElements.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === firstElement || !dialogRef.current.contains(activeElement))) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (
+        !event.shiftKey &&
+        (activeElement === lastElement || !dialogRef.current.contains(activeElement))
+      ) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previouslyFocusedElementRef.current?.isConnected) {
+        previouslyFocusedElementRef.current.focus();
+      }
+    };
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-6"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Đóng popup prompt"
+        className="absolute inset-0 cursor-default bg-black/55 backdrop-blur-sm"
+        onClick={onClose}
+      />
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Toàn bộ prompt ảnh"
-        className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        className="relative z-10 flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl outline-none"
       >
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 p-4">
           <div className="min-w-0">
-            <p className="text-base font-semibold text-foreground">Toàn bộ prompt ảnh</p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h2 id={titleId} className="text-base font-semibold text-foreground">
+              Toàn bộ prompt ảnh
+            </h2>
+            <p id={descriptionId} className="mt-1 text-sm text-muted-foreground">
               {panels.length} prompt · cuộn để đọc toàn bộ danh sách trước khi copy sang tool render.
             </p>
           </div>

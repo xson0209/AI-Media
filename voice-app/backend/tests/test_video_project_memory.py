@@ -1,4 +1,5 @@
 import asyncio
+import importlib.machinery
 import json
 import sys
 import types
@@ -9,6 +10,7 @@ from sqlalchemy import inspect
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+    torch_stub.__spec__ = importlib.machinery.ModuleSpec("torch", loader=None)
 
     class _Tensor:
         def element_size(self):
@@ -18,9 +20,16 @@ if "torch" not in sys.modules:
             return 0
 
     torch_stub.Tensor = _Tensor
+    torch_stub.nn = types.SimpleNamespace(Module=object)
     torch_stub.load = lambda *args, **kwargs: None
     torch_stub.save = lambda *args, **kwargs: None
     sys.modules["torch"] = torch_stub
+
+if "backend.services.transcribe" not in sys.modules:
+    transcribe_stub = types.ModuleType("backend.services.transcribe")
+    transcribe_stub.__spec__ = importlib.machinery.ModuleSpec("backend.services.transcribe", loader=None)
+    transcribe_stub.get_whisper_model = lambda: None
+    sys.modules["backend.services.transcribe"] = transcribe_stub
 
 from backend import config, database, models
 from backend.database import (
@@ -346,7 +355,7 @@ def test_series_project_records_task_dependencies_and_stales_target_narration_on
     event_types = {event.artifact_type for event in events}
     assert {"scene_voice", "subtitle", "package"}.issubset(event_types)
     assert "video_prompt" not in event_types
-    assert all("Ká»‹ch báº£n Ä‘Ã­ch" in event.reason_vi for event in events)
+    assert all("Kịch bản đích đã đổi" in event.reason_vi for event in events)
 
 
 def test_source_transcript_edit_does_not_stale_target_voice_or_subtitle(db, monkeypatch):

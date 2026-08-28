@@ -6,6 +6,7 @@ import {
   redirect,
   useRouterState,
 } from '@tanstack/react-router';
+import { lazy, Suspense } from 'react';
 import { AppFrame } from '@/components/AppFrame/AppFrame';
 import { AIVideoAssistant } from '@/components/AIVideoAssistant/AIVideoAssistant';
 import { CapturesTab } from '@/components/CapturesTab/CapturesTab';
@@ -34,6 +35,45 @@ import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
 import { MODEL_DISPLAY_NAMES, useRestoreActiveTasks } from '@/lib/hooks/useRestoreActiveTasks';
 import { cn } from '@/lib/utils/cn';
 
+const researchFeatureEnabled = import.meta.env.VITE_FEATURE_RESEARCH !== 'false';
+const ResearchWorkspace = lazy(async () => {
+  const module = await import('@/components/ResearchWorkspace/ResearchWorkspace');
+  return { default: module.ResearchWorkspace };
+});
+
+const ProductVideo = lazy(async () => {
+  const module = await import('@/components/ProductVideo/ProductVideo');
+  return { default: module.ProductVideo };
+});
+
+function ProductVideoRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-0 flex-1 items-center justify-center" aria-live="polite">
+          <span className="text-sm text-muted-foreground">Đang mở luồng video sản phẩm...</span>
+        </div>
+      }
+    >
+      <ProductVideo />
+    </Suspense>
+  );
+}
+
+function ResearchWorkspaceRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-0 flex-1 items-center justify-center" aria-live="polite">
+          <span className="text-sm text-muted-foreground">Đang mở không gian nghiên cứu...</span>
+        </div>
+      }
+    >
+      <ResearchWorkspace />
+    </Suspense>
+  );
+}
+
 // Simple platform check that works in both web and Tauri
 const isMacOS = () => navigator.platform.toLowerCase().includes('mac');
 
@@ -42,8 +82,10 @@ function RootLayout() {
   const routerState = useRouterState();
   const isWideWorkspace =
     routerState.location.pathname === '/ai-video' ||
+    routerState.location.pathname === '/product-video' ||
     routerState.location.pathname === '/story-studio' ||
     routerState.location.pathname === '/video-inspiration' ||
+    routerState.location.pathname === '/research' ||
     routerState.location.pathname.startsWith('/comic-series-analysis');
 
   // Monitor active downloads/generations and show toasts for them
@@ -161,6 +203,12 @@ const aiVideoRoute = createRoute({
   component: AIVideoAssistant,
 });
 
+const productVideoRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/product-video',
+  component: ProductVideoRoute,
+});
+
 const storyStudioRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/story-studio',
@@ -230,6 +278,17 @@ const settingsMCPRoute = createRoute({
   component: MCPPage,
 });
 
+const researchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/research',
+  component: ResearchWorkspaceRoute,
+  beforeLoad: () => {
+    if (!researchFeatureEnabled) {
+      throw redirect({ to: '/ai-video' });
+    }
+  },
+});
+
 const settingsAIPlanningRoute = createRoute({
   getParentRoute: () => settingsRoute,
   path: '/ai-planning',
@@ -278,9 +337,11 @@ const routeTree = rootRoute.addChildren([
   voicesRoute,
   effectsRoute,
   videoInspirationRoute,
+  researchRoute,
   comicSeriesAnalysisRoute,
   comicSeriesAnalysisDetailRoute,
   aiVideoRoute,
+  productVideoRoute,
   storyStudioRoute,
   modelsRoute,
   settingsRoute.addChildren([

@@ -24,10 +24,10 @@ from ..database import (
     VideoShotPrompt as DBVideoShotPrompt,
     VideoSubtitle as DBVideoSubtitle,
 )
-from . import video_assets, video_errors, video_language, video_purpose, video_storage
+from . import video_assets, video_errors, video_language, video_purpose, video_rendering, video_speech, video_storage
 
-DEFAULT_PROMPT_SEGMENT_SECONDS = 10
-DEFAULT_MICRO_SCENES_PER_PROMPT = 3
+DEFAULT_PROMPT_SEGMENT_SECONDS = 8
+DEFAULT_MICRO_SCENES_PER_PROMPT = 4
 
 
 class VideoPackageError(ValueError):
@@ -220,12 +220,30 @@ def get_package_readiness(project_id: str, db: Session) -> models.VideoPackageRe
     missing_prompt = [] if shots else [scene.id for scene in scenes if scene.id not in prompt_scene_ids]
     if shots:
         missing_voice = []
-        missing_voice_shots = [
-            shot.id
-            for shot in shots
-            if _requires_shot_narration(shot)
-            and (shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration or _shot_audio_path(shot) is None)
-        ]
+        if video_speech.uses_veo_native_speech(project):
+            clips = video_rendering.active_clips_for_project(project_id, db)
+            missing_voice_shots = []
+            for shot in shots:
+                if not _requires_shot_narration(shot):
+                    continue
+                clip = clips.get(shot.id)
+                clip_path = video_storage.resolve_artifact_storage_path(clip.file_path) if clip else None
+                if (
+                    clip is None
+                    or clip.status != "ready"
+                    or not clip.has_audio
+                    or not clip.duration_seconds
+                    or clip_path is None
+                    or not clip_path.exists()
+                ):
+                    missing_voice_shots.append(shot.id)
+        else:
+            missing_voice_shots = [
+                shot.id
+                for shot in shots
+                if _requires_shot_narration(shot)
+                and (shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration or _shot_audio_path(shot) is None)
+            ]
     else:
         missing_voice = [
             scene.id
@@ -252,13 +270,21 @@ def get_package_readiness(project_id: str, db: Session) -> models.VideoPackageRe
         reasons.append("Thiếu giọng đọc: " + ", ".join(labels))
     if missing_voice_shots:
         labels = [video_storage.shot_number(shot.shot_order) for shot in shots if shot.id in missing_voice_shots]
-        reasons.append("Thiếu giọng đọc: " + ", ".join(labels))
+        reasons.append(
+            ("Clip Veo thiếu audio lời thoại tiếng Việt: " if video_speech.uses_veo_native_speech(project) else "Thiếu giọng đọc: ")
+            + ", ".join(labels)
+        )
     if missing_subtitle:
         reasons.append("Chưa có file phụ đề .srt hoàn tất.")
 
     return models.VideoPackageReadinessResponse(
         project_id=project_id,
         language=video_language.normalize_video_language(getattr(project, "target_language", None)),
+        speech_source=(
+            video_speech.speech_source_for_language(getattr(project, "target_language", None))
+            if getattr(project, "phase", "phase1") == "phase2"
+            else video_speech.SPEECH_SOURCE_PROJECT_AUDIO
+        ),
         video_purpose=video_purpose.normalize_video_purpose(getattr(project, "video_purpose", None)),
         dialogue_mode=video_purpose.normalize_dialogue_mode(getattr(project, "dialogue_mode", None), purpose=getattr(project, "video_purpose", None)),
         narration_density=video_purpose.normalize_narration_density(getattr(project, "narration_density", None), purpose=getattr(project, "video_purpose", None)),
@@ -298,6 +324,11 @@ def _manifest(project: DBVideoProject, scenes: list[DBVideoScene], db: Session) 
         project_id=project.id,
         project_title=project.title,
         language=video_language.normalize_video_language(getattr(project, "target_language", None)),
+        speech_source=(
+            video_speech.speech_source_for_language(getattr(project, "target_language", None))
+            if getattr(project, "phase", "phase1") == "phase2"
+            else video_speech.SPEECH_SOURCE_PROJECT_AUDIO
+        ),
         video_purpose=video_purpose.normalize_video_purpose(getattr(project, "video_purpose", None)),
         dialogue_mode=video_purpose.normalize_dialogue_mode(getattr(project, "dialogue_mode", None), purpose=getattr(project, "video_purpose", None)),
         narration_density=video_purpose.normalize_narration_density(getattr(project, "narration_density", None), purpose=getattr(project, "video_purpose", None)),
@@ -313,6 +344,14 @@ def _guide_text(project: DBVideoProject) -> str:
         language_label = video_language.video_language_label(getattr(project, "target_language", None))
         prompt_duration = _project_prompt_duration(project)
         micro_count = _project_micro_scenes_per_prompt(project)
+        native_speech = video_speech.uses_veo_native_speech(project)
+        audio_guide = (
+            "3. Video tieng Viet dung loi thoai/audio render truc tiep trong tung clip Veo 3; goi nay khong tao thu muc voice TTS rieng.\n"
+            "4. Thu muc '04 - Phu de' chua file .srt tieng Viet, timing theo do dai clip Veo.\n\n"
+            if native_speech
+            else f"3. Thu muc '03 - Giong doc' chua file voice {language_label} da tao bang Voicebox.\n"
+            f"4. Thu muc '04 - Phu de' chua file .srt {language_label} khop timing voice.\n\n"
+        )
         return (
             f"Bo nguyen lieu prompt video - {project.title}\n\n"
             f"Video language: {language_label}.\n\n"
@@ -321,8 +360,7 @@ def _guide_text(project: DBVideoProject) -> str:
             f"Narration density: {video_purpose.normalize_narration_density(getattr(project, 'narration_density', None), purpose=getattr(project, 'video_purpose', None))}.\n\n"
             f"1. Thu muc '01 - Kich ban' chua kich ban {language_label}, mo ta tieng Viet, continuity bible va segment list CSV.\n"
             f"2. Thu muc '02 - Prompt video' chua prompt goc cho tung segment {prompt_duration} giay, moi segment co {micro_count} canh nho, retention notes, chuyen canh va am thanh/SFX de ban dung khi dung video. Copy prompt goc sang cong cu tao video ben ngoai.\n"
-            f"3. Thu muc '03 - Giong doc' chua file voice {language_label} da tao bang Voicebox.\n"
-            f"4. Thu muc '04 - Phu de' chua file .srt {language_label} khop timing voice.\n\n"
+            f"{audio_guide}"
             "Ban giai thich tieng Viet trong goi nay chi de doc hieu va duyet noi dung; no khong phai file phu de .srt cua video cuoi.\n"
             "Cac cue SFX/BGM trong goi nay la chi dan dung neu chua co audio asset that duoc mix vao MP4.\n"
             "Voicebox khong render MP4 trong goi ZIP nay. Ban dung prompt video, voice va subtitle trong tool dung video ben ngoai.\n"
@@ -346,6 +384,8 @@ def _shot_list_csv(project: DBVideoProject, shots: list[DBVideoShot], db: Sessio
         "duration",
         "vietnamese_description",
         narration_header,
+        "speech_source",
+        "speech_cues",
         "shot_type",
         "camera_angle",
         "framing",
@@ -368,6 +408,8 @@ def _shot_list_csv(project: DBVideoProject, shots: list[DBVideoShot], db: Sessio
             shot.duration_seconds or "",
             shot.vietnamese_description or "",
             shot.english_narration or "",
+            video_speech.speech_source_for_language(getattr(project, "target_language", None)),
+            json.dumps(shot.speech_cues_json or [], ensure_ascii=False),
             shot.shot_type or "",
             shot.camera_angle or "",
             shot.framing or "",
@@ -550,12 +592,13 @@ def _write_package_zip(
                     _zip_name(root, "02 - Prompt video", video_storage.video_prompt_filename(scene.scene_order if scene else None, shot.shot_order)),
                     _phase2_prompt_text(project, shot, prompt),
                 )
-            for shot in shots:
-                if _requires_shot_narration(shot):
-                    path = _shot_audio_path(shot)
-                    filename = _shot_audio_filename(shot, scenes_by_id)
-                    if path is not None and filename is not None:
-                        archive.write(path, _zip_name(root, "03 - Giong doc", filename))
+            if not video_speech.uses_veo_native_speech(project):
+                for shot in shots:
+                    if _requires_shot_narration(shot):
+                        path = _shot_audio_path(shot)
+                        filename = _shot_audio_filename(shot, scenes_by_id)
+                        if path is not None and filename is not None:
+                            archive.write(path, _zip_name(root, "03 - Giong doc", filename))
             archive.write(subtitle_path, _zip_name(root, "04 - Phu de", video_storage.subtitle_filename(project.title)))
             return
 

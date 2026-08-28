@@ -112,6 +112,19 @@ def _as_list(value: Any) -> list[Any]:
         return []
     return value if isinstance(value, list) else [value]
 
+
+def _has_meaningful_content(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(_has_meaningful_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_meaningful_content(item) for item in value)
+    return True
+
+
 def _rewrite_payload(row: DBVideoInspirationJob) -> dict[str, Any]:
     analysis = _as_dict(row.analysis_json)
     return _as_dict(analysis.get("rewrite"))
@@ -384,6 +397,72 @@ def list_handoffs_for_job(job_id: str, db: Session) -> models.VideoInspirationHa
     )
 
 
+def create_project_memory_cards(
+    project: DBVideoProject,
+    *,
+    source_type: str,
+    source_ref_id: str,
+    items: list[tuple[str, str, Any]],
+    db: Session,
+    replace: bool = True,
+    commit: bool = True,
+) -> list[DBVideoProjectMemoryCard]:
+    """Materialize approved handoff content into project-scope memory cards."""
+    existing = (
+        db.query(DBVideoProjectMemoryCard)
+        .filter(
+            DBVideoProjectMemoryCard.project_id == project.id,
+            DBVideoProjectMemoryCard.source_type == source_type,
+            DBVideoProjectMemoryCard.source_ref_id == source_ref_id,
+        )
+        .order_by(DBVideoProjectMemoryCard.card_type.asc(), DBVideoProjectMemoryCard.created_at.asc())
+        .all()
+    )
+    if existing and not replace:
+        return existing
+    if existing:
+        db.query(DBVideoProjectMemoryCard).filter(
+            DBVideoProjectMemoryCard.project_id == project.id,
+            DBVideoProjectMemoryCard.source_type == source_type,
+            DBVideoProjectMemoryCard.source_ref_id == source_ref_id,
+        ).delete(synchronize_session=False)
+
+    now = _now()
+    rows: list[DBVideoProjectMemoryCard] = []
+    for card_type, title, content in items:
+        if not _has_meaningful_content(content):
+            continue
+        if isinstance(content, dict):
+            normalized = content
+        elif isinstance(content, list):
+            normalized = {"items": content}
+        else:
+            normalized = {"value": content}
+        row = DBVideoProjectMemoryCard(
+            id=str(uuid.uuid4()),
+            project_id=project.id,
+            series_id=project.series_id,
+            memory_scope="project",
+            card_type=card_type,
+            title=title,
+            content_json=normalized,
+            status="approved",
+            source_type=source_type,
+            source_ref_id=source_ref_id,
+            revision=1,
+            created_at=now,
+            updated_at=now,
+            approved_at=now,
+        )
+        db.add(row)
+        rows.append(row)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    return rows
+
+
 def create_project_memory_from_handoff(project: DBVideoProject, handoff: DBVideoInspirationHandoff, db: Session) -> list[DBVideoProjectMemoryCard]:
     payload = _as_dict(handoff.payload_json)
     target = _as_dict(payload.get("target_content"))
@@ -404,36 +483,13 @@ def create_project_memory_from_handoff(project: DBVideoProject, handoff: DBVideo
         ("avoid", "Điều cần tránh", {"avoid": target.get("avoid"), "originality_boundaries": payload.get("originality_boundaries")}),
         ("source_evidence", "Bằng chứng nguồn", {"evidence_refs": payload.get("evidence_refs"), "limitations": payload.get("limitations")}),
     ]
-    db.query(DBVideoProjectMemoryCard).filter(
-        DBVideoProjectMemoryCard.project_id == project.id,
-        DBVideoProjectMemoryCard.source_ref_id == handoff.id,
-    ).delete(synchronize_session=False)
-    now = _now()
-    rows: list[DBVideoProjectMemoryCard] = []
-    for card_type, title, content in items:
-        normalized = content if isinstance(content, dict) else {"value": content}
-        if not any(str(value or "").strip() for value in normalized.values()):
-            continue
-        row = DBVideoProjectMemoryCard(
-            id=str(uuid.uuid4()),
-            project_id=project.id,
-            series_id=project.series_id,
-            memory_scope="project",
-            card_type=card_type,
-            title=title,
-            content_json=normalized,
-            status="approved",
-            source_type="handoff",
-            source_ref_id=handoff.id,
-            revision=1,
-            created_at=now,
-            updated_at=now,
-            approved_at=now,
-        )
-        db.add(row)
-        rows.append(row)
-    db.commit()
-    return rows
+    return create_project_memory_cards(
+        project,
+        source_type="handoff",
+        source_ref_id=handoff.id,
+        items=items,
+        db=db,
+    )
 
 
 def plan_target_timeline(project: DBVideoProject, handoff: DBVideoInspirationHandoff, db: Session) -> list[DBVideoProjectTargetTimelineBeat]:
@@ -513,13 +569,42 @@ def compile_context(
     timeline = list_target_timeline(project_id, db).items
     pinned_types = {"project_identity", "video_goal", "content_spine", "hook_and_payoff", "approved_decision"}
     if data.task_type in {"voice", "subtitle"}:
-        selected_memory = [card for card in memory if card.card_type in {"voice_and_language", "approved_decision", "hook_and_payoff"}]
+        selected_memory = [card for card in memory if card.card_type in {"voice_and_language", "approved_decision", "approved_script_seed", "hook_and_payoff"}]
         selected_timeline = []
     elif data.task_type == "story":
-        selected_memory = [card for card in memory if card.card_type in pinned_types | {"target_audience", "retention_map", "avoid"}]
+        selected_memory = [
+            card
+            for card in memory
+            if card.card_type
+            in pinned_types
+            | {
+                "target_audience",
+                "retention_map",
+                "selected_ideas",
+                "approved_script_seed",
+                "research_findings",
+                "must_have",
+                "avoid",
+                "source_evidence",
+            }
+        ]
         selected_timeline = timeline[:8]
     else:
-        selected_memory = [card for card in memory if card.card_type in pinned_types | {"visual_direction", "audio_direction", "retention_map", "must_have", "avoid"}]
+        selected_memory = [
+            card
+            for card in memory
+            if card.card_type
+            in pinned_types
+            | {
+                "visual_direction",
+                "audio_direction",
+                "retention_map",
+                "selected_ideas",
+                "approved_script_seed",
+                "must_have",
+                "avoid",
+            }
+        ]
         selected_timeline = timeline[:12]
     context = {
         "task_type": data.task_type,

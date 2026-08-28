@@ -19,13 +19,23 @@ from sqlalchemy.orm import Session
 from ... import config as core_config
 from ...database import (
     ComicAnalysisJob as DBJob,
+    ComicApprovalManifest as DBApprovalManifest,
+    ComicDetectedCharacter as DBCharacter,
+    ComicDetectedLocation as DBLocation,
+    ComicPanel as DBPanel,
+    ComicPlotAnalysis as DBPlot,
+    ComicSeriesHandoff as DBHandoff,
+    ComicSeriesHandoffItem as DBHandoffItem,
     ComicSourceAsset as DBAsset,
     ComicSourceDocument as DBDoc,
     ComicSourcePage as DBPage,
+    ComicSourceVersionRecord as DBVersionRecord,
+    ComicSpeechBubble as DBBubble,
 )
 from . import config as comic_config
 from . import fetcher, html_extractor, image_pipeline, url_security
 from .contracts import (
+    ACTIVE_RUN_STATUSES,
     DEFAULT_DEVELOPMENT_MODE,
     DEVELOPMENT_MODES,
     READING_MODES,
@@ -443,15 +453,75 @@ def list_jobs(db: Session, *, limit: int = 20, offset: int = 0) -> list[DBJob]:
     )
 
 
+def count_jobs(db: Session) -> int:
+    """Return the total number of jobs before list pagination is applied."""
+    return db.query(DBJob).count()
+
+
 def delete_job(db: Session, job_id: str) -> bool:
-    """Delete a job and its un-handed-off artifacts (explicit cleanup, task 2.10)."""
+    """Delete an inactive job and every Comic-owned dependent row."""
     job = get_job(db, job_id)
     if job is None:
         return False
+
+    if job.run_status in ACTIVE_RUN_STATUSES:
+        raise ComicAnalysisError(
+            "COMIC_ANALYSIS_INVALID_STATE",
+            "Không thể xóa job đang được xử lý. Hãy hủy job trước khi xóa.",
+            status_code=409,
+        )
+
     # Explicit child cleanup (SQLite FK cascade is not assumed).
-    doc_ids = [d.id for d in db.query(DBDoc).filter(DBDoc.job_id == job_id).all()]
+    # Break the job -> current document / manifest pointers before deleting children.
+    job.current_source_document_id = None
+    job.approval_manifest_id = None
+    db.flush()
+
+    handoff_ids = [
+        row.id for row in db.query(DBHandoff.id).filter(DBHandoff.job_id == job_id)
+    ]
+    if handoff_ids:
+        db.query(DBHandoffItem).filter(
+            DBHandoffItem.handoff_id.in_(handoff_ids)
+        ).delete(synchronize_session=False)
+        db.query(DBVersionRecord).filter(
+            DBVersionRecord.handoff_id.in_(handoff_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(DBVersionRecord).filter(
+        DBVersionRecord.job_id == job_id
+    ).delete(synchronize_session=False)
+    db.query(DBHandoff).filter(DBHandoff.job_id == job_id).delete(
+        synchronize_session=False
+    )
+    db.query(DBApprovalManifest).filter(
+        DBApprovalManifest.job_id == job_id
+    ).delete(synchronize_session=False)
+
+    # Bubbles reference panels; panels can reference source pages/assets.
+    db.query(DBBubble).filter(DBBubble.job_id == job_id).delete(
+        synchronize_session=False
+    )
+    db.query(DBPanel).filter(DBPanel.job_id == job_id).delete(
+        synchronize_session=False
+    )
+    db.query(DBCharacter).filter(DBCharacter.job_id == job_id).delete(
+        synchronize_session=False
+    )
+    db.query(DBLocation).filter(DBLocation.job_id == job_id).delete(
+        synchronize_session=False
+    )
+    db.query(DBPlot).filter(DBPlot.job_id == job_id).delete(
+        synchronize_session=False
+    )
+
     db.query(DBPage).filter(DBPage.job_id == job_id).delete(synchronize_session=False)
     db.query(DBAsset).filter(DBAsset.job_id == job_id).delete(synchronize_session=False)
+    # Source documents form a self-referencing revision chain.
+    db.query(DBDoc).filter(DBDoc.job_id == job_id).update(
+        {DBDoc.previous_revision_id: None},
+        synchronize_session=False,
+    )
     db.query(DBDoc).filter(DBDoc.job_id == job_id).delete(synchronize_session=False)
     db.delete(job)
     db.commit()
@@ -459,6 +529,7 @@ def delete_job(db: Session, job_id: str) -> bool:
 
 
 __all__ = [
+    "count_jobs",
     "create_upload_job",
     "create_url_job",
     "delete_job",

@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 SOURCE_PACKAGE_SCHEMA_VERSION = "source_package.v1"
 DEFAULT_AI_VIDEO_BLOCK_LIMIT = 30_000
+TRUNCATION_SUFFIX = "...[truncated]"
 
 
 @dataclass(frozen=True)
@@ -130,7 +131,7 @@ def to_ai_video_source_blocks(
         if not content:
             continue
         if len(content) > max_content_chars:
-            content = content[:max_content_chars].rstrip(" ,.;:\n\t") + "...[truncated]"
+            content = _truncate_content_for_limit(content, max_content_chars)
         result.append(
             {
                 "block_type": block.block_type,
@@ -198,6 +199,16 @@ def _format_content(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
     return json.dumps(value, ensure_ascii=False, indent=2, default=str).strip()
+
+
+def _truncate_content_for_limit(content: str, max_content_chars: int) -> str:
+    if max_content_chars <= 0:
+        return ""
+    if max_content_chars <= len(TRUNCATION_SUFFIX):
+        return content[:max_content_chars].rstrip(" ,.;:\n\t")
+    prefix_limit = max_content_chars - len(TRUNCATION_SUFFIX)
+    prefix = content[:prefix_limit].rstrip(" ,.;:\n\t")
+    return f"{prefix}{TRUNCATION_SUFFIX}"
 
 
 def _clean_token(value: Any) -> str:

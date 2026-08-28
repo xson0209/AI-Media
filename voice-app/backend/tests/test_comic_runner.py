@@ -70,6 +70,115 @@ def test_delete_job_cleans_children(db):
     assert db.query(ComicSourceDocument).filter_by(job_id=job.id).count() == 0
 
 
+def test_delete_job_cleans_analysis_review_and_handoff_rows(db):
+    from backend.database import (
+        ComicApprovalManifest,
+        ComicDetectedCharacter,
+        ComicDetectedLocation,
+        ComicPanel,
+        ComicPlotAnalysis,
+        ComicSeriesHandoff,
+        ComicSeriesHandoffItem,
+        ComicSourcePage,
+        ComicSourceVersionRecord,
+        ComicSpeechBubble,
+    )
+
+    job = service.create_upload_job(db, images=[("analyzed.png", _png())])
+    page = db.query(ComicSourcePage).filter_by(job_id=job.id).one()
+    manifest = ComicApprovalManifest(
+        job_id=job.id,
+        analysis_revision=1,
+        manifest_hash="manifest-hash",
+    )
+    panel = ComicPanel(
+        job_id=job.id,
+        analysis_revision=1,
+        page_id=page.id,
+        asset_id=page.asset_id,
+    )
+    character = ComicDetectedCharacter(
+        job_id=job.id,
+        analysis_revision=1,
+        display_name="Ari",
+    )
+    location = ComicDetectedLocation(
+        job_id=job.id,
+        analysis_revision=1,
+        name="Quan ca phe",
+    )
+    plot = ComicPlotAnalysis(
+        job_id=job.id,
+        analysis_revision=1,
+        synopsis="Ari gap Kai.",
+    )
+    db.add_all([manifest, panel, character, location, plot])
+    db.flush()
+
+    bubble = ComicSpeechBubble(
+        job_id=job.id,
+        analysis_revision=1,
+        panel_id=panel.id,
+        speaker_character_id=character.id,
+        raw_text="Xin chao",
+    )
+    handoff = ComicSeriesHandoff(
+        job_id=job.id,
+        analysis_revision=1,
+        approval_manifest_id=manifest.id,
+    )
+    db.add_all([bubble, handoff])
+    db.flush()
+
+    handoff_item = ComicSeriesHandoffItem(
+        handoff_id=handoff.id,
+        item_type="character",
+        source_ref_id=character.id,
+    )
+    version_record = ComicSourceVersionRecord(
+        job_id=job.id,
+        handoff_id=handoff.id,
+        analysis_revision=1,
+        target_type="profile",
+        target_id="profile-1",
+    )
+    db.add_all([handoff_item, version_record])
+    job.analysis_revision = 1
+    job.approval_manifest_id = manifest.id
+    job.run_status = "ready_for_review"
+    db.commit()
+    job_id = job.id
+    handoff_id = handoff.id
+
+    assert service.delete_job(db, job_id) is True
+    for model in (
+        ComicApprovalManifest,
+        ComicDetectedCharacter,
+        ComicDetectedLocation,
+        ComicPanel,
+        ComicPlotAnalysis,
+        ComicSeriesHandoff,
+        ComicSourceVersionRecord,
+        ComicSpeechBubble,
+    ):
+        assert db.query(model).filter_by(job_id=job_id).count() == 0
+    assert db.query(ComicSeriesHandoffItem).filter_by(handoff_id=handoff_id).count() == 0
+
+
+@pytest.mark.parametrize("run_status", ["queued", "running"])
+def test_delete_job_rejects_active_run(db, run_status):
+    job = service.create_url_job(db, url="https://example.com/chapter")
+    job.run_status = run_status
+    db.commit()
+
+    with pytest.raises(ComicAnalysisError) as exc:
+        service.delete_job(db, job.id)
+
+    assert exc.value.status_code == 409
+    assert exc.value.error_code == "COMIC_ANALYSIS_INVALID_STATE"
+    assert service.get_job(db, job.id) is not None
+
+
 def test_recover_interrupted_jobs(db):
     from backend.database import ComicAnalysisJob
     running = ComicAnalysisJob(source_type="url", source_url="http://x/y", run_status="running")

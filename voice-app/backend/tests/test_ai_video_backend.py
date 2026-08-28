@@ -1,6 +1,8 @@
 import asyncio
 import io
+import itertools
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -18,6 +20,7 @@ from sqlalchemy import create_engine, inspect, text
 from backend import config, database, models
 from backend.database import (
     Generation as DBGeneration,
+    SeriesCharacterProfile as DBSeriesCharacterProfile,
     VoiceProfile as DBVoiceProfile,
     VideoAutoRun as DBVideoAutoRun,
     VideoDebugEvent as DBVideoDebugEvent,
@@ -49,7 +52,10 @@ from backend.services import (
     video_planning_pool,
     video_projects,
     video_rendering,
+    video_series_characters,
+    video_speech,
     video_storage,
+    video_watermark_cleanup,
     story_studio,
     video_subtitles,
     video_voice,
@@ -102,8 +108,12 @@ def test_video_render_prompt_sanitizer_blocks_subtitles_and_text_overlays():
     assert "yellow karaoke" not in lowered
     assert "Do not render subtitles" in safe
     assert "text overlays" in safe
+    assert "stylized 3D cinematic animation" in safe
+    assert "not a flat/static image" in safe
     assert "no subtitles" in negative.casefold()
     assert "no text overlays" in negative.casefold()
+    assert "no 2d illustration" in negative.casefold()
+    assert "no static image" in negative.casefold()
 
 def _add_ready_clip(
     db,
@@ -270,6 +280,8 @@ def test_ai_video_tables_are_created(db):
     assert "no_narration" in scene_columns
     clip_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_shot_clips")}
     assert {"project_id", "shot_id", "status", "file_path", "duration_seconds", "is_active"}.issubset(clip_columns)
+    shot_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_shots")}
+    assert "speech_cues_json" in shot_columns
     render_columns = {column["name"] for column in inspect(database_session.engine).get_columns("video_render_jobs")}
     assert {
         "project_id",
@@ -664,6 +676,48 @@ def test_codex_exec_fallback_uses_user_connected_config_without_forced_model(db,
     assert result.metadata["fallback_error_code"] == "CODEX_EXEC_NONZERO"
     assert "model does not exist" in result.metadata["fallback_reason"]
     assert result.metadata["request_id"]
+
+def test_codex_exec_fallback_treats_cli_stderr_timeout_as_exec_timeout(db, tmp_path, monkeypatch):
+    fake_codex = tmp_path / "codex"
+    fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    row = settings_service.update_ai_planning_settings(
+        db,
+        {"codex_path": str(fake_codex), "timeout_seconds": 30},
+    )
+    calls = []
+
+    def fake_run(command, *, timeout_seconds, cwd=None, input_text=None):
+        calls.append((command, input_text))
+        assert command[-1] == "-"
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout="OpenAI Codex v0.144.1",
+                stderr="Preferred profile error: Codex exec timed out after 20 seconds.",
+            )
+        output_path = command[command.index("--output-last-message") + 1]
+        with open(output_path, "w", encoding="utf-8") as handle:
+            handle.write("fallback ok")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ai_planning, "_run_command", fake_run)
+
+    result = ai_planning.run_codex_exec(row, "Return ok.", return_metadata=True)
+
+    assert isinstance(result, ai_planning.CodexExecResult)
+    assert result.output == "fallback ok"
+    assert len(calls) == 2
+    primary_command = calls[0][0]
+    fallback_command = calls[1][0]
+    assert "--model" in primary_command
+    assert "--config" in primary_command
+    assert "--model" not in fallback_command
+    assert "--config" not in fallback_command
+    assert result.metadata["fallback_used"] is True
+    assert result.metadata["fallback_error_code"] == "CODEX_EXEC_TIMEOUT"
+    assert "timed out after 20 seconds" in result.metadata["fallback_reason"]
 
 def test_codex_exec_schema_fallback_still_runs_inside_user_config_fallback(db, tmp_path, monkeypatch):
     fake_codex = tmp_path / "codex"
@@ -1474,7 +1528,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
             return json.dumps(
                 {
                     "input_synthesis": "Lan follows the approved Story Studio master episode.",
-                    "story_strategy": "Turn the approved door mystery into a short Vietnamese video episode.",
+                    "story_strategy": "Localize the approved door mystery into a short English video episode.",
                     "continuity_bible": "Keep Lan's blue jacket, the silver door clue, and the same cinematic webtoon style.",
                     "detailed_script": "Lan opens the silver door, finds the warning note, and chooses to chase the final train.",
                     **_creative_direction_fields(),
@@ -1483,8 +1537,8 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
                             "title": "Cánh cửa bạc",
                             "vietnamese_description": "Lan mở cánh cửa bạc và nhìn thấy lời nhắn cảnh báo.",
                             "english_narration": (
-                                "Lan giữ chặt áo khoác xanh khi cánh cửa bạc mở ra. "
-                                "Trên chiếc bàn nhỏ, một lời nhắn cảnh báo cô phải bắt chuyến tàu cuối cùng."
+                                "Lan grips her blue jacket as the silver door opens. "
+                                "On a small table, a warning note tells her to catch the final train."
                             ),
                             **_scene_detail_fields(
                                 character_appearance="Lan có mặt trái xoan, tóc đen ngang vai và ánh mắt cảnh giác.",
@@ -1505,7 +1559,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
                             "shot_order": 1,
                             "duration_seconds": 3,
                             "vietnamese_description": "Cận cảnh Lan đứng trước cánh cửa bạc đang phát sáng.",
-                            "english_narration": "Lan giữ chặt áo khoác xanh khi cánh cửa bạc mở ra.",
+                            "english_narration": "Lan grips her blue jacket as the silver door opens.",
                             "primary_action": "Lan reaches toward the glowing silver door.",
                             "purpose": "Mở hook và xác nhận manh mối.",
                             "shot_type": "medium close-up",
@@ -1523,7 +1577,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
                             "shot_order": 2,
                             "duration_seconds": 3,
                             "vietnamese_description": "Lan đọc lời nhắn về chuyến tàu cuối cùng.",
-                            "english_narration": "Trên chiếc bàn nhỏ, một lời nhắn cảnh báo cô phải bắt chuyến tàu cuối cùng.",
+                            "english_narration": "A warning note on the small table tells her to catch the final train.",
                             "primary_action": "Lan picks up the warning note and turns toward the exit.",
                             "purpose": "Payoff cho tập và mở nhiệm vụ tiếp theo.",
                             "shot_type": "insert to over-shoulder",
@@ -1551,7 +1605,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
                             "prompt": (
                                 "Create a 3-second 9:16 cinematic video. Lan, a Vietnamese heroine with a blue jacket "
                                 "and black shoulder-length hair, reaches toward a glowing silver door. Slow push-in, "
-                                "silver light pulses, leave clean space at the lower frame for Vietnamese subtitles."
+                                "silver light pulses, leave clean space at the lower frame for English subtitles."
                             ),
                             "prompt_explanation_vi": "Prompt mở hook bằng cánh cửa bạc, giữ áo khoác xanh và chừa vùng phụ đề.",
                             "negative_prompt": "No watermark, no random text, no changed blue jacket.",
@@ -1576,7 +1630,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
                             "prompt": (
                                 "Create a 3-second 9:16 cinematic video. A warning note sits on a small table while "
                                 "Lan's blue jacket remains visible over her shoulder. The camera tilts from the note "
-                                "to Lan's determined face, with clean lower-frame space for Vietnamese subtitles."
+                                "to Lan's determined face, with clean lower-frame space for English subtitles."
                             ),
                             "prompt_explanation_vi": "Prompt payoff bằng lời nhắn chuyến tàu cuối, tiếp tục giữ continuity của Lan.",
                             "negative_prompt": "No watermark, no unreadable random text, no extra main character.",
@@ -1601,6 +1655,10 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
             )
         raise AssertionError(f"unexpected schema: {output_schema}")
 
+    def fake_story_run(session, prompt, schema, *, timeout_seconds=300):
+        assert schema is story_studio.STORY_CANDIDATE_SCHEMA or schema is story_studio.STORY_EVALUATION_SCHEMA
+        raise story_studio.StoryStudioError("provider timed out")
+
     enqueued_voice_generations: list[str] = []
 
     def fake_enqueue(generation_id, coro):
@@ -1610,12 +1668,13 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
             close()
 
     monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
+    monkeypatch.setattr(story_studio, "_run_structured_ai", fake_story_run)
     monkeypatch.setattr(video_voice, "enqueue_generation", fake_enqueue)
 
     profile = DBVoiceProfile(
-        id="story-cycle-vi-profile",
-        name="Story cycle Vietnamese profile",
-        language="vi",
+        id="story-cycle-en-profile",
+        name="Story cycle English profile",
+        language="en",
         voice_type="cloned",
         default_engine="qwen",
     )
@@ -1652,6 +1711,16 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
             language_profile="vi",
             market_profile="viet_nam",
             source_input="Lan mở cánh cửa bạc và thấy lời nhắn về chuyến tàu cuối.",
+            output_settings=models.StoryEpisodeOutputSettings(
+                video=models.StoryVideoHandoffSettings(
+                    target_language="en",
+                    target_duration_seconds=6,
+                    default_shot_duration_seconds=None,
+                    prompt_segment_count=2,
+                    prompt_segment_duration_seconds=3,
+                    micro_scenes_per_prompt=1,
+                )
+            ),
         ),
         db,
     )
@@ -1697,7 +1766,7 @@ def test_story_studio_series_to_video_prompt_voice_and_subtitle_without_veo(db, 
         .order_by(DBVideoShotPrompt.created_at.asc())
         .all()
     )
-    assert all("clean lower-frame space for Vietnamese subtitles" not in row.prompt for row in stored_prompts)
+    assert all("clean lower-frame space for English subtitles" not in row.prompt for row in stored_prompts)
     assert all("Do not render subtitles" in row.prompt for row in stored_prompts)
     assert all("no subtitles" in (row.negative_prompt or "").casefold() for row in stored_prompts)
     assert "không nhắc tên provider" in captured_prompts["prompts"]
@@ -2062,6 +2131,460 @@ def test_enhanced_audio_mix_command_uses_delay_volume_and_amix(tmp_path):
     assert "volume=0.360" in graph
     assert "afade=t=in" in graph
     assert "amix=inputs=2:duration=first" in graph
+    assert "normalize=0" in graph
+
+def test_enhanced_audio_mix_keeps_voice_level_across_asset_counts(tmp_path):
+    base = tmp_path / "voice.wav"
+    base.write_bytes(b"voice")
+    actions = []
+    for index in range(3):
+        sfx = tmp_path / f"sfx-{index}.wav"
+        sfx.write_bytes(b"sfx")
+        actions.append(
+            {
+                "asset_path": str(sfx),
+                "cue_alias": f"cue_{index}",
+                "start_seconds": float(index),
+                "duration_seconds": 0.5,
+                "volume": 0.3,
+            }
+        )
+    single = video_rendering.build_enhanced_audio_mix_command(
+        ffmpeg="ffmpeg",
+        base_audio_path=base,
+        sfx_actions=actions[:1],
+        output_path=tmp_path / "one.wav",
+        total_duration_seconds=4.0,
+    )
+    many = video_rendering.build_enhanced_audio_mix_command(
+        ffmpeg="ffmpeg",
+        base_audio_path=base,
+        sfx_actions=actions,
+        output_path=tmp_path / "many.wav",
+        total_duration_seconds=4.0,
+    )
+    single_graph = single[single.index("-filter_complex") + 1]
+    many_graph = many[many.index("-filter_complex") + 1]
+    # The voice bed must never be scaled down by the number of mixed inputs.
+    assert "amix=inputs=2:duration=first:dropout_transition=0:normalize=0" in single_graph
+    assert "amix=inputs=4:duration=first:dropout_transition=0:normalize=0" in many_graph
+    assert "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[base]" in single_graph
+    assert "[0:a]aformat=sample_rates=48000:channel_layouts=stereo[base]" in many_graph
+    # Asset levels still come from the asset configuration, not from the mix step.
+    assert many_graph.count("volume=0.300") == 3
+
+class _FakeBedClip:
+    def __init__(self, *, has_audio: bool = True, status: str = "ready"):
+        self.has_audio = has_audio
+        self.status = status
+
+
+def test_clip_audio_bed_decision_covers_every_branch(tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"clip")
+    ready = _FakeBedClip()
+
+    # (a) Voice IS the clip audio: never add a bed, or the voice comb-filters against itself.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=True, has_narration=True, clip=ready, clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_SKIP_NATIVE_SPEECH
+    )
+    # (b) Native speech project, no narration: full bed instead of silence.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=True, has_narration=False, clip=ready, clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_FULL
+    )
+    # (c) Synthetic voice with narration: bed is ducked under the voice.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=True, clip=ready, clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_DUCKED
+    )
+    # (d) Synthetic voice, no narration: full bed.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=False, clip=ready, clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_FULL
+    )
+    # (e) Clip has no audio / missing file / not ready: silence, unchanged behaviour.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=True, clip=_FakeBedClip(has_audio=False), clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO
+    )
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=False, clip=ready, clip_path=tmp_path / "gone.mp4"
+        )
+        == video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO
+    )
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=False, clip=None, clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO
+    )
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False, has_narration=False, clip=_FakeBedClip(status="pending"), clip_path=clip_path
+        )
+        == video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO
+    )
+    assert video_rendering.clip_audio_bed_decision_uses_clip_audio(video_rendering.BED_DECISION_FULL) is True
+    assert video_rendering.clip_audio_bed_decision_uses_clip_audio(video_rendering.BED_DECISION_DUCKED) is True
+    assert (
+        video_rendering.clip_audio_bed_decision_uses_clip_audio(video_rendering.BED_DECISION_SKIP_NATIVE_SPEECH)
+        is False
+    )
+    assert (
+        video_rendering.clip_audio_bed_decision_uses_clip_audio(video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO)
+        is False
+    )
+
+
+def test_clip_audio_bed_decision_clip_only_ignores_project_speech_source(tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"clip")
+    ready = _FakeBedClip()
+    clip_only = video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY
+
+    # The native-speech skip exists to stop the voice doubling against itself. At the
+    # clip-only level there is no voice timeline, so applying it would silence exactly the
+    # segments that carry speech.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=True,
+            has_narration=True,
+            clip=ready,
+            clip_path=clip_path,
+            clip_audio_mode=clip_only,
+        )
+        == video_rendering.BED_DECISION_FULL
+    )
+    # Narrated segments are not ducked either: there is no voice to duck against.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False,
+            has_narration=True,
+            clip=ready,
+            clip_path=clip_path,
+            clip_audio_mode=clip_only,
+        )
+        == video_rendering.BED_DECISION_FULL
+    )
+    # A clip with no audio stream is still silent at this level.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=False,
+            has_narration=True,
+            clip=_FakeBedClip(has_audio=False),
+            clip_path=clip_path,
+            clip_audio_mode=clip_only,
+        )
+        == video_rendering.BED_DECISION_SILENT_NO_CLIP_AUDIO
+    )
+    # The bed level keeps its old behaviour, which is also what the keyword defaults to.
+    assert (
+        video_rendering.clip_audio_bed_decision(
+            native_speech=True,
+            has_narration=True,
+            clip=ready,
+            clip_path=clip_path,
+            clip_audio_mode=video_rendering.CLIP_AUDIO_MODE_BED,
+        )
+        == video_rendering.BED_DECISION_SKIP_NATIVE_SPEECH
+    )
+
+
+def test_clip_audio_mode_maps_boolean_without_changing_api_type():
+    assert (
+        video_rendering.clip_audio_mode_for_settings(models.VideoRenderSettings())
+        == video_rendering.CLIP_AUDIO_MODE_DROP
+    )
+    assert (
+        video_rendering.clip_audio_mode_for_settings(models.VideoRenderSettings(mute_clip_audio=True))
+        == video_rendering.CLIP_AUDIO_MODE_DROP
+    )
+    assert (
+        video_rendering.clip_audio_mode_for_settings(models.VideoRenderSettings(mute_clip_audio=False))
+        == video_rendering.CLIP_AUDIO_MODE_BED
+    )
+    assert (
+        video_rendering.clip_audio_mode_for_settings(models.VideoRenderSettings(clip_audio_mode="clip_only"))
+        == video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY
+    )
+    # The level wins over the boolean whenever it carries a value.
+    assert (
+        video_rendering.clip_audio_mode_for_settings(
+            models.VideoRenderSettings(mute_clip_audio=True, clip_audio_mode="bed")
+        )
+        == video_rendering.CLIP_AUDIO_MODE_BED
+    )
+    # A settings blob written before the level existed carries only the boolean. Reading it
+    # as the default would strip the original audio out of a job the user set to the bed.
+    legacy_bed = models.VideoRenderSettings.model_validate_json('{"resolution": "auto", "mute_clip_audio": false}')
+    assert legacy_bed.clip_audio_mode is None
+    assert video_rendering.clip_audio_mode_for_settings(legacy_bed) == video_rendering.CLIP_AUDIO_MODE_BED
+    legacy_drop = models.VideoRenderSettings.model_validate_json('{"mute_clip_audio": true}')
+    assert video_rendering.clip_audio_mode_for_settings(legacy_drop) == video_rendering.CLIP_AUDIO_MODE_DROP
+    # A client that sends neither field still validates and keeps the default.
+    assert (
+        video_rendering.clip_audio_mode_for_settings(models.VideoRenderSettings.model_validate_json("{}"))
+        == video_rendering.CLIP_AUDIO_MODE_DROP
+    )
+    with pytest.raises(ValueError, match="clip_audio_mode"):
+        models.VideoRenderSettings(clip_audio_mode="karaoke")
+
+
+def test_render_settings_for_project_infers_bed_from_job_without_audio_level(db):
+    """A job row written before the audio level existed must keep its bed level.
+
+    Falling back to the default here would silently drop the original clip audio from every
+    later unattended render of that project, with no error anywhere.
+    """
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Legacy bed job", phase="phase2"), db)
+    db.add(
+        DBVideoRenderJob(
+            project_id=project.id,
+            status="completed",
+            progress=1.0,
+            settings_json='{"resolution": "auto", "fps": 30, "mute_clip_audio": false}',
+            created_at=datetime(2026, 8, 6, 10, 0, 0),
+        )
+    )
+    db.commit()
+
+    resolved = video_rendering.render_settings_for_project(project.id, db)
+
+    assert resolved.clip_audio_mode is None
+    assert video_rendering.clip_audio_mode_for_settings(resolved) == video_rendering.CLIP_AUDIO_MODE_BED
+
+
+def test_resolve_shot_duration_clip_only_times_from_clip_then_script(db):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip only timer", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Has narration, has no voice.", duration_seconds=7.5)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=3.25)
+    clip_only = video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY
+
+    assert video_rendering.resolve_shot_duration(shot, clip=clip, clip_audio_mode=clip_only) == pytest.approx(3.25)
+    # A clip whose duration was never probed falls back to the script duration.
+    clip.duration_seconds = None
+    db.commit()
+    assert video_rendering.resolve_shot_duration(shot, clip=clip, clip_audio_mode=clip_only) == pytest.approx(7.5)
+    # Neither source available still blocks: there is no timer to render against.
+    shot.duration_seconds = None
+    db.commit()
+    assert video_rendering.resolve_shot_duration(shot, clip=clip, clip_audio_mode=clip_only) is None
+    # Without the level the resolver keeps its old voice-only behaviour.
+    assert video_rendering.resolve_shot_duration(shot, clip=clip) is None
+
+
+def test_render_settings_for_project_reuses_last_render_and_falls_back_to_defaults(db):
+    """Unattended flows read the user's last choice instead of always using defaults.
+
+    They run in the backend and cannot see the panel, which is why an MP4 from the auto
+    run never carried the original clip audio no matter what the user picked.
+    """
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Auto settings", phase="phase2"), db)
+
+    # A project that has never been rendered keeps today's behaviour.
+    assert video_rendering.render_settings_for_project(project.id, db) == models.VideoRenderSettings()
+    chosen = models.VideoRenderSettings(mute_clip_audio=False, fps=60, watermark_cleanup=True)
+    older = DBVideoRenderJob(
+        project_id=project.id,
+        status="completed",
+        progress=1.0,
+        settings_json=models.VideoRenderSettings(mute_clip_audio=True, fps=24).model_dump_json(),
+        created_at=datetime(2026, 8, 1, 10, 0, 0),
+    )
+    newest = DBVideoRenderJob(
+        project_id=project.id,
+        status="completed",
+        progress=1.0,
+        settings_json=chosen.model_dump_json(),
+        created_at=datetime(2026, 8, 2, 10, 0, 0),
+    )
+    db.add_all([older, newest])
+    db.commit()
+
+    resolved = video_rendering.render_settings_for_project(project.id, db)
+
+    # The most recent render wins, and its choice really does reach the render decision.
+    assert resolved.mute_clip_audio is False
+    assert resolved.fps == 60
+    assert resolved.watermark_cleanup is True
+    assert video_rendering.clip_audio_mode_for_settings(resolved) == video_rendering.CLIP_AUDIO_MODE_BED
+
+    # One project's settings never leak into another's.
+    other = video_projects.create_project(models.VideoProjectCreate(topic="Other project", phase="phase2"), db)
+    assert video_rendering.render_settings_for_project(other.id, db) == models.VideoRenderSettings()
+
+    # `force` skips the readiness gate, so a one-off override must not persist into
+    # later unattended runs.
+    forced = DBVideoRenderJob(
+        project_id=project.id,
+        status="completed",
+        progress=1.0,
+        settings_json=models.VideoRenderSettings(force=True, mute_clip_audio=False).model_dump_json(),
+        created_at=datetime(2026, 8, 3, 10, 0, 0),
+    )
+    db.add(forced)
+    db.commit()
+    after_force = video_rendering.render_settings_for_project(project.id, db)
+    assert after_force.force is False
+    assert after_force.mute_clip_audio is False
+
+    # Settings written by an older build that no longer validate still render on defaults.
+    broken = DBVideoRenderJob(
+        project_id=project.id,
+        status="completed",
+        progress=1.0,
+        settings_json='{"resolution": "8k", "fps": "sixty"}',
+        created_at=datetime(2026, 8, 4, 10, 0, 0),
+    )
+    db.add(broken)
+    db.commit()
+    assert video_rendering.render_settings_for_project(project.id, db) == models.VideoRenderSettings()
+
+    # A job row with no settings recorded at all also falls back rather than raising.
+    empty = DBVideoRenderJob(
+        project_id=project.id,
+        status="completed",
+        progress=1.0,
+        settings_json=None,
+        created_at=datetime(2026, 8, 5, 10, 0, 0),
+    )
+    db.add(empty)
+    db.commit()
+    assert video_rendering.render_settings_for_project(project.id, db) == models.VideoRenderSettings()
+
+
+def test_auto_run_render_action_passes_saved_project_settings_to_render(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Auto render settings", phase="phase2"), db)
+    row = DBVideoAutoRun(project_id=project.id, status="running", current_step="generate_render")
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    chosen = models.VideoRenderSettings(mute_clip_audio=False, fps=60, subtitle_mode="none")
+    captured: dict[str, models.VideoRenderSettings] = {}
+    now = datetime.utcnow()
+
+    monkeypatch.setattr(video_auto_runs, "_latest_render_job", lambda project_id, session: None)
+    monkeypatch.setattr(video_rendering, "render_settings_for_project", lambda project_id, session: chosen)
+    monkeypatch.setattr(
+        video_rendering,
+        "get_render_readiness",
+        lambda project_id, session, settings: models.VideoRenderReadinessResponse(
+            project_id=project_id, ready=True, ffmpeg_ready=True, ffprobe_ready=True
+        ),
+    )
+
+    def fake_create(project_id, data, session):
+        captured["settings"] = data.settings
+        return models.VideoRenderJobResponse(
+            id="auto-render-job", project_id=project_id, status="queued", created_at=now, updated_at=now
+        )
+
+    monkeypatch.setattr(video_rendering, "create_render_job_for_auto_run", fake_create)
+    action = video_auto_runs._render_action(row, project, db)
+
+    assert action == {"action": "run_render_job", "job_id": "auto-render-job"}
+    assert captured["settings"] == chosen
+    assert captured["settings"].mute_clip_audio is False
+    assert row.current_step == "waiting_render"
+
+def test_clip_audio_bed_segment_command_pads_trims_and_falls_back_to_silence(tmp_path):
+    clip_path = tmp_path / "clip.mp4"
+    clip_path.write_bytes(b"clip")
+
+    # Shorter clip audio is padded with silence, longer audio is trimmed: apad+atrim does both.
+    short = video_rendering.build_clip_audio_bed_segment_command(
+        ffmpeg="ffmpeg",
+        clip_path=clip_path,
+        output_path=tmp_path / "bed-short.wav",
+        duration_seconds=4.5,
+        use_clip_audio=True,
+    )
+    assert short is not None
+    assert "-vn" in short
+    assert str(clip_path) in short
+    assert short[short.index("-af") + 1] == "apad,atrim=duration=4.500"
+    assert short[short.index("-c:a") + 1] == "pcm_s16le"
+    assert short[short.index("-ar") + 1] == "48000"
+    assert short[short.index("-ac") + 1] == "2"
+
+    long = video_rendering.build_clip_audio_bed_segment_command(
+        ffmpeg="ffmpeg",
+        clip_path=clip_path,
+        output_path=tmp_path / "bed-long.wav",
+        duration_seconds=1.25,
+        use_clip_audio=True,
+    )
+    assert long is not None
+    assert long[long.index("-af") + 1] == "apad,atrim=duration=1.250"
+
+    silent = video_rendering.build_clip_audio_bed_segment_command(
+        ffmpeg="ffmpeg",
+        clip_path=clip_path,
+        output_path=tmp_path / "bed-silent.wav",
+        duration_seconds=2.0,
+        use_clip_audio=False,
+    )
+    assert silent is not None
+    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in silent
+    assert silent[silent.index("-t") + 1] == "2.000"
+    assert str(clip_path) not in silent
+
+    # Invalid segment durations must not produce a bogus command.
+    for bad_duration in (0.0, -1.5):
+        assert (
+            video_rendering.build_clip_audio_bed_segment_command(
+                ffmpeg="ffmpeg",
+                clip_path=clip_path,
+                output_path=tmp_path / "bed-bad.wav",
+                duration_seconds=bad_duration,
+                use_clip_audio=True,
+            )
+            is None
+        )
+
+
+def test_clip_audio_bed_mix_command_ducks_with_sidechain_and_keeps_voice_level(tmp_path):
+    voice = tmp_path / "voice.wav"
+    bed = tmp_path / "bed.wav"
+    voice.write_bytes(b"voice")
+    bed.write_bytes(b"bed")
+    command = video_rendering.build_clip_audio_bed_mix_command(
+        ffmpeg="ffmpeg",
+        voice_path=voice,
+        bed_path=bed,
+        output_path=tmp_path / "mixed.wav",
+        total_duration_seconds=12.0,
+    )
+    graph = command[command.index("-filter_complex") + 1]
+    # Voice is input 0 and must be the sidechain control signal; the bed is compressed.
+    assert "[bed_raw][voice_sc]sidechaincompress=" in graph
+    assert f"ratio={video_rendering.CLIP_AUDIO_BED_DUCK_RATIO:.3f}" in graph
+    assert f"release={video_rendering.CLIP_AUDIO_BED_DUCK_RELEASE_MS:.2f}" in graph
+    assert f"attack={video_rendering.CLIP_AUDIO_BED_DUCK_ATTACK_MS:.2f}" in graph
+    assert f"volume={video_rendering.CLIP_AUDIO_BED_VOLUME:.3f}" in graph
+    # One single mix over the whole timeline, with the voice level preserved.
+    assert graph.count("amix=") == 1
+    assert "amix=inputs=2:duration=first:dropout_transition=0:normalize=0" in graph
+    assert "atrim=duration=12.000[mixed]" in graph
+    # sidechaincompress drops its tail at EOF, so both of its inputs are padded past the end.
+    assert graph.count("apad=whole_dur=13.000") == 2
+    assert command[0] == "ffmpeg"
+    assert command[command.index("-map") + 1] == "[mixed]"
+
 
 def test_render_ffprobe_parser_and_missing_tools(tmp_path, monkeypatch):
     clip_path = tmp_path / "clip.mp4"
@@ -2239,6 +2762,83 @@ def test_render_clip_upload_replace_delete_and_serialization(db, monkeypatch):
     assert deleted_path is None or not deleted_path.exists()
 
 
+def test_shot_clip_upload_records_provider_for_batch_and_stays_unset_without_it(db, monkeypatch):
+    """A batch import records the provider so watermark cleanup scans one mark, not six.
+
+    The single-clip button sends no provider, and must keep behaving exactly as before:
+    `provider` stays NULL, which is what makes `resolve_clip_mark` fall back to scanning
+    every detector.
+    """
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Batch provider", phase="phase2"), db)
+    batch_shot = _add_phase2_shot(db, project.id, order=1)
+    single_shot = _add_phase2_shot(db, project.id, order=2)
+
+    monkeypatch.setattr(
+        video_rendering,
+        "probe_clip",
+        lambda path: video_rendering.ClipMetadata(
+            duration_seconds=2.0, width=1080, height=1920, fps=30, codec="h264", has_audio=True
+        ),
+    )
+
+    batch = client.post(
+        f"/ai-video/projects/{project.id}/shots/{batch_shot.id}/clip",
+        files={"file": ("1.mp4", b"batch clip", "video/mp4")},
+        data={"provider": "veo"},
+    )
+    single = client.post(
+        f"/ai-video/projects/{project.id}/shots/{single_shot.id}/clip",
+        files={"file": ("cảnh hai.mp4", b"single clip", "video/mp4")},
+    )
+
+    assert batch.status_code == 200
+    assert single.status_code == 200
+    batch_row = db.get(DBVideoShotClip, batch.json()["id"])
+    single_row = db.get(DBVideoShotClip, single.json()["id"])
+
+    assert batch_row.provider == "veo"
+    assert single_row.provider is None
+    # How a user-picked clip is told apart from a provider-downloaded one does not change.
+    assert batch_row.source == "upload"
+    assert single_row.source == "upload"
+    assert batch_row.status == "ready"
+    assert single_row.status == "ready"
+    assert single_row.original_filename == "cảnh hai.mp4"
+
+    batch_path = video_storage.resolve_artifact_storage_path(batch_row.file_path)
+    single_path = video_storage.resolve_artifact_storage_path(single_row.file_path)
+    assert batch_path is not None and single_path is not None
+    # The recorded provider is what narrows the mark scan; without it cleanup stays on auto.
+    assert (
+        video_watermark_cleanup.resolve_clip_mark(
+            project_id=project.id, shot_id=batch_shot.id, provider=batch_row.provider, input_path=batch_path
+        )
+        == "veo"
+    )
+    assert (
+        video_watermark_cleanup.resolve_clip_mark(
+            project_id=project.id, shot_id=single_shot.id, provider=single_row.provider, input_path=single_path
+        )
+        == "auto"
+    )
+
+    # An unknown provider is not stored: it would buy nothing and claim a source we cannot back.
+    unknown_shot = _add_phase2_shot(db, project.id, order=3)
+    unknown = client.post(
+        f"/ai-video/projects/{project.id}/shots/{unknown_shot.id}/clip",
+        files={"file": ("3.mp4", b"unknown provider clip", "video/mp4")},
+        data={"provider": "khong-ro"},
+    )
+    assert unknown.status_code == 200
+    assert db.get(DBVideoShotClip, unknown.json()["id"]).provider is None
+
+
 def test_shot_clip_download_api_returns_active_clip_file(db):
     app = FastAPI()
     app.include_router(ai_video_router)
@@ -2384,6 +2984,109 @@ def test_render_readiness_duration_resolver_and_timeline_manifest(db, monkeypatc
     assert timeline[0].sound_design["sound_cues"][0]["cue_type"] == "riser"
     assert timeline[1].has_narration is False
 
+def test_render_readiness_clip_only_level_needs_no_voice(db, monkeypatch):
+    """The clip-only level unblocks a project whose shots have narration but no voice.
+
+    Both readiness reasons the user used to see came from the same root cause, so the level
+    has to clear the voice requirement AND give the timer a source that is not the voice.
+    """
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda ffmpeg: "subtitles")
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip only ready", phase="phase2"), db)
+    first = _add_phase2_shot(db, project.id, order=1, narration="Every shot has narration.", duration_seconds=9.0)
+    second = _add_phase2_shot(db, project.id, order=2, narration="And none of them has a voice.", duration_seconds=9.0)
+    first_clip = _add_ready_clip(db, project.id, first.id, duration_seconds=3.0)
+    first_clip.has_audio = True
+    second_clip = _add_ready_clip(db, project.id, second.id, duration_seconds=2.0)
+    second_clip.has_audio = True
+    db.commit()
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", clip_audio_mode="clip_only", mute_clip_audio=False),
+    )
+    timeline = video_rendering.build_timeline_manifest(
+        project.id,
+        db,
+        clip_audio_mode=video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY,
+    )
+
+    assert readiness is not None
+    assert readiness.ready is True
+    assert readiness.missing_voice_shot_ids == []
+    assert readiness.missing_timer_shot_ids == []
+    assert readiness.missing_reasons == []
+    # No shot is dropped, and each one is timed from its own clip.
+    assert [item.shot_id for item in timeline] == [first.id, second.id]
+    assert [item.duration_seconds for item in timeline] == [pytest.approx(3.0), pytest.approx(2.0)]
+    assert [(item.start_seconds, item.end_seconds) for item in timeline] == [(0.0, 3.0), (3.0, 5.0)]
+
+    # Without the level the same project is still blocked twice over, so the level is what
+    # unblocked it rather than some unrelated change.
+    default_readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none"),
+    )
+    assert default_readiness is not None
+    assert default_readiness.ready is False
+    assert set(default_readiness.missing_voice_shot_ids) == {first.id, second.id}
+    assert set(default_readiness.missing_timer_shot_ids) == {first.id, second.id}
+    assert video_rendering.build_timeline_manifest(project.id, db) == []
+
+
+def test_render_readiness_clip_only_warns_on_clip_without_audio_but_still_renders(db, monkeypatch):
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda ffmpeg: "subtitles")
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip only silent shot", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Narration without a voice.", duration_seconds=4.0)
+    # The helper clip has no audio stream, so this segment can only be silent.
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=2.0)
+    db.commit()
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", clip_audio_mode="clip_only", mute_clip_audio=False),
+    )
+
+    assert readiness is not None
+    # Silence is a valid result the user may want, so it warns instead of blocking.
+    assert readiness.ready is True
+    assert readiness.missing_voice_shot_ids == []
+    warning = next(
+        (item for item in readiness.warnings if item.code == "VIDEO_RENDER_CLIP_ONLY_AUDIO_MISSING"),
+        None,
+    )
+    assert warning is not None
+    assert warning.shot_id == shot.id
+
+
+def test_render_readiness_clip_only_still_blocks_a_shot_with_no_timer_source(db, monkeypatch):
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda ffmpeg: "subtitles")
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip only no timer", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Narration.", duration_seconds=None)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=2.0)
+    clip.duration_seconds = None
+    clip.has_audio = True
+    db.commit()
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", clip_audio_mode="clip_only", mute_clip_audio=False),
+    )
+
+    assert readiness is not None
+    assert readiness.ready is False
+    assert readiness.missing_timer_shot_ids == [shot.id]
+    assert "Một số shot thiếu thời lượng render." in readiness.missing_reasons
+    # The voice is still not demanded; only the missing timer blocks.
+    assert readiness.missing_voice_shot_ids == []
+
+
 def test_render_readiness_flags_missing_burn_in_filter(db, monkeypatch):
     monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
     monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda ffmpeg: None)
@@ -2407,6 +3110,1235 @@ def test_render_readiness_flags_missing_burn_in_filter(db, monkeypatch):
     assert any("filter burn-in phụ đề" in reason for reason in burn_in.missing_reasons)
     assert sidecar is not None
     assert sidecar.ready is True
+
+
+def test_render_readiness_only_probes_watermark_worker_when_enabled(db, monkeypatch):
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda _ffmpeg: "subtitles")
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Watermark readiness", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    calls: list[str] = []
+
+    def fake_runtime_status(**kwargs):
+        calls.append(kwargs["backend"])
+        return video_watermark_cleanup.WatermarkRuntimeStatus(
+            ready=False,
+            package_root=None,
+            python=None,
+            worker_script=None,
+            revision="revision-missing-runtime",
+            failure_reason="Watermark worker thử nghiệm chưa sẵn sàng.",
+            error_code="VIDEO_RENDER_WATERMARK_PYTHON_MISSING",
+        )
+
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+
+    disabled = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=False),
+    )
+    enabled = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="migan"),
+    )
+
+    assert disabled is not None
+    assert disabled.ready is True
+    assert disabled.watermark_cleanup_ready is True
+    assert disabled.watermark_backends == []
+    # Cleanup disabled must not probe at all; cleanup enabled probes every
+    # supported backend so the UI can flag unavailable choices up front.
+    assert calls == ["cv2", "migan"]
+    assert enabled is not None
+    assert enabled.ready is False
+    assert enabled.watermark_cleanup_ready is False
+    assert enabled.watermark_cleanup_revision == "revision-missing-runtime"
+    assert enabled.watermark_cleanup_failure_reason == "Watermark worker thử nghiệm chưa sẵn sàng."
+    assert "Watermark worker thử nghiệm chưa sẵn sàng." in enabled.missing_reasons
+    assert [item.backend for item in enabled.watermark_backends] == ["cv2", "migan"]
+    assert all(item.ready is False for item in enabled.watermark_backends)
+
+
+def _watermark_readiness_project(db, monkeypatch):
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_select_subtitle_filter", lambda _ffmpeg: "subtitles")
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Watermark backends", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    return project
+
+
+def _watermark_runtime(*, ready: bool, model_cache: str | None = None, failure_reason: str | None = None):
+    return video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=ready,
+        package_root=None,
+        python=None,
+        worker_script=None,
+        revision="revision-test",
+        failure_reason=None if ready else (failure_reason or "Backend chưa sẵn sàng."),
+        error_code=None if ready else "WATERMARK_WORKER_MIGAN_MISSING",
+        model_cache=model_cache,
+    )
+
+
+def test_render_readiness_reports_every_supported_backend_ready(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+    probed: list[str] = []
+
+    def fake_runtime_status(**kwargs):
+        probed.append(kwargs["backend"])
+        return _watermark_runtime(
+            ready=True,
+            model_cache=video_watermark_cleanup.MODEL_CACHE_CACHED if kwargs["backend"] == "migan" else None,
+        )
+
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="cv2"),
+    )
+
+    assert readiness is not None
+    assert readiness.ready is True
+    assert readiness.watermark_cleanup_ready is True
+    assert probed == list(video_watermark_cleanup.SUPPORTED_CLEANUP_BACKENDS)
+    # `lama` needs ~4.7 GB RAM and is out of scope, so it must never be probed.
+    assert "lama" not in probed
+    assert [(item.backend, item.ready) for item in readiness.watermark_backends] == [("cv2", True), ("migan", True)]
+    assert readiness.missing_reasons == []
+
+
+def test_render_readiness_allows_cv2_while_migan_backend_not_ready(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+
+    def fake_runtime_status(**kwargs):
+        if kwargs["backend"] == "migan":
+            return _watermark_runtime(ready=False, failure_reason="Backend MI-GAN chưa sẵn sàng: thiếu onnxruntime.")
+        return _watermark_runtime(ready=True)
+
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="cv2"),
+    )
+
+    assert readiness is not None
+    # An optional backend that is not installed must not block a working one.
+    assert readiness.ready is True
+    assert readiness.watermark_cleanup_ready is True
+    statuses = {item.backend: item for item in readiness.watermark_backends}
+    assert statuses["cv2"].ready is True
+    assert statuses["migan"].ready is False
+    assert statuses["migan"].failure_reason == "Backend MI-GAN chưa sẵn sàng: thiếu onnxruntime."
+    assert not any("MI-GAN" in reason for reason in readiness.missing_reasons)
+
+
+def test_render_readiness_blocks_when_selected_migan_backend_not_ready(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+
+    def fake_runtime_status(**kwargs):
+        if kwargs["backend"] == "migan":
+            return _watermark_runtime(ready=False, failure_reason="Backend MI-GAN chưa sẵn sàng: thiếu onnxruntime.")
+        return _watermark_runtime(ready=True)
+
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="migan"),
+    )
+
+    assert readiness is not None
+    assert readiness.ready is False
+    assert readiness.watermark_cleanup_ready is False
+    assert "Backend MI-GAN chưa sẵn sàng: thiếu onnxruntime." in readiness.missing_reasons
+
+
+def test_render_readiness_warns_when_migan_model_not_cached(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+
+    def fake_runtime_status(**kwargs):
+        if kwargs["backend"] == "migan":
+            return _watermark_runtime(ready=True, model_cache=video_watermark_cleanup.MODEL_CACHE_NOT_CACHED)
+        return _watermark_runtime(ready=True)
+
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+
+    selected_migan = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="migan"),
+    )
+    selected_cv2 = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="cv2"),
+    )
+
+    assert selected_migan is not None
+    # Missing model cache is a warning, never a blocker: the only way to populate
+    # the cache is to run a render once.
+    assert selected_migan.ready is True
+    assert selected_migan.watermark_cleanup_ready is True
+    warning_codes = [warning.code for warning in selected_migan.warnings]
+    assert "VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED" in warning_codes
+    cache_warning = next(w for w in selected_migan.warnings if w.code == "VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED")
+    assert "28 MB" in cache_warning.message
+    statuses = {item.backend: item for item in selected_migan.watermark_backends}
+    assert statuses["migan"].model_cache == "not_cached"
+    assert statuses["cv2"].model_cache is None
+
+    assert selected_cv2 is not None
+    assert selected_cv2.ready is True
+    # cv2 uses no model, so it must not raise the model-download warning.
+    assert "VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED" not in [w.code for w in selected_cv2.warnings]
+
+
+def test_render_readiness_no_model_warning_when_migan_model_cached(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+    monkeypatch.setattr(
+        video_watermark_cleanup,
+        "get_runtime_status",
+        lambda **kwargs: _watermark_runtime(
+            ready=True,
+            model_cache=video_watermark_cleanup.MODEL_CACHE_CACHED if kwargs["backend"] == "migan" else None,
+        ),
+    )
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="migan"),
+    )
+
+    assert readiness is not None
+    assert readiness.ready is True
+    assert "VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED" not in [w.code for w in readiness.warnings]
+    statuses = {item.backend: item for item in readiness.watermark_backends}
+    assert statuses["migan"].model_cache == "cached"
+
+
+def test_render_readiness_reuses_caller_runtime_without_extra_worker_spawn(db, monkeypatch):
+    project = _watermark_readiness_project(db, monkeypatch)
+    monkeypatch.setattr(
+        video_watermark_cleanup,
+        "get_runtime_status",
+        lambda **_kwargs: pytest.fail("render path must reuse its single probe instead of spawning a worker"),
+    )
+
+    readiness = video_rendering.get_render_readiness(
+        project.id,
+        db,
+        models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True, watermark_backend="migan"),
+        watermark_runtime=_watermark_runtime(ready=True, model_cache=video_watermark_cleanup.MODEL_CACHE_NOT_CACHED),
+    )
+
+    assert readiness is not None
+    assert readiness.ready is True
+    # The render path already probed the selected backend; readiness must not pay
+    # for a second worker spawn just to describe the unselected one.
+    assert [item.backend for item in readiness.watermark_backends] == ["migan"]
+    assert readiness.watermark_backends[0].model_cache == "not_cached"
+    assert "VIDEO_RENDER_WATERMARK_MODEL_NOT_CACHED" in [warning.code for warning in readiness.warnings]
+
+
+def test_render_readiness_api_accepts_watermark_settings(db, monkeypatch):
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+    from backend.routes import ai_video as ai_video_routes
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Watermark API", phase="phase2"), db)
+    captured: dict[str, object] = {}
+
+    def fake_readiness(project_id, _db_session, settings=None):
+        captured["project_id"] = project_id
+        captured["settings"] = settings
+        return models.VideoRenderReadinessResponse(
+            project_id=project_id,
+            ready=False,
+            ffmpeg_ready=True,
+            ffprobe_ready=True,
+            watermark_cleanup_ready=False,
+            watermark_cleanup_revision="revision-api",
+            watermark_cleanup_failure_reason="Thiếu runtime thử nghiệm.",
+            missing_reasons=["Thiếu runtime thử nghiệm."],
+        )
+
+    monkeypatch.setattr(ai_video_routes.video_rendering, "get_render_readiness", fake_readiness)
+
+    response = client.get(
+        f"/ai-video/projects/{project.id}/render/readiness",
+        params={"subtitle_mode": "none", "watermark_cleanup": "true", "watermark_backend": "migan"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    settings = captured["settings"]
+    assert captured["project_id"] == project.id
+    assert settings.watermark_cleanup is True
+    assert settings.watermark_backend == "migan"
+    assert payload["watermark_cleanup_ready"] is False
+    assert payload["watermark_cleanup_revision"] == "revision-api"
+
+
+def test_resolve_clip_worker_count_derives_from_cpu_with_an_upper_bound(monkeypatch):
+    monkeypatch.delenv(video_rendering.CLIP_WORKERS_ENV, raising=False)
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 16)
+    assert video_rendering.resolve_clip_worker_count(18) == video_rendering._MAX_CLIP_WORKERS
+    # A much bigger machine still stops at the upper bound.
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 128)
+    assert video_rendering.resolve_clip_worker_count(18) == video_rendering._MAX_CLIP_WORKERS
+
+
+def test_resolve_clip_worker_count_is_at_least_one_on_a_single_core_machine(monkeypatch):
+    monkeypatch.delenv(video_rendering.CLIP_WORKERS_ENV, raising=False)
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 1)
+    assert video_rendering.resolve_clip_worker_count(18) == 1
+    # os.cpu_count() can return None on exotic platforms.
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: None)
+    assert video_rendering.resolve_clip_worker_count(18) == 1
+
+
+def test_resolve_clip_worker_count_honours_a_valid_environment_override(monkeypatch):
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 16)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, "12")
+    assert video_rendering.resolve_clip_worker_count(18) == 12
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, " 1 ")
+    assert video_rendering.resolve_clip_worker_count(18) == 1
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "abc", "0", "-4", "2.5"])
+def test_resolve_clip_worker_count_ignores_an_invalid_override(monkeypatch, raw):
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 16)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, raw)
+    assert video_rendering.resolve_clip_worker_count(18) == video_rendering._MAX_CLIP_WORKERS
+
+
+def test_resolve_clip_worker_count_never_exceeds_the_clip_count(monkeypatch):
+    monkeypatch.delenv(video_rendering.CLIP_WORKERS_ENV, raising=False)
+    monkeypatch.setattr(video_rendering.os, "cpu_count", lambda: 16)
+    assert video_rendering.resolve_clip_worker_count(2) == 2
+    assert video_rendering.resolve_clip_worker_count(0) == 1
+
+
+def test_render_settings_default_to_the_fast_watermark_backend():
+    assert models.VideoRenderSettings().watermark_backend == "cv2"
+    # The slow backend stays reachable without a code change.
+    assert models.VideoRenderSettings(watermark_backend="migan").watermark_backend == "migan"
+    assert "migan" in video_watermark_cleanup.SUPPORTED_CLEANUP_BACKENDS
+
+
+def test_watermark_cache_key_still_separates_backends_so_migan_cache_survives(tmp_path, monkeypatch):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"clip")
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=tmp_path,
+        python=sys.executable,
+        worker_script=tmp_path / "worker.py",
+        revision="revision-default",
+    )
+
+    def key_for(backend: str) -> str:
+        return video_watermark_cleanup.watermark_cache_key(
+            input_path=source,
+            mark="veo",
+            backend=backend,
+            temporal_consistency=True,
+            runtime=runtime,
+        )
+
+    assert key_for("cv2") != key_for("migan")
+    assert key_for("migan") == key_for("migan")
+
+
+def test_render_uses_watermark_derivative_for_video_and_source_contract_for_audio(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Watermark render", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.provider = "veo"
+    db.commit()
+    source_path = video_storage.resolve_artifact_storage_path(clip.file_path)
+    assert source_path is not None
+    source_bytes = source_path.read_bytes()
+    settings = models.VideoRenderSettings(
+        subtitle_mode="none",
+        watermark_cleanup=True,
+        watermark_backend="cv2",
+    )
+    job = DBVideoRenderJob(
+        project_id=project.id,
+        status="queued",
+        progress=0.0,
+        current_step="queued",
+        settings_json=settings.model_dump_json(),
+        readiness_json="{}",
+        stale=False,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=source_path.parent,
+        python=sys.executable,
+        worker_script=source_path.parent / "worker.py",
+        revision="revision-render",
+        package_version="0.22.0",
+    )
+    runtime_calls: list[str] = []
+    cleanup_calls: list[dict[str, object]] = []
+    normalize_inputs: list[Path] = []
+
+    def fake_runtime_status(**kwargs):
+        runtime_calls.append(kwargs["backend"])
+        return runtime
+
+    def fake_cleanup(**kwargs):
+        cleanup_calls.append(kwargs)
+        cleaned = video_storage.get_project_subdir(project.id, "render_cache") / "watermark" / "cleaned.mp4"
+        cleaned.parent.mkdir(parents=True, exist_ok=True)
+        cleaned.write_bytes(b"cleaned video")
+        return cleaned, {
+            "ok": True,
+            "status": "no_supported_mark",
+            "visible_mark": None,
+            "visible_detected_frames": 0,
+            "visible_removed_frames": 0,
+            "provider": "veo",
+            "requested_mark": "veo",
+            "backend": "cv2",
+            "runtime_revision": "revision-render",
+            "cache_hit": False,
+            "shot_id": shot.id,
+        }
+
+    def fake_normalize(**kwargs):
+        normalize_inputs.append(kwargs["input_path"])
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "normalized.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_audio_segments(_ffmpeg, _project, _timeline, _shots_by_id, clips, output_dir):
+        active_source = video_storage.resolve_artifact_storage_path(clips[shot.id].file_path)
+        assert active_source == source_path
+        audio = output_dir / "audio-source.wav"
+        audio.write_bytes(b"audio")
+        return [audio]
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", fake_runtime_status)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_build_audio_segments", fake_audio_segments)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert runtime_calls == ["cv2"]
+    assert cleanup_calls[0]["provider"] == "veo"
+    assert cleanup_calls[0]["input_path"] == source_path
+    assert normalize_inputs[0].name == "cleaned.mp4"
+    assert source_path.read_bytes() == source_bytes
+    output_dir = video_storage.get_project_subdir(project.id, "render_outputs") / job.id
+    manifest = json.loads((output_dir / "timeline-manifest.json").read_text(encoding="utf-8"))
+    cache_summary = json.loads((output_dir / "render-cache-summary.json").read_text(encoding="utf-8"))
+    assert manifest["watermark_cleanup"]["enabled"] is True
+    assert manifest["watermark_cleanup"]["runtime_revision"] == "revision-render"
+    assert manifest["watermark_cleanup"]["items"][0]["status"] == "no_supported_mark"
+    assert cache_summary["watermark_hits"] == 0
+    assert cache_summary["watermark_misses"] == 1
+
+
+def _clip_audio_bed_render_job(db, project_id: str, **setting_overrides) -> DBVideoRenderJob:
+    settings = models.VideoRenderSettings(subtitle_mode="none", **setting_overrides)
+    job = DBVideoRenderJob(
+        project_id=project_id,
+        status="queued",
+        progress=0.0,
+        current_step="queued",
+        settings_json=settings.model_dump_json(),
+        readiness_json="{}",
+        stale=False,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _clip_audio_bed_manifest(project_id: str, job_id: str) -> dict:
+    output_dir = video_storage.get_project_subdir(project_id, "render_outputs") / job_id
+    manifest = json.loads((output_dir / "timeline-manifest.json").read_text(encoding="utf-8"))
+    return manifest.get("clip_audio_bed") or {}
+
+
+def test_render_bed_takes_original_clip_audio_when_watermark_cleanup_is_on(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Bed source", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.provider = "veo"
+    clip.has_audio = True
+    db.commit()
+    source_path = video_storage.resolve_artifact_storage_path(clip.file_path)
+    source_bytes = source_path.read_bytes()
+    job = _clip_audio_bed_render_job(db, project.id, mute_clip_audio=False, watermark_cleanup=True, watermark_backend="cv2")
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=source_path.parent,
+        python=sys.executable,
+        worker_script=source_path.parent / "worker.py",
+        revision="revision-bed",
+        package_version="0.22.0",
+    )
+    cleaned_path = video_storage.get_project_subdir(project.id, "render_cache") / "watermark" / "cleaned-bed.mp4"
+
+    def fake_cleanup(**kwargs):
+        cleaned_path.parent.mkdir(parents=True, exist_ok=True)
+        cleaned_path.write_bytes(b"cleaned video")
+        return cleaned_path, {"ok": True, "status": "no_supported_mark", "cache_hit": False, "shot_id": shot.id}
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "normalized-bed.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    bed_inputs: list[str] = []
+
+    def fake_run_command(cmd, timeout):
+        if any("bed-" in str(part) for part in cmd):
+            bed_inputs.extend(str(part) for part in cmd)
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **kwargs: runtime)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    # The bed must read the ORIGINAL clip, never the watermark-cleanup derivative.
+    assert str(source_path) in bed_inputs
+    assert str(cleaned_path) not in bed_inputs
+    assert source_path.read_bytes() == source_bytes
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is True
+    assert summary["clip_audio_segments"] == 1
+
+
+def test_render_skips_bed_mix_when_every_segment_is_silent(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Bed silent", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    # Default helper clip has no audio stream, so the bed timeline is fully silent.
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    job = _clip_audio_bed_render_job(db, project.id, mute_clip_audio=False)
+    mix_calls: list[list[str]] = []
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        if "sidechaincompress" in " ".join(str(part) for part in cmd):
+            mix_calls.append([str(part) for part in cmd])
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    # No duck/mix step at all when there is nothing to bed under the voice.
+    assert mix_calls == []
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is False
+    assert summary["reason"] == "bed_all_silent"
+    assert summary["clip_audio_segments"] == 0
+
+
+def test_render_falls_back_to_voice_when_bed_mix_fails(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Bed fallback", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.has_audio = True
+    db.commit()
+    # enhanced_render stays off so the fallback path cannot rely on the enhanced plan.
+    job = _clip_audio_bed_render_job(db, project.id, mute_clip_audio=False, enhanced_render=False)
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        if "sidechaincompress" in " ".join(str(part) for part in cmd):
+            raise video_rendering.VideoRenderError("bed mix boom", error_code="VIDEO_RENDER_BED_TEST")
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    # A bed failure must never fail the render.
+    assert job.status == "completed"
+    assert job.error_code is None
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is False
+    assert summary["reason"] == "failed"
+    # The fallback reason is recorded even with enhanced render turned off.
+    events = (
+        db.query(DBVideoDebugEvent)
+        .filter(DBVideoDebugEvent.project_id == project.id, DBVideoDebugEvent.step_name == "render_clip_audio_bed")
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].status == "warning"
+    assert events[0].error_code == "VIDEO_RENDER_CLIP_AUDIO_BED_FALLBACK"
+
+
+def test_render_falls_back_to_voice_when_bed_segment_extraction_fails(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Bed extract fail", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.has_audio = True
+    db.commit()
+    job = _clip_audio_bed_render_job(db, project.id, mute_clip_audio=False, enhanced_render=False)
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        if any("bed-" in str(part) for part in cmd):
+            raise video_rendering.VideoRenderError("bed extract boom", error_code="VIDEO_RENDER_BED_TEST")
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is False
+    assert summary["reason"] == "failed"
+
+
+def test_render_vietnamese_narrated_segment_never_gets_a_bed(db, monkeypatch):
+    project = video_projects.create_project(
+        models.VideoProjectCreate(topic="Bed guard VI", phase="phase2", target_language="vi"),
+        db,
+    )
+    # Narrated Vietnamese segment: the voice already IS the clip audio.
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Xin chào các bạn", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.has_audio = True
+    db.commit()
+    assert video_speech.uses_veo_native_speech(
+        db.query(DBVideoProject).filter(DBVideoProject.id == project.id).first()
+    )
+    timeline = video_rendering.build_timeline_manifest(project.id, db)
+    assert timeline and timeline[0].has_narration is True
+    job = _clip_audio_bed_render_job(db, project.id, mute_clip_audio=False, enhanced_render=False)
+    mix_calls: list[str] = []
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        if "sidechaincompress" in " ".join(str(part) for part in cmd):
+            mix_calls.append(" ".join(str(part) for part in cmd))
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    # Adding a bed here would comb-filter the Vietnamese voice against itself.
+    assert mix_calls == []
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is False
+    assert summary["reason"] == "bed_all_silent"
+    assert summary["decisions"] == [video_rendering.BED_DECISION_SKIP_NATIVE_SPEECH]
+
+
+def test_render_default_settings_never_build_a_bed(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Bed default off", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    clip.has_audio = True
+    db.commit()
+    # Default mute_clip_audio=True keeps the pre-change behaviour.
+    job = _clip_audio_bed_render_job(db, project.id)
+    bed_commands: list[str] = []
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        joined = " ".join(str(part) for part in cmd)
+        if "bed-" in joined or "sidechaincompress" in joined or "clip-audio-bed" in joined:
+            bed_commands.append(joined)
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    assert bed_commands == []
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["applied"] is False
+    assert summary["mode"] == video_rendering.CLIP_AUDIO_MODE_DROP
+
+
+def test_render_clip_only_level_makes_clip_audio_the_main_track(db, monkeypatch):
+    """A Vietnamese project whose voice comes from the clip still gets its speech.
+
+    The bed level skips narrated segments of such a project to stop the voice doubling
+    against itself; reusing that rule here would silence exactly the segments with speech.
+    """
+    project = video_projects.create_project(
+        models.VideoProjectCreate(topic="Clip only render", phase="phase2", target_language="vi"),
+        db,
+    )
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Xin chào các bạn", duration_seconds=5.0)
+    clip = _add_ready_clip(db, project.id, shot.id, duration_seconds=1.5)
+    clip.has_audio = True
+    db.commit()
+    source_path = video_storage.resolve_artifact_storage_path(clip.file_path)
+    # No voice was ever generated for this shot, which is the case the level exists for.
+    assert shot.voice_status != "completed"
+    job = _clip_audio_bed_render_job(
+        db,
+        project.id,
+        clip_audio_mode="clip_only",
+        mute_clip_audio=False,
+        enhanced_render=False,
+    )
+    commands: list[str] = []
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        commands.append(" ".join(str(part) for part in cmd))
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    joined = "\n".join(commands)
+    # Original level: no ducking, no mixing of two timelines, no volume drop.
+    assert "sidechaincompress" not in joined
+    assert "amix" not in joined
+    assert f"volume={video_rendering.CLIP_AUDIO_BED_VOLUME:.3f}" not in joined
+    # No voice timeline is built at all, and the clip audio track is what gets muxed.
+    assert "audio-001.wav" not in joined
+    assert any("clip-only-audio.wav" in command for command in commands)
+    assert str(source_path) in joined
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["mode"] == video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY
+    assert summary["applied"] is True
+    assert summary["reason"] == "clip_audio_only"
+    assert summary["decisions"] == [video_rendering.BED_DECISION_FULL]
+    assert summary["clip_audio_segments"] == 1
+    # The timeline is timed from the clip, not from the missing voice.
+    manifest = json.loads(
+        (video_storage.get_project_subdir(project.id, "render_outputs") / job.id / "timeline-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [item["duration_seconds"] for item in manifest["timeline"]] == [pytest.approx(1.5)]
+
+
+def test_render_clip_only_level_warns_when_no_segment_has_audio(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Clip only silent", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Narration without a voice.", duration_seconds=3.0)
+    # The helper clip has no audio stream, so every segment can only be silent.
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    db.commit()
+    job = _clip_audio_bed_render_job(
+        db,
+        project.id,
+        clip_audio_mode="clip_only",
+        mute_clip_audio=False,
+        enhanced_render=False,
+    )
+
+    def fake_normalize(**kwargs):
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / "n.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    # A silent result is valid, so the render completes and only warns.
+    assert job.status == "completed"
+    summary = _clip_audio_bed_manifest(project.id, job.id)
+    assert summary["reason"] == "clip_audio_all_silent"
+    assert summary["clip_audio_segments"] == 0
+    events = (
+        db.query(DBVideoDebugEvent)
+        .filter(DBVideoDebugEvent.project_id == project.id, DBVideoDebugEvent.step_name == "render_clip_only_audio")
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].status == "warning"
+    assert events[0].error_code == "VIDEO_RENDER_CLIP_ONLY_AUDIO_ALL_SILENT"
+
+
+def test_subtitle_generation_at_clip_only_level_needs_no_voice(db):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Subtitle clip only", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Narration without a voice yet.", duration_seconds=9.0)
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=4.0)
+    db.commit()
+
+    # At the default level the missing voice still blocks subtitle generation.
+    with pytest.raises(video_subtitles.VideoSubtitleError) as blocked:
+        video_subtitles.generate_subtitle(project.id, db)
+    assert blocked.value.error_code == "VIDEO_SUBTITLE_MISSING_NARRATION"
+
+    # Subtitles are generated outside the render call, so the level is read back from the
+    # project's saved render settings — the same source the unattended render flow uses.
+    db.add(
+        DBVideoRenderJob(
+            project_id=project.id,
+            status="completed",
+            progress=1.0,
+            settings_json=models.VideoRenderSettings(
+                clip_audio_mode="clip_only",
+                mute_clip_audio=False,
+            ).model_dump_json(),
+            created_at=datetime(2026, 8, 7, 10, 0, 0),
+        )
+    )
+    db.commit()
+
+    subtitle = video_subtitles.generate_subtitle(project.id, db)
+
+    assert subtitle.status == "completed"
+    assert subtitle.cues
+    # Cues share the video timeline, which at this level runs on the clip duration.
+    assert subtitle.cues[0].start_seconds == pytest.approx(0.0)
+    assert subtitle.cues[-1].end_seconds == pytest.approx(4.0)
+    for cue in subtitle.cues:
+        assert 0.0 <= cue.start_seconds < cue.end_seconds <= 4.0
+
+
+def test_render_fails_strictly_when_watermark_cleanup_fails(db, monkeypatch):
+    project = video_projects.create_project(models.VideoProjectCreate(topic="Watermark strict failure", phase="phase2"), db)
+    shot = _add_phase2_shot(db, project.id, order=1, narration="", duration_seconds=1.0)
+    _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    job = DBVideoRenderJob(
+        project_id=project.id,
+        status="queued",
+        progress=0.0,
+        current_step="queued",
+        settings_json=models.VideoRenderSettings(subtitle_mode="none", watermark_cleanup=True).model_dump_json(),
+        readiness_json="{}",
+        stale=False,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=Path.cwd(),
+        python=sys.executable,
+        worker_script=Path.cwd() / "worker.py",
+        revision="revision-failure",
+    )
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **_kwargs: runtime)
+
+    def fail_cleanup(**_kwargs):
+        raise video_watermark_cleanup.VideoWatermarkCleanupError(
+            "Worker encode thất bại.",
+            error_code="VIDEO_RENDER_WATERMARK_WORKER_FAILED",
+        )
+
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fail_cleanup)
+
+    with pytest.raises(video_rendering.VideoRenderError) as error:
+        video_rendering._render_job_steps(job, db)
+
+    assert error.value.error_code == "VIDEO_RENDER_WATERMARK_WORKER_FAILED"
+    assert "Worker encode thất bại" in str(error.value)
+
+def _multi_clip_render_project(db, topic: str, clip_count: int):
+    project = video_projects.create_project(models.VideoProjectCreate(topic=topic, phase="phase2"), db)
+    for order in range(1, clip_count + 1):
+        shot = _add_phase2_shot(db, project.id, order=order, narration="", duration_seconds=1.0)
+        _add_ready_clip(db, project.id, shot.id, duration_seconds=1.0)
+    return project
+
+
+def _multi_clip_render_job(db, project_id: str, **overrides) -> DBVideoRenderJob:
+    settings = models.VideoRenderSettings(subtitle_mode="none", **overrides)
+    job = DBVideoRenderJob(
+        project_id=project_id,
+        status="queued",
+        progress=0.0,
+        current_step="queued",
+        settings_json=settings.model_dump_json(),
+        readiness_json="{}",
+        stale=False,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def test_render_concats_clips_in_timeline_order_when_they_finish_out_of_order(db, monkeypatch):
+    clip_count = 5
+    project = _multi_clip_render_project(db, "Parallel order", clip_count)
+    job = _multi_clip_render_job(db, project.id)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, str(clip_count))
+    finish_order: list[int] = []
+    normalize_lock = threading.Lock()
+    call_index = itertools.count(1)
+
+    def fake_normalize(**kwargs):
+        with normalize_lock:
+            index = next(call_index)
+        # Later clips finish first, so completion order is the reverse of timeline order.
+        time.sleep(0.02 * (clip_count - index))
+        with normalize_lock:
+            finish_order.append(index)
+        normalized = video_storage.get_project_subdir(project.id, "render_cache") / "normalized" / f"n{index}.mp4"
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(f"normalized-{index}".encode())
+        return normalized, False
+
+    concat_lists: list[list[str]] = []
+
+    def fake_concat(_ffmpeg, paths, output_path, **_kwargs):
+        concat_lists.append([Path(path).name for path in paths])
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"concat")
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_concat_media", fake_concat)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert job.status == "completed"
+    # Guard the premise: the clips really did finish out of timeline order.
+    assert finish_order != sorted(finish_order)
+    assert concat_lists[0] == [f"n{index}.mp4" for index in range(1, clip_count + 1)]
+    output_dir = video_storage.get_project_subdir(project.id, "render_outputs") / job.id
+    cache_summary = json.loads((output_dir / "render-cache-summary.json").read_text(encoding="utf-8"))
+    assert cache_summary["normalized_hits"] + cache_summary["normalized_misses"] == clip_count
+
+
+def test_render_orders_watermark_manifest_items_by_clip_index(db, monkeypatch):
+    clip_count = 4
+    project = _multi_clip_render_project(db, "Parallel manifest", clip_count)
+    job = _multi_clip_render_job(db, project.id, watermark_cleanup=True)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, str(clip_count))
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=Path.cwd(),
+        python=sys.executable,
+        worker_script=Path.cwd() / "worker.py",
+        revision="revision-parallel",
+    )
+    cleanup_lock = threading.Lock()
+    cleanup_index = itertools.count(1)
+
+    def fake_cleanup(**kwargs):
+        with cleanup_lock:
+            index = next(cleanup_index)
+        time.sleep(0.02 * (clip_count - index))
+        cleaned = video_storage.get_project_subdir(project.id, "render_cache") / "watermark" / f"c{index}.mp4"
+        cleaned.parent.mkdir(parents=True, exist_ok=True)
+        cleaned.write_bytes(b"cleaned")
+        return cleaned, {"ok": True, "shot_id": kwargs["shot_id"], "cache_hit": index % 2 == 0}
+
+    def fake_normalize(**kwargs):
+        normalized = (
+            video_storage.get_project_subdir(project.id, "render_cache")
+            / "normalized"
+            / f"n-{Path(kwargs['input_path']).stem}.mp4"
+        )
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **_kwargs: runtime)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+
+    video_rendering._render_job_steps(job, db)
+
+    output_dir = video_storage.get_project_subdir(project.id, "render_outputs") / job.id
+    manifest = json.loads((output_dir / "timeline-manifest.json").read_text(encoding="utf-8"))
+    cache_summary = json.loads((output_dir / "render-cache-summary.json").read_text(encoding="utf-8"))
+    shot_ids = [item["shot_id"] for item in manifest["watermark_cleanup"]["items"]]
+    timeline_shot_ids = [item["shot_id"] for item in manifest["timeline"]]
+    assert shot_ids == timeline_shot_ids
+    assert cache_summary["watermark_hits"] + cache_summary["watermark_misses"] == clip_count
+
+
+def test_render_reports_the_lowest_indexed_clip_when_several_fail(db, monkeypatch):
+    clip_count = 4
+    project = _multi_clip_render_project(db, "Parallel failure", clip_count)
+    job = _multi_clip_render_job(db, project.id, watermark_cleanup=True)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, str(clip_count))
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=Path.cwd(),
+        python=sys.executable,
+        worker_script=Path.cwd() / "worker.py",
+        revision="revision-failure",
+    )
+    shot_order_by_id = {
+        shot.id: shot.shot_order for shot in video_rendering._ordered_shots(project.id, db)
+    }
+    cleanup_lock = threading.Lock()
+    started: list[int] = []
+
+    def fake_cleanup(**kwargs):
+        order = shot_order_by_id[kwargs["shot_id"]]
+        with cleanup_lock:
+            started.append(order)
+        # The last clip fails first; the first clip fails later. The reported error must
+        # still be the first clip's, not whichever failed soonest.
+        time.sleep(0.02 * order)
+        raise video_watermark_cleanup.VideoWatermarkCleanupError(
+            f"Worker thất bại ở clip {order}.",
+            error_code="VIDEO_RENDER_WATERMARK_WORKER_FAILED",
+        )
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **_kwargs: runtime)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+
+    with pytest.raises(video_rendering.VideoRenderError) as error:
+        video_rendering._render_job_steps(job, db)
+
+    assert error.value.error_code == "VIDEO_RENDER_WATERMARK_WORKER_FAILED"
+    assert "clip 1." in str(error.value)
+
+
+def test_render_stops_submitting_clips_after_the_first_failure(db, monkeypatch):
+    clip_count = 6
+    project = _multi_clip_render_project(db, "Parallel early stop", clip_count)
+    job = _multi_clip_render_job(db, project.id, watermark_cleanup=True)
+    # One worker at a time makes "stopped submitting" observable without racing.
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, "1")
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=Path.cwd(),
+        python=sys.executable,
+        worker_script=Path.cwd() / "worker.py",
+        revision="revision-early-stop",
+    )
+    attempted: list[str] = []
+
+    def fake_cleanup(**kwargs):
+        attempted.append(kwargs["shot_id"])
+        raise video_watermark_cleanup.VideoWatermarkCleanupError(
+            "Worker thất bại.",
+            error_code="VIDEO_RENDER_WATERMARK_WORKER_FAILED",
+        )
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **_kwargs: runtime)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+
+    with pytest.raises(video_rendering.VideoRenderError):
+        video_rendering._render_job_steps(job, db)
+
+    # The remaining five clips were never started.
+    assert len(attempted) == 1
+
+
+def test_render_progress_rises_monotonically_with_labels_matching_the_running_step(db, monkeypatch):
+    clip_count = 3
+    project = _multi_clip_render_project(db, "Progress labels", clip_count)
+    job = _multi_clip_render_job(db, project.id, watermark_cleanup=True)
+    monkeypatch.setenv(video_rendering.CLIP_WORKERS_ENV, "2")
+    runtime = video_watermark_cleanup.WatermarkRuntimeStatus(
+        ready=True,
+        package_root=Path.cwd(),
+        python=sys.executable,
+        worker_script=Path.cwd() / "worker.py",
+        revision="revision-progress",
+    )
+    updates: list[tuple[float, str]] = []
+    real_update_job = video_rendering._update_job
+
+    def recording_update_job(tracked_job, tracked_db, **kwargs):
+        real_update_job(tracked_job, tracked_db, **kwargs)
+        updates.append((float(tracked_job.progress or 0.0), str(tracked_job.current_step or "")))
+
+    def fake_cleanup(**kwargs):
+        cleaned = video_storage.get_project_subdir(project.id, "render_cache") / "watermark" / f"{kwargs['shot_id']}.mp4"
+        cleaned.parent.mkdir(parents=True, exist_ok=True)
+        cleaned.write_bytes(b"cleaned")
+        return cleaned, {"ok": True, "shot_id": kwargs["shot_id"], "cache_hit": False}
+
+    def fake_normalize(**kwargs):
+        normalized = (
+            video_storage.get_project_subdir(project.id, "render_cache")
+            / "normalized"
+            / f"n-{Path(kwargs['input_path']).stem}.mp4"
+        )
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_watermark_cleanup, "get_runtime_status", lambda **_kwargs: runtime)
+    monkeypatch.setattr(video_watermark_cleanup, "cleanup_clip_with_cache", fake_cleanup)
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+    monkeypatch.setattr(video_rendering, "_update_job", recording_update_job)
+
+    video_rendering._render_job_steps(job, db)
+
+    progresses = [progress for progress, _ in updates]
+    assert progresses == sorted(progresses)
+    assert all(0.0 <= progress <= 1.0 for progress in progresses)
+    # Every clip gets its own tick, and the label names the expensive step.
+    clip_steps = [step for _, step in updates if "clip" in step]
+    assert len(clip_steps) == clip_count
+    assert all("làm sạch dấu AI" in step for step in clip_steps)
+    assert clip_steps[-1].endswith(f"{clip_count}/{clip_count}")
+    # The stretch from voice mux to completion is no longer a silent gap.
+    assert any(0.75 < progress < 1.0 for progress in progresses)
+
+
+def test_render_clip_labels_omit_watermark_wording_when_cleanup_is_off(db, monkeypatch):
+    project = _multi_clip_render_project(db, "Progress no cleanup", 2)
+    job = _multi_clip_render_job(db, project.id)
+    steps: list[str] = []
+    real_update_job = video_rendering._update_job
+
+    def recording_update_job(tracked_job, tracked_db, **kwargs):
+        real_update_job(tracked_job, tracked_db, **kwargs)
+        steps.append(str(tracked_job.current_step or ""))
+
+    def fake_normalize(**kwargs):
+        normalized = (
+            video_storage.get_project_subdir(project.id, "render_cache")
+            / "normalized"
+            / f"n-{Path(kwargs['input_path']).stem}.mp4"
+        )
+        normalized.parent.mkdir(parents=True, exist_ok=True)
+        normalized.write_bytes(b"normalized")
+        return normalized, False
+
+    def fake_run_command(cmd, timeout):
+        output_path = Path(cmd[-1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake media")
+
+    monkeypatch.setattr(video_rendering, "detect_tools", lambda: video_rendering.FFmpegTools(ffmpeg="ffmpeg", ffprobe="ffprobe"))
+    monkeypatch.setattr(video_rendering, "_normalize_clip_with_cache", fake_normalize)
+    monkeypatch.setattr(video_rendering, "_run_command", fake_run_command)
+    monkeypatch.setattr(video_rendering, "_update_job", recording_update_job)
+
+    video_rendering._render_job_steps(job, db)
+
+    assert not any("dấu AI" in step for step in steps)
+    assert any(step.startswith("Đang chuẩn hoá clip") for step in steps)
+
 
 def test_render_ffmpeg_command_builders_include_expected_filters(tmp_path):
     crop_cmd = video_rendering.build_normalize_clip_command(
@@ -2680,6 +4612,10 @@ def test_phase2_timeout_error_uses_internal_fallback_for_story_shots_and_prompts
     assert detail["planning_status"] == "story_ready"
     assert detail["retention_plan_json"]["quality_check"]["fallback_used"] is True
     assert len(detail["scenes"]) >= 1
+    serialized_story = json.dumps(detail, ensure_ascii=False)
+    assert "Tia" not in serialized_story
+    assert "Florentia" not in serialized_story
+    assert "Lombardy" not in serialized_story
 
     approval_response = client.post(f"/ai-video/projects/{project.id}/story/approval", json={"approved": True})
     assert approval_response.status_code == 200
@@ -2707,6 +4643,133 @@ def test_phase2_timeout_error_uses_internal_fallback_for_story_shots_and_prompts
     assert details["will_retry"] is False
     assert failure.error_code == "CODEX_EXEC_TIMEOUT"
     assert fallback.status == "warning"
+
+
+def test_phase2_timeout_fails_prompt_pack_after_one_batch_retry(db, monkeypatch):
+    project = video_projects.create_project(
+        models.VideoProjectCreate(
+            topic="Người Que — Khu Rừng Đi Ngược Thời Gian",
+            phase="phase2",
+            target_duration_seconds=180,
+            prompt_segment_count=18,
+            prompt_segment_duration_seconds=10,
+            micro_scenes_per_prompt=3,
+            source_blocks=[
+                models.VideoSourceBlockDraft(
+                    block_type="idea",
+                    content="Người Que bước vào khu rừng nơi thời gian chảy ngược và phải tìm đường cứu đồng đội.",
+                )
+            ],
+        ),
+        db,
+    )
+    project_row = db.get(DBVideoProject, project.id)
+    project_row.story_approved = True
+    project_row.script_approved = True
+    project_row.status = "story_approved"
+    project_row.planning_status = "story_approved"
+    for scene_order in range(1, 20):
+        db.add(
+            database.VideoScene(
+                project_id=project.id,
+                scene_order=scene_order,
+                title=f"Người Que — Nhịp truyện {scene_order}",
+                dialogue=f"Người Que tiếp tục vượt thử thách thời gian ở nhịp {scene_order}.",
+                visual_description=f"Cảnh {scene_order} trong khu rừng thời gian chảy ngược.",
+                target_duration_seconds=10,
+                approved=True,
+            )
+        )
+    db.commit()
+
+    def fake_timeout(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
+        assert output_schema == video_phase2.SHOT_BREAKDOWN_SCHEMA or output_schema == video_phase2.VIDEO_PROMPT_PACK_SCHEMA
+        raise ai_planning.AIPlanningError(
+            "AI planning took too long while creating content.",
+            error_code="CODEX_EXEC_TIMEOUT",
+        )
+
+    monkeypatch.setattr(ai_planning, "run_codex_exec", fake_timeout)
+    monkeypatch.setattr(video_phase2, "RETRY_DELAY_SECONDS", 0)
+
+    app = FastAPI()
+    app.include_router(ai_video_router)
+    from backend.database import get_db
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+
+    response = client.post(f"/ai-video/projects/{project.id}/shots")
+
+    assert response.status_code == 200, response.text
+    shots = response.json()
+    assert len(shots) == 18
+    assert [shot["shot_order"] for shot in shots] == list(range(1, 19))
+    assert all(len(shot["micro_scenes"]) == 3 for shot in shots)
+    serialized_shots = json.dumps(shots, ensure_ascii=False)
+    assert "Người Que" in serialized_shots
+    assert "Tia" not in serialized_shots
+    assert "Florentia" not in serialized_shots
+
+    db.expire_all()
+    selected_scene_orders = [db.get(database.VideoScene, shot["scene_id"]).scene_order for shot in shots]
+    assert selected_scene_orders[0] == 1
+    assert selected_scene_orders[-1] == 19
+    events = video_observability.latest_events(project.id, db, limit=50)
+    fallback = next(event for event in events if event.step_name == "shot_breakdown_fallback")
+    assert fallback.status == "warning"
+    assert fallback.error_code == "CODEX_EXEC_TIMEOUT"
+
+    prompts_response = client.post(f"/ai-video/projects/{project.id}/prompts")
+
+    assert prompts_response.status_code == 502, prompts_response.text
+    assert prompts_response.json()["detail"]["error_code"] == "CODEX_EXEC_TIMEOUT"
+    assert db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project.id).count() == 0
+    events = video_observability.latest_events(project.id, db, limit=50)
+    prompt_failure = next(event for event in events if event.step_name == "video_prompt_generation_batch_failure")
+    assert prompt_failure.status == "failure"
+    assert prompt_failure.error_code == "CODEX_EXEC_TIMEOUT"
+    details = json.loads(prompt_failure.technical_details or "{}")
+    assert details["batch_index"] == 1
+    assert details["batch_count"] == 4
+    assert details["batch_retry_count"] == 1
+
+
+def test_ai_video_blocking_worker_uses_threadpool_and_closes_session(monkeypatch):
+    from backend.routes import ai_video as ai_video_routes
+
+    calls = []
+
+    class FakeSession:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    worker_db = FakeSession()
+
+    async def fake_run_in_threadpool(callback, *args, **kwargs):
+        calls.append((callback, args, kwargs))
+        return callback(*args, **kwargs)
+
+    def blocking_callback(prefix, session, *, suffix):
+        assert session is worker_db
+        return f"{prefix}{suffix}"
+
+    monkeypatch.setattr(ai_video_routes.database_session, "SessionLocal", lambda: worker_db)
+    monkeypatch.setattr(ai_video_routes, "run_in_threadpool", fake_run_in_threadpool)
+
+    result = asyncio.run(
+        ai_video_routes._run_with_worker_db(
+            blocking_callback,
+            "AI Video",
+            suffix=" responsive",
+        )
+    )
+
+    assert result == "AI Video responsive"
+    assert calls == [(blocking_callback, ("AI Video", worker_db), {"suffix": " responsive"})]
+    assert worker_db.closed is True
 
 
 def test_phase2_story_development_accepts_structured_text_fields(db, monkeypatch):
@@ -3007,7 +5070,7 @@ def test_scene_voice_rejects_profile_language_mismatch(db):
     assert exc.value.error_code == "VIDEO_VOICE_PROFILE_LANGUAGE_MISMATCH"
     assert db.query(DBGeneration).filter(DBGeneration.profile_id == profile.id).count() == 0
 
-def test_shot_voice_vietnamese_profile_uses_qwen_1_7b_when_default_is_tada(db, monkeypatch):
+def test_shot_voice_vietnamese_uses_veo_native_audio_instead_of_legacy_tada_profile(db):
     profile = DBVoiceProfile(
         id="legacy-tada-vi-profile",
         name="Legacy TADA Vietnamese profile",
@@ -3026,29 +5089,14 @@ def test_shot_voice_vietnamese_profile_uses_qwen_1_7b_when_default_is_tada(db, m
         db,
     )
     shot = _add_phase2_shot(db, project.id, order=1, narration="Đây là lời thoại tiếng Việt.")
-    enqueued: list[str] = []
 
-    def fake_enqueue(generation_id, coro):
-        enqueued.append(generation_id)
-        close = getattr(coro, "close", None)
-        if close:
-            close()
+    with pytest.raises(video_voice.VideoVoiceError) as exc:
+        asyncio.run(video_voice.create_shot_narration(project.id, shot.id, models.VideoSceneNarrationRequest(), db))
 
-    monkeypatch.setattr(video_voice, "enqueue_generation", fake_enqueue)
+    assert exc.value.error_code == "VIDEO_VOICE_VEO_NATIVE_SPEECH"
+    assert db.query(DBGeneration).filter(DBGeneration.profile_id == profile.id).count() == 0
 
-    status = asyncio.run(video_voice.create_shot_narration(project.id, shot.id, models.VideoSceneNarrationRequest(), db))
-
-    assert status is not None
-    assert status.voice_status == "queued"
-    assert enqueued == [status.generation_id]
-    generation = db.get(DBGeneration, status.generation_id)
-    assert generation is not None
-    assert generation.profile_id == profile.id
-    assert generation.language == "vi"
-    assert generation.engine == "qwen"
-    assert generation.model_size == "1.7B"
-
-def test_shot_voice_qwen_vietnamese_0_6b_request_uses_1_7b(db, monkeypatch):
+def test_shot_voice_vietnamese_rejects_explicit_qwen_request_because_veo_owns_audio(db):
     profile = DBVoiceProfile(
         id="qwen-vi-0-6b-profile",
         name="Qwen Vietnamese 0.6B profile",
@@ -3067,30 +5115,19 @@ def test_shot_voice_qwen_vietnamese_0_6b_request_uses_1_7b(db, monkeypatch):
         db,
     )
     shot = _add_phase2_shot(db, project.id, order=1, narration="Đây là lời thoại tiếng Việt.")
-    enqueued: list[str] = []
 
-    def fake_enqueue(generation_id, coro):
-        enqueued.append(generation_id)
-        close = getattr(coro, "close", None)
-        if close:
-            close()
-
-    monkeypatch.setattr(video_voice, "enqueue_generation", fake_enqueue)
-
-    status = asyncio.run(
-        video_voice.create_shot_narration(
-            project.id,
-            shot.id,
-            models.VideoSceneNarrationRequest(engine="qwen", model_size="0.6B"),
-            db,
+    with pytest.raises(video_voice.VideoVoiceError) as exc:
+        asyncio.run(
+            video_voice.create_shot_narration(
+                project.id,
+                shot.id,
+                models.VideoSceneNarrationRequest(engine="qwen", model_size="0.6B"),
+                db,
+            )
         )
-    )
 
-    assert enqueued == [status.generation_id]
-    generation = db.get(DBGeneration, status.generation_id)
-    assert generation is not None
-    assert generation.engine == "qwen"
-    assert generation.model_size == "1.7B"
+    assert exc.value.error_code == "VIDEO_VOICE_VEO_NATIVE_SPEECH"
+    assert db.query(DBGeneration).filter(DBGeneration.profile_id == profile.id).count() == 0
 
 def test_shot_voice_status_syncs_from_existing_generation(db):
     project = video_projects.create_project(
@@ -3469,6 +5506,47 @@ def test_phase2_retainability_quality_flags_static_and_audio_risks():
     assert quality["audio_clutter_risk"] is True
     assert quality["long_static_span_risk"] is True
 
+
+def test_phase2_character_reference_models_are_json_serializable_at_persistence_boundaries():
+    character = video_phase2.CharacterReferencePlan(
+        name="Linh",
+        role="main character",
+        appearance="Short black hair and a blue jacket.",
+        action="Looks toward the glowing doorway.",
+    )
+    scene = video_phase2.StoryScenePlan(
+        title="The doorway",
+        vietnamese_description="Linh nhìn thấy một cánh cửa phát sáng.",
+        english_narration="Linh notices a glowing doorway at the end of the hall.",
+        character_appearance="Short black hair and a blue jacket.",
+        wardrobe_and_sandals="Blue jacket, dark trousers, practical shoes.",
+        subject_motion_by_duration="She walks forward and pauses at the doorway.",
+        setting_and_lighting="A dim hall with warm light spilling through the door.",
+        detailed_mood="Cautious curiosity.",
+        related_characters=[character],
+    )
+    shot = video_phase2.ShotPlan(
+        scene_order=1,
+        shot_order=1,
+        vietnamese_description="Linh bước tới cánh cửa.",
+        english_narration="She takes one careful step toward the light.",
+        primary_action="Walks toward the doorway.",
+        purpose="Build curiosity.",
+        shot_type="story beat",
+        camera_angle="eye level",
+        framing="medium shot",
+        composition="Linh on the left third, doorway on the right.",
+        camera_motion="slow push-in",
+        visible_characters=[character],
+    )
+
+    description = video_phase2._story_scene_visual_description(scene)
+    retention = video_phase2._shot_retention_metadata(shot)
+
+    assert '"name": "Linh"' in description
+    assert retention["visible_characters"][0]["name"] == "Linh"
+    json.dumps(retention, ensure_ascii=False)
+
 def test_phase2_shot_breakdown_accepts_top_level_segments_payload(db, monkeypatch):
     project = video_projects.create_project(
         models.VideoProjectCreate(
@@ -3754,6 +5832,8 @@ def test_phase2_video_prompt_accepts_shots_alias_payload(db, monkeypatch):
     assert pack is not None
     assert len(pack.prompts) == 1
     assert "Create a 3-second" in pack.prompts[0].prompt
+    assert "stylized 3D cinematic animation" in pack.prompts[0].prompt
+    assert "no 2d illustration" in (pack.prompts[0].negative_prompt or "").casefold()
     assert "người que nhỏ chạy luyện tập" in (pack.prompts[0].prompt_explanation_vi or "")
     assert pack.prompts[0].quality_status == "passed"
     assert pack.prompts[0].camera_motion == "slow push-in"
@@ -3988,7 +6068,8 @@ def test_prompt_pack_retry_writes_only_valid_mapping_attempt(db, monkeypatch):
     assert pack is not None
     assert calls["count"] == 2
     assert len(pack.prompts) == 1
-    assert pack.prompts[0].prompt == "Valid second attempt"
+    assert pack.prompts[0].prompt.startswith("Valid second attempt")
+    assert "stylized 3D cinematic animation" in pack.prompts[0].prompt
     assert db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.shot_id == shot.id).count() == 1
     warning = db.query(DBVideoDebugEvent).filter(
         DBVideoDebugEvent.project_id == project.id,
@@ -4104,6 +6185,7 @@ def test_prompt_pack_accepts_normalized_creative_note_defaults_for_multi_segment
 
     def fake_run(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
         assert output_schema == video_phase2.VIDEO_PROMPT_PACK_SCHEMA
+        batch_orders = sorted({int(value) for value in re.findall(r"Segment (\d+) of 6:", prompt)})
         return json.dumps(
             {
                 "negative_prompt_global": "No watermark, no subtitles, no distorted hands.",
@@ -4132,7 +6214,7 @@ def test_prompt_pack_accepts_normalized_creative_note_defaults_for_multi_segment
                         "lighting": "cinematic natural light",
                         "mood": "focused and story-driven",
                     }
-                    for order in range(1, 7)
+                    for order in batch_orders
                 ],
             }
         )
@@ -4148,6 +6230,130 @@ def test_prompt_pack_accepts_normalized_creative_note_defaults_for_multi_segment
         assert prompt.retention_notes == video_phase2.VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["retention_notes"]
         assert prompt.transition_notes == video_phase2.VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["transition_notes"]
         assert prompt.sound_design_notes == video_phase2.VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["sound_design_notes"]
+
+def test_prompt_pack_regenerates_story_handoff_as_long_segment_prompt(db, monkeypatch):
+    project = video_projects.create_project(
+        models.VideoProjectCreate(
+            topic="Tia wakes in the Lombardy library and realizes time is wrong.",
+            phase="phase2",
+            prompt_segment_count=6,
+            prompt_segment_duration_seconds=10,
+            micro_scenes_per_prompt=4,
+            aspect_ratio="9:16",
+            target_language="en",
+            source_blocks=[
+                models.VideoSourceBlockDraft(
+                    block_type="idea",
+                    content="Anime/webtoon opening segment for Tia returning to childhood.",
+                )
+            ],
+        ),
+        db,
+    )
+    shot = _add_phase2_shot(
+        db,
+        project.id,
+        order=1,
+        narration="Tia opens her eyes and sees her father alive beside her.",
+        duration_seconds=10,
+    )
+    shot.prompt_status = "missing"
+    shot.vietnamese_description = "Tia wakes in the Lombardy library and sees her father alive."
+    shot.primary_action = "Tia opens her eyes and slowly turns toward her father."
+    shot.shot_type = "anime webtoon opening segment"
+    shot.camera_angle = "eye level"
+    shot.framing = "vertical medium close-up"
+    shot.composition = "Tia in the foreground, father beside her, tall library windows behind them"
+    shot.camera_motion = "slow push-in"
+    shot.subject_motion = "Tia blinks awake, turns her head, and freezes in stunned recognition."
+    shot.environment_motion = "dust motes drift in soft daylight"
+    shot.transition_to_next = "hold on Tia's stunned face before the next segment"
+    shot.micro_scenes_json = [
+        {
+            "order": 1,
+            "start_seconds": 0,
+            "end_seconds": 2.5,
+            "description_vi": "Tia's eyelids flutter open in the library.",
+            "visual_action": "Tia wakes on the library floor.",
+            "camera_note": "slow push-in",
+            "continuity_note": "same red-haired girl and noble wardrobe",
+        },
+        {
+            "order": 2,
+            "start_seconds": 2.5,
+            "end_seconds": 5,
+            "description_vi": "She sees her father alive beside her.",
+            "visual_action": "Tia turns toward her father.",
+            "camera_note": "soft rack focus",
+            "continuity_note": "same Lombardy library",
+        },
+        {
+            "order": 3,
+            "start_seconds": 5,
+            "end_seconds": 7.5,
+            "description_vi": "Her expression shifts from confusion to shock.",
+            "visual_action": "Tia's eyes widen.",
+            "camera_note": "tight emotional close-up",
+            "continuity_note": "same face and green eyes",
+        },
+        {
+            "order": 4,
+            "start_seconds": 7.5,
+            "end_seconds": 10,
+            "description_vi": "She realizes time is wrong.",
+            "visual_action": "Tia holds still in stunned silence.",
+            "camera_note": "final hold",
+            "continuity_note": "do not restart the story",
+        },
+    ]
+    db.commit()
+
+    def fake_run(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
+        assert output_schema == video_phase2.VIDEO_PROMPT_PACK_SCHEMA
+        assert "Segment X of 6" in prompt
+        assert "4 micro-scene" in prompt
+        return json.dumps(
+            {
+                "global_continuity": "Same young red-haired girl, same noble wardrobe, same anime webtoon style.",
+                "negative_prompt_global": "No watermark, no subtitles, no text overlay.",
+                "prompts": [
+                    {
+                        "shot_order": 1,
+                        "prompt": "Tia opens her eyes in the Lombardy library and sees her father alive beside her.",
+                        "prompt_explanation_vi": "Long segment prompt should be restored around this short AI answer.",
+                        "negative_prompt": "No watermark, no subtitles, no text overlay, no changed character.",
+                        "duration_seconds": 10,
+                        "aspect_ratio": "9:16",
+                        "shot_type": "anime webtoon opening segment",
+                        "camera_angle": "eye level",
+                        "framing": "vertical medium close-up",
+                        "composition": "Tia foreground, father beside her, tall library windows behind them",
+                        "camera_motion": "slow push-in",
+                        "subject_motion": "Tia blinks awake, turns her head, and freezes in stunned recognition.",
+                        "environment_motion": "dust motes drift in soft daylight",
+                        "start_frame": "Tia lies still in the library",
+                        "end_frame": "Tia stares at her living father in shock",
+                        "lighting": "soft daylight through tall library windows",
+                        "mood": "stunned, emotional, and uncanny",
+                        "continuity_notes": "Keep the same young red-haired girl, same father, same library, same story state.",
+                        **_prompt_creative_fields(),
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
+
+    pack = video_phase2.generate_video_prompt_pack(project.id, db)
+
+    assert pack is not None
+    stored = db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.shot_id == shot.id).one()
+    assert stored.prompt.startswith("Create a 10-second 9:16 high-quality stylized 3D cinematic animation video.\nThis is segment 1 of 6")
+    assert "3D visual rule:" in stored.prompt
+    assert "Segment structure: use exactly 4 connected micro-scenes" in stored.prompt
+    assert "0-2.5s:" in stored.prompt
+    assert "7.5-10s:" in stored.prompt
+    assert "Tia opens her eyes in the Lombardy library" in stored.prompt
 
 def test_phase2_video_prompt_accepts_top_level_segments_payload(db, monkeypatch):
     project = video_projects.create_project(
@@ -4793,7 +6999,7 @@ def test_phase2_target_duration_creates_ten_second_prompt_segments(db, monkeypat
 
     assert pack is not None
     assert len(pack.prompts) == 3
-    assert "Create a 10-second 9:16 cinematic video" in pack.prompts[0].prompt
+    assert "Create a 10-second 9:16 high-quality stylized 3D cinematic animation video" in pack.prompts[0].prompt
     assert "segment 1 of 3" in pack.prompts[0].prompt.lower()
     assert "first 5 seconds" in pack.prompts[2].prompt
 
@@ -5456,6 +7662,141 @@ def test_phase2_prompt_pack_uses_one_full_codex_call_and_not_tts_queue(db, monke
     assert len(codex_calls) == 1
     assert enqueued_generation_ids == []
 
+
+def test_phase2_prompt_pack_batches_five_shots_and_keeps_full_quality_context(db, monkeypatch):
+    project = _ready_phase2_project(db, topic="Batched full quality prompt pack")
+    for order in range(1, 7):
+        shot = _add_phase2_shot(db, project.id, order=order, narration=f"Narration {order}", duration_seconds=3)
+        shot.prompt_status = "missing"
+        shot.vietnamese_description = f"Mô tả đầy đủ cho shot {order}."
+        shot.primary_action = f"The subject performs one clear action for shot {order}."
+        shot.retention_json = {"retention_role": f"keep curiosity for shot {order}"}
+        shot.transition_json = {"transition_type": "motivated cut", "timing": "last beat"}
+        shot.sound_design_json = {"music_mood": "focused", "mixing_notes": "keep narration clear"}
+    db.commit()
+    calls: list[tuple[str, list[int]]] = []
+
+    def prompt_payload(order: int) -> dict:
+        return {
+            "shot_order": order,
+            "prompt": f"Create a 3-second 9:16 high-quality stylized 3D cinematic animation video for shot {order}.",
+            "prompt_explanation_vi": f"Giải thích đầy đủ cho shot {order}.",
+            "negative_prompt": "No watermark, no subtitles, no distorted hands.",
+            "duration_seconds": 3,
+            "aspect_ratio": "9:16",
+            "shot_type": "medium shot",
+            "camera_angle": "eye level",
+            "framing": "centered subject",
+            "composition": "balanced vertical composition",
+            "camera_motion": "slow push-in",
+            "subject_motion": f"The subject performs one clear action for shot {order}.",
+            "environment_motion": "soft environmental motion",
+            "start_frame": "subject enters the opening frame",
+            "end_frame": "subject reaches the final beat",
+            "lighting": "soft cinematic lighting",
+            "mood": "focused and clear",
+            "continuity_notes": "Keep the same character, wardrobe, setting, and style.",
+            **_prompt_creative_fields(),
+        }
+
+    def fake_run(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
+        assert output_schema == video_phase2.VIDEO_PROMPT_PACK_SCHEMA
+        orders = sorted({int(value) for value in re.findall(r"Shot (\d+):", prompt)})
+        calls.append((prompt, orders))
+        assert orders
+        assert "speech_cues=" in prompt
+        assert "retention=" in prompt
+        assert "transition_pack=" in prompt
+        assert "sound=" in prompt
+        return json.dumps({"prompts": [prompt_payload(order) for order in orders]})
+
+    monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
+    pack = video_phase2.generate_video_prompt_pack(project.id, db)
+
+    assert pack is not None
+    assert [orders for _, orders in calls] == [[1, 2, 3, 4, 5], [6]]
+    assert len(pack.prompts) == 6
+    assert [db.get(DBVideoShot, item.shot_id).shot_order for item in pack.prompts] == list(range(1, 7))
+    assert all("high-quality stylized 3D cinematic animation" in item.prompt for item in pack.prompts)
+
+
+def test_phase2_prompt_pack_batch_failure_after_retry_preserves_previous_prompts(db, monkeypatch):
+    project = _ready_phase2_project(db, topic="Atomic batched prompt pack")
+    first_shot = _add_phase2_shot(db, project.id, order=1, narration="Existing narration", duration_seconds=3)
+    for order in range(2, 7):
+        shot = _add_phase2_shot(db, project.id, order=order, narration=f"Narration {order}", duration_seconds=3)
+        shot.prompt_status = "missing"
+    old_path = video_storage.get_project_subdir(project.id, "video_prompts") / "existing-prompt.txt"
+    old_path.write_text("existing prompt must remain", encoding="utf-8")
+    db.add(
+        DBVideoShotPrompt(
+            project_id=project.id,
+            shot_id=first_shot.id,
+            version=1,
+            prompt="existing prompt must remain",
+            prompt_path=video_storage.to_artifact_storage_path(old_path),
+        )
+    )
+    db.commit()
+    calls = {"count": 0}
+
+    def valid_batch_payload(prompt: str) -> str:
+        orders = sorted({int(value) for value in re.findall(r"Shot (\d+):", prompt)})
+        return json.dumps(
+            {
+                "prompts": [
+                    {
+                        "shot_order": order,
+                        "prompt": f"Create a 3-second 9:16 high-quality stylized 3D cinematic animation video for shot {order}.",
+                        "prompt_explanation_vi": "Giải thích prompt đầy đủ.",
+                        "negative_prompt": "No watermark, no subtitles.",
+                        "duration_seconds": 3,
+                        "aspect_ratio": "9:16",
+                        "shot_type": "medium shot",
+                        "camera_angle": "eye level",
+                        "framing": "centered",
+                        "composition": "balanced",
+                        "camera_motion": "slow push-in",
+                        "subject_motion": "one clear action",
+                        "environment_motion": "subtle motion",
+                        "start_frame": "opening frame",
+                        "end_frame": "final frame",
+                        "lighting": "cinematic light",
+                        "mood": "focused",
+                        "continuity_notes": "same character and style",
+                        **_prompt_creative_fields(),
+                    }
+                    for order in orders
+                ]
+            }
+        )
+
+    def fake_run(settings, prompt, *, output_schema, timeout_seconds=None, cwd=None):
+        calls["count"] += 1
+        if "Shot 6:" in prompt:
+            raise ai_planning.AIPlanningError("provider stream closed", error_code="CODEX_PROVIDER_TEMPORARY_UNAVAILABLE")
+        return valid_batch_payload(prompt)
+
+    monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
+    monkeypatch.setattr(video_phase2, "RETRY_DELAY_SECONDS", 0)
+
+    with pytest.raises(ai_planning.AIPlanningError):
+        video_phase2.generate_video_prompt_pack(project.id, db)
+
+    assert calls["count"] == 3
+    prompts = db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project.id).all()
+    assert len(prompts) == 1
+    assert prompts[0].prompt == "existing prompt must remain"
+    assert old_path.exists()
+    failure = db.query(DBVideoDebugEvent).filter(
+        DBVideoDebugEvent.project_id == project.id,
+        DBVideoDebugEvent.step_name == "video_prompt_generation_batch_failure",
+    ).first()
+    assert failure is not None
+    details = json.loads(failure.technical_details or "{}")
+    assert details["batch_index"] == 2
+    assert details["batch_retry_count"] == 1
+
 def test_manual_planning_endpoint_returns_vietnamese_conflict_when_project_active(db, monkeypatch):
     project = video_projects.create_project(
         models.VideoProjectCreate(
@@ -5529,8 +7870,9 @@ def test_auto_run_third_project_waits_for_planning_slot_then_continues(db, monke
         )
 
     monkeypatch.setattr(ai_planning, "run_codex_exec", fake_run)
-    run = _start_auto_run(db, project.id, mode="full_auto")
+    run = _start_auto_run(db, project.id, mode="full_auto", material_target="prompts_only")
     assert run is not None
+    assert run.material_target == "prompts_only"
 
     first_slot = video_planning_pool.planning_slot(db, project_id="held-project-1", step_name="held_step")
     second_slot = video_planning_pool.planning_slot(db, project_id="held-project-2", step_name="held_step")
@@ -5841,6 +8183,7 @@ def test_auto_run_prompts_only_completes_without_voice_profile_or_subtitle(db, m
     assert response.summary.subtitle_status == "missing"
     assert "generate_voice" not in response.pending_steps
     assert "generate_subtitle" not in response.pending_steps
+    assert response.pending_steps == []
 
 def test_auto_run_prompts_only_review_gated_stops_at_prompt_then_completes(db, monkeypatch):
     _disable_auto_run_background(monkeypatch)
@@ -6077,3 +8420,296 @@ def test_auto_run_retry_cancel_invalid_state_and_ignores_legacy_package_flag(db,
     assert cancel_response.status == "cancelled"
     with pytest.raises(video_auto_runs.VideoAutoRunError):
         asyncio.run(video_auto_runs.continue_auto_run(cancelled_project.id, cancelled.id, models.VideoAutoRunContinueRequest(), db))
+
+
+def _series_project_with_character_flow(db, *, affected_artifacts: list[str] | None = None):
+    series = video_projects.create_series(
+        models.VideoSeriesCreate(title="Character flow series", series_mode="video_story_only"),
+        db,
+    )
+    profile = video_projects.create_character_profile(
+        series.id,
+        models.SeriesCharacterProfileCreate(
+            name="Lan",
+            role="Lead",
+            face_description="Oval face",
+            hair_description="Black shoulder-length hair",
+            signature_outfit="Blue jacket",
+            fixed_traits="Keep the blue jacket and black hair.",
+        ),
+        db,
+    )
+    project = video_projects.create_episode(
+        series.id,
+        models.VideoEpisodeCreate(topic="Lan meets a new ally.", phase="phase2"),
+        db,
+    )
+    row = db.get(DBVideoProject, project.id)
+    payload = {
+        "episode_cast": [
+            {
+                "character_profile_id": profile.id,
+                "episode_role": "Lead of this episode",
+                "importance": "primary",
+                "reason_vi": "Lan drives the episode.",
+            }
+        ],
+        "episode_only_guests": [
+            {
+                "name": "Guard",
+                "episode_role": "One-scene helper",
+                "appearance": "Grey uniform",
+            }
+        ],
+        "new_character_proposals": [
+            {
+                "proposal_id": "prop-minh",
+                "name": "Minh",
+                "episode_role": "Recurring ally",
+                "reason_vi": "Minh unlocks the next plot thread.",
+                "canon_impact": "high",
+                "has_dialogue": True,
+                "foreground": True,
+                "reappears_likely": True,
+                "face_description": "Round face",
+                "hair_description": "Short brown hair",
+                "signature_outfit": "Green scarf",
+                "fixed_traits": "Always wears the green scarf.",
+                "affected_artifacts": affected_artifacts or ["story", "shots", "prompts"],
+            },
+            {
+                "proposal_id": "prop-crowd",
+                "name": "background extra",
+                "background_extra": True,
+                "canon_impact": "none",
+                "affected_artifacts": ["prompts"],
+            },
+        ],
+    }
+    flow = video_series_characters.build_story_character_flow(row, db, payload)
+    assert flow is not None
+    video_series_characters.set_project_character_flow(row, flow)
+    db.commit()
+    return series, profile, project
+
+
+def test_series_character_flow_builds_cast_guests_and_classifies_proposals(db):
+    series, profile, project = _series_project_with_character_flow(db)
+    row = db.get(DBVideoProject, project.id)
+
+    response = video_series_characters.character_flow_response(row, db)
+
+    assert response.series_id == series.id
+    assert [item.character_profile_id for item in response.episode_cast] == [profile.id]
+    assert response.episode_cast[0].identity_lock
+    assert response.episode_only_guests[0].name == "Guard"
+    assert response.pending_required_count == 1
+    assert response.required_proposals_decided is False
+    pending = [item for item in response.new_character_proposals if item.proposal_id == "prop-minh"][0]
+    background = [item for item in response.new_character_proposals if item.proposal_id == "prop-crowd"][0]
+    assert pending.requires_review is True
+    assert pending.status == "pending_review"
+    assert background.requires_review is False
+    assert background.status == "background_extra"
+
+
+def test_character_flow_is_not_required_for_non_series_projects(db):
+    project = video_projects.create_project(
+        models.VideoProjectCreate(
+            topic="Standalone video",
+            phase="phase2",
+            source_blocks=[models.VideoSourceBlockDraft(block_type="idea", content="Standalone video")],
+        ),
+        db,
+    )
+    row = db.get(DBVideoProject, project.id)
+
+    assert video_series_characters.build_story_character_flow(
+        row,
+        db,
+        {"new_character_proposals": [{"name": "Minh", "foreground": True}]},
+    ) is None
+    response = video_series_characters.character_flow_response(row, db)
+    assert response.series_id is None
+    assert response.episode_cast == []
+    assert response.pending_required_count == 0
+    assert response.required_proposals_decided is True
+
+
+def test_character_proposal_approve_creates_series_profile_and_cast(db):
+    series, _profile, project = _series_project_with_character_flow(db)
+    old_revision = db.get(DBVideoSeries, series.id).revision
+
+    result = video_series_characters.decide_character_proposal(
+        project.id,
+        "prop-minh",
+        models.CharacterProposalDecisionRequest(decision="approve_as_series_character", note_vi="Approved"),
+        db,
+    )
+
+    assert result is not None
+    assert result.created_character_profile is not None
+    assert result.created_character_profile.name == "Minh"
+    assert result.auto_run_ready_to_continue is True
+    db.expire_all()
+    series_row = db.get(DBVideoSeries, series.id)
+    assert series_row.revision == old_revision + 1
+    profile_row = (
+        db.query(DBSeriesCharacterProfile)
+        .filter(DBSeriesCharacterProfile.series_id == series.id, DBSeriesCharacterProfile.name == "Minh")
+        .first()
+    )
+    assert profile_row is not None
+    flow = video_series_characters.project_character_flow(db.get(DBVideoProject, project.id))
+    assert any(item.get("character_profile_id") == profile_row.id for item in flow["episode_cast"])
+    proposal = next(item for item in flow["new_character_proposals"] if item["proposal_id"] == "prop-minh")
+    assert proposal["status"] == "approved_as_series_character"
+    assert proposal["series_character_profile_id"] == profile_row.id
+
+
+def test_character_proposal_episode_only_does_not_write_series_canon(db):
+    series, _profile, project = _series_project_with_character_flow(db)
+
+    result = video_series_characters.decide_character_proposal(
+        project.id,
+        "prop-minh",
+        models.CharacterProposalDecisionRequest(decision="keep_episode_only"),
+        db,
+    )
+
+    assert result is not None
+    assert result.created_character_profile is None
+    assert result.auto_run_ready_to_continue is True
+    assert (
+        db.query(DBSeriesCharacterProfile)
+        .filter(DBSeriesCharacterProfile.series_id == series.id, DBSeriesCharacterProfile.name == "Minh")
+        .count()
+        == 0
+    )
+    flow = video_series_characters.project_character_flow(db.get(DBVideoProject, project.id))
+    assert any(item.get("proposal_id") == "prop-minh" for item in flow["episode_only_guests"])
+    proposal = next(item for item in flow["new_character_proposals"] if item["proposal_id"] == "prop-minh")
+    assert proposal["status"] == "episode_only"
+
+
+def test_character_proposal_reject_marks_safe_regeneration_scope(db):
+    _series, _profile, project = _series_project_with_character_flow(db, affected_artifacts=["prompts"])
+    shot = _add_phase2_shot(db, project.id, order=1, narration="Lan sees Minh.", duration_seconds=3)
+    prompt_path = video_storage.get_project_subdir(project.id, "video_prompts") / "old-series-prompt.txt"
+    prompt_path.write_text("old prompt", encoding="utf-8")
+    db.add(
+        DBVideoShotPrompt(
+            project_id=project.id,
+            shot_id=shot.id,
+            version=1,
+            prompt="old prompt with Minh",
+            prompt_path=video_storage.to_artifact_storage_path(prompt_path),
+        )
+    )
+    db.commit()
+
+    result = video_series_characters.decide_character_proposal(
+        project.id,
+        "prop-minh",
+        models.CharacterProposalDecisionRequest(decision="reject"),
+        db,
+    )
+
+    assert result is not None
+    assert result.auto_run_ready_to_continue is True
+    db.expire_all()
+    shot = db.get(DBVideoShot, shot.id)
+    assert shot.prompt_status == "stale"
+    assert db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.project_id == project.id).count() == 0
+    flow = video_series_characters.project_character_flow(db.get(DBVideoProject, project.id))
+    assert flow["resume_step"] == "generate_prompts"
+    assert "prop-minh" in flow["rejected_proposal_ids"]
+    proposal = next(item for item in flow["new_character_proposals"] if item["proposal_id"] == "prop-minh")
+    assert proposal["status"] == "rejected"
+
+
+def test_auto_run_stops_for_series_character_proposals_and_resumes_after_decision(db, monkeypatch):
+    _series, _profile, project = _series_project_with_character_flow(db)
+    project_row = db.get(DBVideoProject, project.id)
+    flow_payload = video_series_characters.project_character_flow(project_row)
+    project_row.retention_plan_json = {}
+    project_row.story_strategy = None
+    project_row.detailed_script = None
+    project_row.planning_status = "draft"
+    db.commit()
+
+    run = DBVideoAutoRun(
+        project_id=project.id,
+        mode="full_auto",
+        status="running",
+        current_step="validate",
+        force=False,
+        step_results_json={"reviewed": {}, "completed_steps": [], "events": [], "material_target": "prompts_only"},
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    monkeypatch.setattr(video_auto_runs, "_ensure_planning_ready", lambda session: None)
+
+    def fake_develop_story(project_id, session, *, force=False):
+        row = session.get(DBVideoProject, project_id)
+        row.story_strategy = "story"
+        row.detailed_script = "script"
+        row.planning_status = "story_ready"
+        row.status = "story_ready"
+        row.retention_plan_json = {
+            video_series_characters.CHARACTER_FLOW_KEY: flow_payload,
+        }
+        session.commit()
+        return None
+
+    def fake_background_task(coro):
+        close = getattr(coro, "close", None)
+        if close:
+            close()
+
+    monkeypatch.setattr(video_phase2, "develop_story", fake_develop_story)
+    monkeypatch.setattr(video_auto_runs, "create_background_task", fake_background_task)
+
+    action = video_auto_runs._advance_steps(run, db)
+    db.refresh(run)
+    assert action == {"action": "stop"}
+    assert run.status == "needs_review"
+    assert run.current_step == "review_character_proposals"
+    assert run.review_stage == "character_proposals"
+    assert run.step_results_json["character_flow"]["pending_required_count"] == 1
+
+    video_series_characters.decide_character_proposal(
+        project.id,
+        "prop-minh",
+        models.CharacterProposalDecisionRequest(decision="keep_episode_only"),
+        db,
+    )
+    continued = asyncio.run(
+        video_auto_runs.continue_auto_run(
+            project.id,
+            run.id,
+            models.VideoAutoRunContinueRequest(approved=True),
+            db,
+        )
+    )
+    assert continued is not None
+    assert continued.status == "waiting_workflow"
+    assert continued.current_step == "generate_shots"
+
+
+def test_series_prompt_rules_lock_multi_character_3d_identity(db):
+    _series, _profile, project = _series_project_with_character_flow(db)
+    row = db.get(DBVideoProject, project.id)
+    text = video_series_characters.video_prompt_instructions(row)
+    segment_rule = video_series_characters.segment_continuity_rule(row)
+
+    assert "stylized 3D" in text
+    assert "cinematic 3D animation" in text
+    assert "identity lock" in text
+    assert "identity swap" in text
+    assert "duplicate character" in text
+    assert "same main character only" in text
+    assert "single-main-character-only" in segment_rule
+    assert "Approved episode cast" in segment_rule

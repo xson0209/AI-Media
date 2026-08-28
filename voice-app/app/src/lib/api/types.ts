@@ -14,6 +14,213 @@ export type DialogueMode = 'voiceover' | 'character_lines' | 'mixed';
 export type NarrationDensity = 'light' | 'balanced' | 'dense';
 export type CallToActionStyle = 'none' | 'soft' | 'direct' | 'urgent';
 
+export type ResearchRunMode = 'research' | 'creative' | 'both';
+export type ResearchSourceType = 'video_url' | 'video_upload' | 'story_url' | 'image_upload' | 'text' | 'docs_url' | 'series_memory';
+export type ResearchChatAction = 'develop' | 'variant' | 'next_episode' | 'increase_drama' | 'fix_logic' | 'develop_character' | 'script_seed';
+
+export interface ResearchProjectResponse {
+  id: string;
+  title: string;
+  description?: string | null;
+  brief?: string | null;
+  status: string;
+  revision: number;
+  memory_path?: string | null;
+  manifest_path?: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchProjectCreate {
+  title: string;
+  description?: string;
+  brief?: string;
+  tags?: string[];
+}
+
+export interface ResearchSourceResponse {
+  id: string;
+  project_id: string;
+  source_type: ResearchSourceType;
+  title?: string | null;
+  input_url?: string | null;
+  file_path?: string | null;
+  status: string;
+  revision: number;
+  source_package_path?: string | null;
+  summary_path?: string | null;
+  result: Record<string, unknown>;
+  limitations: unknown[];
+  provenance: Record<string, unknown>;
+  error_code?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchRunAttempt {
+  mode: string;
+  status: string;
+  output: { options?: Array<Record<string, unknown>>; [key: string]: unknown };
+  duration_ms: number;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
+export interface ResearchRunResponse {
+  id: string;
+  project_id: string;
+  mode: ResearchRunMode;
+  status: string;
+  output: {
+    options?: Array<Record<string, unknown>>;
+    attempts?: Record<string, ResearchRunAttempt>;
+    merge?: Record<string, unknown>;
+    merge_revision?: number;
+    [key: string]: unknown;
+  };
+  provider_metadata: Record<string, unknown>;
+  cost: Record<string, unknown>;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchIdeaResponse {
+  id: string;
+  project_id: string;
+  run_id?: string | null;
+  title: string;
+  summary?: string | null;
+  status: string;
+  content: Record<string, unknown>;
+  source_provider?: string | null;
+  dependency_fingerprint?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchScriptResponse {
+  id: string;
+  project_id: string;
+  idea_id?: string | null;
+  title: string;
+  status: string;
+  content?: string | null;
+  content_json: Record<string, unknown>;
+  target_format?: string | null;
+  dependency_fingerprint?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchScoreResponse {
+  id: string;
+  project_id: string;
+  target_type: 'idea' | 'script';
+  target_id: string;
+  rubric_version: string;
+  components: Record<string, { score: number; weight: number; explanation: string; evidence_refs?: unknown[] }>;
+  total_score: number;
+  recommendation_status: 'recommended' | 'alternative' | 'blocked' | 'stale';
+  recommendation_reason?: string | null;
+  confidence?: number | null;
+  rank?: number | null;
+  tie_group?: number | null;
+  completeness_status: 'complete' | 'incomplete';
+  stale_reason?: string | null;
+  improvement_actions: unknown[];
+  tradeoffs: Record<string, unknown>;
+  safety_gate: { passed?: boolean; violations?: unknown[]; thresholds?: Record<string, number>; [key: string]: unknown };
+  provider_metadata: Record<string, unknown>;
+  cost: Record<string, unknown>;
+  evidence_refs: unknown[];
+  limitations: unknown[];
+  dependency_fingerprint?: string | null;
+  user_override_status?: string | null;
+  user_override_reason?: string | null;
+  user_override_revision: number;
+  user_override_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchRecommendationResponse {
+  project_id: string;
+  rubric_version: string;
+  ranked_scores: ResearchScoreResponse[];
+  recommended_target_ids: string[];
+  selected_target_id?: string | null;
+  selected_score_id?: string | null;
+  decision_source: 'ai' | 'user_override' | 'none' | string;
+  tie_groups: Array<{
+    group: number;
+    rank?: number | null;
+    target_ids: string[];
+    score_range: [number, number] | number[];
+  }>;
+  has_incomplete: boolean;
+  has_stale: boolean;
+  summary_reason?: string | null;
+}
+
+export interface ResearchChatResponse {
+  thread_id: string;
+  user_message_id: string;
+  assistant_message_id: string;
+  draft: string;
+  suggestions: Array<{ action: string; label: string }>;
+  status: string;
+  branch_name: string;
+  continuity: Record<string, unknown>;
+  context_project_ids: string[];
+}
+
+export interface ResearchChatMessageResponse {
+  id: string;
+  thread_id: string;
+  role: string;
+  content: string;
+  message_type: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ResearchChatThreadResponse {
+  id: string;
+  project_id: string;
+  title?: string | null;
+  selected_project_ids: string[];
+  branch_name: string;
+  status: string;
+  messages: ResearchChatMessageResponse[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchChatPromotionResponse {
+  message_id: string;
+  promotion_type: 'idea' | 'script' | 'memory_card';
+  status: string;
+  project_revision: number;
+  idea?: ResearchIdeaResponse | null;
+  script?: ResearchScriptResponse | null;
+}
+
+export interface ResearchHandoffResponse {
+  id: string;
+  project_id: string;
+  revision: number;
+  status: string;
+  target_ai_video_project_id?: string | null;
+  deep_link?: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface VoiceProfileCreate {
   name: string;
   description?: string;
@@ -259,6 +466,157 @@ export interface GenerationSettings {
   autoplay_on_generate: boolean;
 }
 
+export type AutomationPlatform = 'roxy' | 'youtube' | 'facebook' | 'tiktok';
+
+export interface AutomationHubStatusResponse {
+  enabled: boolean;
+  direct_post_enabled: boolean;
+  secret_store: {
+    ready?: boolean;
+    source?: string;
+    key_fingerprint?: string;
+    error?: string;
+    [key: string]: unknown;
+  };
+  worker: {
+    available?: boolean;
+    max_concurrency?: number;
+    queued?: number;
+    running?: number;
+    [key: string]: unknown;
+  };
+  sidecar: AutomationSidecarStatus;
+  prerequisites: string[];
+}
+
+export interface AutomationConnectionCreate {
+  kind: 'roxy' | 'publisher';
+  platform: AutomationPlatform;
+  label: string;
+  public_config?: Record<string, unknown>;
+  secret: Record<string, unknown>;
+  scopes?: string[];
+}
+
+export interface AutomationConnectionUpdate {
+  label?: string;
+  public_config?: Record<string, unknown>;
+  secret?: Record<string, unknown>;
+  scopes?: string[];
+}
+
+export interface AutomationConnectionResponse {
+  id: string;
+  kind: string;
+  platform: AutomationPlatform;
+  label: string;
+  status: string;
+  public_config: Record<string, unknown>;
+  has_secret: boolean;
+  secret_fingerprint?: string | null;
+  scopes: string[];
+  last_checked_at?: string | null;
+  failure_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationAssetResponse {
+  id: string;
+  source_type: string;
+  source_ref?: string | null;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string;
+  created_at: string;
+}
+
+export interface AutomationPublishAttemptResponse {
+  id: string;
+  attempt_number: number;
+  status: string;
+  request_meta: Record<string, unknown>;
+  response_meta: Record<string, unknown>;
+  error_code?: string | null;
+  failure_reason?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+}
+
+export interface AutomationPublishJobCreate {
+  asset_id: string;
+  connection_id: string;
+  platform: 'youtube' | 'facebook' | 'tiktok';
+  publish_mode: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  privacy?: string | null;
+  scheduled_at?: string | null;
+  idempotency_key: string;
+}
+
+export interface AutomationPublishJobResponse {
+  id: string;
+  asset_id: string;
+  connection_id: string;
+  platform: 'youtube' | 'facebook' | 'tiktok';
+  publish_mode: string;
+  status: string;
+  title: string;
+  description: string;
+  tags: string[];
+  privacy?: string | null;
+  scheduled_at?: string | null;
+  idempotency_key: string;
+  attempt_count: number;
+  cancel_requested: boolean;
+  provider_post_id?: string | null;
+  provider_url?: string | null;
+  result: Record<string, unknown>;
+  error_code?: string | null;
+  failure_reason?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  attempts: AutomationPublishAttemptResponse[];
+}
+
+export interface AutomationSidecarStatus {
+  managed?: boolean;
+  running?: boolean;
+  ready?: boolean;
+  browser_connected?: boolean;
+  pid?: number | null;
+  url?: string;
+}
+
+export interface RoxyWorkspaceListResponse {
+  rows: Array<{
+    id: number;
+    workspaceName?: string;
+    project_details?: Array<{ projectId?: number | string; projectName?: string }>;
+  }>;
+  total: number;
+}
+
+export interface RoxyProfileListResponse {
+  rows: Array<{
+    dir_id: string;
+    window_name?: string | null;
+    window_remark?: string | null;
+    window_sort_num?: number | string | null;
+    workspace_name?: string | null;
+    core_type?: string | null;
+    core_version?: string | null;
+    os?: string | null;
+  }>;
+  total: number;
+}
+
 export type GenerationSettingsUpdate = Partial<GenerationSettings>;
 
 export interface AIPlanningSettings {
@@ -416,6 +774,86 @@ export interface SeriesCharacterProfileSuggestionResponse {
   profiles: SeriesCharacterProfileCreate[];
   source: string;
   saved: boolean;
+  message: string;
+}
+
+export interface EpisodeCastMember {
+  character_profile_id?: string | null;
+  name: string;
+  episode_role?: string | null;
+  importance: string;
+  reason_vi?: string | null;
+  identity_lock?: string | null;
+  visual_identity?: string | null;
+  fixed_traits?: string | null;
+}
+
+export interface EpisodeOnlyGuest {
+  guest_id: string;
+  proposal_id?: string | null;
+  name: string;
+  episode_role?: string | null;
+  appearance?: string | null;
+  personality?: string | null;
+  speech_style?: string | null;
+  reason_vi?: string | null;
+  approved_at?: string | null;
+}
+
+export interface NewCharacterProposal {
+  proposal_id: string;
+  name: string;
+  episode_role?: string | null;
+  reason_vi?: string | null;
+  canon_impact: string;
+  reappears_likely: boolean;
+  has_dialogue: boolean;
+  foreground: boolean;
+  affects_plot: boolean;
+  background_extra: boolean;
+  requires_review: boolean;
+  face_description?: string | null;
+  hair_description?: string | null;
+  body_description?: string | null;
+  signature_outfit?: string | null;
+  personality?: string | null;
+  speech_style?: string | null;
+  fixed_traits?: string | null;
+  additional_notes?: string | null;
+  affected_artifacts: string[];
+  status: string;
+  decision?: CharacterProposalDecision | string | null;
+  decided_at?: string | null;
+  decided_note_vi?: string | null;
+  series_character_profile_id?: string | null;
+}
+
+export interface VideoProjectCharacterFlowResponse {
+  project_id: string;
+  series_id?: string | null;
+  episode_cast: EpisodeCastMember[];
+  episode_only_guests: EpisodeOnlyGuest[];
+  new_character_proposals: NewCharacterProposal[];
+  pending_required_count: number;
+  required_proposals_decided: boolean;
+  resume_step?: string | null;
+  message: string;
+}
+
+export type CharacterProposalDecision =
+  | 'approve_as_series_character'
+  | 'keep_episode_only'
+  | 'reject';
+
+export interface CharacterProposalDecisionRequest {
+  decision: CharacterProposalDecision;
+  note_vi?: string | null;
+}
+
+export interface CharacterProposalDecisionResponse {
+  character_flow: VideoProjectCharacterFlowResponse;
+  created_character_profile?: SeriesCharacterProfileResponse | null;
+  auto_run_ready_to_continue: boolean;
   message: string;
 }
 
@@ -1169,6 +1607,20 @@ export interface VideoShotMicroScene {
   continuity_note?: string | null;
 }
 
+export interface VideoShotSpeechCue {
+  speaker_name: string;
+  character_profile_id?: string | null;
+  speaker_role: 'visible_character' | 'offscreen_narrator' | 'episode_guest' | 'unknown';
+  text: string;
+  voice_description?: string | null;
+  delivery?: string | null;
+  emotion?: string | null;
+  context?: string | null;
+  start_seconds?: number | null;
+  end_seconds?: number | null;
+  lip_sync_required: boolean;
+}
+
 export interface VideoShotResponse {
   id: string;
   project_id: string;
@@ -1191,6 +1643,7 @@ export interface VideoShotResponse {
   transition_json?: Record<string, unknown> | null;
   sound_design_json?: Record<string, unknown> | null;
   micro_scenes?: VideoShotMicroScene[] | null;
+  speech_cues?: VideoShotSpeechCue[] | null;
   retainability_quality_check?: Record<string, unknown> | null;
   locked: boolean;
   status: string;
@@ -1384,6 +1837,7 @@ export interface VideoSubtitleResponse {
 export interface VideoPackageReadinessResponse {
   project_id: string;
   language: VideoLanguage;
+  speech_source: 'veo_native' | 'project_audio';
   video_purpose: VideoPurpose;
   dialogue_mode: DialogueMode;
   narration_density: NarrationDensity;
@@ -1426,6 +1880,28 @@ export interface VideoShotClipResponse {
   updated_at: string;
 }
 
+/** One file already matched to a shot, ready to upload as part of a batch. */
+export interface VideoShotClipBatchEntry {
+  shotId: string;
+  shotOrder: number;
+  file: File;
+}
+
+export interface VideoShotClipBatchSuccess extends VideoShotClipBatchEntry {
+  clip: VideoShotClipResponse;
+}
+
+export interface VideoShotClipBatchFailure extends VideoShotClipBatchEntry {
+  message: string;
+}
+
+/** Successes and failures are kept apart so one bad file never hides the loaded ones. */
+export interface VideoShotClipBatchResult {
+  succeeded: VideoShotClipBatchSuccess[];
+  failed: VideoShotClipBatchFailure[];
+  total: number;
+}
+
 export interface VideoRenderSettings {
   resolution: 'auto' | '720p' | '1080p';
   fps: number;
@@ -1433,12 +1909,16 @@ export interface VideoRenderSettings {
   duration_mode: 'freeze' | 'trim_only';
   subtitle_mode: 'burn_in' | 'sidecar' | 'none';
   mute_clip_audio: boolean;
+  /** Absent means the backend infers the level from `mute_clip_audio`. */
+  clip_audio_mode?: 'drop' | 'bed' | 'clip_only';
   background_color?: string;
   force?: boolean;
   enhanced_render?: boolean;
   enhanced_audio?: boolean;
   ai_review?: boolean;
   max_fix_attempts?: number;
+  watermark_cleanup?: boolean;
+  watermark_backend?: 'cv2' | 'migan';
 }
 
 export interface VideoRenderWarning {
@@ -1447,11 +1927,26 @@ export interface VideoRenderWarning {
   message: string;
 }
 
+export type VideoRenderWatermarkModelCache = 'cached' | 'not_cached' | 'unknown';
+
+export interface VideoRenderWatermarkBackendStatus {
+  backend: string;
+  ready: boolean;
+  failure_reason?: string | null;
+  error_code?: string | null;
+  revision?: string | null;
+  model_cache?: VideoRenderWatermarkModelCache | null;
+}
+
 export interface VideoRenderReadinessResponse {
   project_id: string;
   ready: boolean;
   ffmpeg_ready: boolean;
   ffprobe_ready: boolean;
+  watermark_cleanup_ready: boolean;
+  watermark_cleanup_revision?: string | null;
+  watermark_cleanup_failure_reason?: string | null;
+  watermark_backends?: VideoRenderWatermarkBackendStatus[];
   missing_clip_shot_ids: string[];
   invalid_clip_shot_ids: string[];
   missing_voice_shot_ids: string[];
@@ -1749,6 +2244,7 @@ export type VideoAutoRunStep =
   | 'waiting_workflow'
   | 'develop_story'
   | 'waiting_planning'
+  | 'review_character_proposals'
   | 'review_story'
   | 'generate_shots'
   | 'generate_prompts'
@@ -1762,7 +2258,7 @@ export type VideoAutoRunStep =
   | 'generate_render'
   | 'waiting_render'
   | 'completed';
-export type VideoAutoRunReviewStage = 'story' | 'prompts';
+export type VideoAutoRunReviewStage = 'story' | 'prompts' | 'character_proposals';
 
 export interface VideoAutoRunStartRequest {
   mode?: VideoAutoRunMode;
@@ -2004,6 +2500,25 @@ export interface VideoInspirationAnalyzeRequest {
   allow_audio_only?: boolean;
   stt_model?: WhisperModelSize | null;
   analysis_mode?: VideoInspirationAnalysisMode;
+  handoff_to_ai_video?: boolean;
+}
+
+export interface VideoInspirationVariantGenerateRequest {
+  candidate_count?: 2 | 3;
+}
+
+export interface VideoInspirationVariantScoreRequest {
+  variant_ids?: string[];
+}
+
+export interface VideoInspirationVariantSynthesisRequest {
+  variant_ids?: string[];
+  final_version_count?: 1 | 2 | 3;
+  strategy?: 'balanced' | 'hook' | 'emotion' | 'retention' | 'visual';
+}
+
+export interface VideoInspirationVariantSelectRequest {
+  variant_id: string;
 }
 
 export interface VideoInspirationTranscriptUpdate {
@@ -2848,4 +3363,118 @@ export interface ComicAnalysisPackage {
   };
   optimized_script?: ComicOptimizedScript | null;
   optimized_script_source?: string | null;
+}
+
+// ── Product Video (prompt-only flow) ──────────────────────────────────
+// Contract source: openspec/changes/ngay-23-08-luong-product-video-sinh-prompt
+
+export type ProductVideoAspectRatio = '9:16' | '16:9';
+
+export interface ProductVideoProjectCreate {
+  topic: string;
+  title?: string | null;
+  target_language?: string;
+  aspect_ratio?: ProductVideoAspectRatio;
+  visual_style?: string | null;
+  visual_style_preset?: string | null;
+  video_purpose?: string;
+  dialogue_mode?: string | null;
+  narration_density?: string | null;
+  call_to_action_style?: string | null;
+  creation_mode?: 'quick' | 'manual';
+  automation_mode?: 'review_gated' | 'full_auto';
+  output_target?: 'render_ready' | 'prompt_pack' | 'shots_only';
+  target_duration_seconds?: number | null;
+  prompt_segment_count?: number | null;
+  prompt_segment_duration_seconds?: number | null;
+  micro_scenes_per_prompt?: number | null;
+}
+
+export type ProductVideoProjectUpdate = Partial<ProductVideoProjectCreate>;
+
+export interface ProductVideoProjectResponse {
+  id: string;
+  title: string;
+  topic: string;
+  target_language: string;
+  aspect_ratio: ProductVideoAspectRatio;
+  visual_style: string | null;
+  visual_style_preset: string | null;
+  video_purpose: string;
+  dialogue_mode: string | null;
+  narration_density: string | null;
+  call_to_action_style: string | null;
+  creation_mode: 'quick' | 'manual';
+  automation_mode: 'review_gated' | 'full_auto';
+  output_target: 'render_ready' | 'prompt_pack' | 'shots_only';
+  target_duration_seconds: number | null;
+  prompt_segment_count: number | null;
+  prompt_segment_duration_seconds: number | null;
+  micro_scenes_per_prompt: number | null;
+  status: string;
+  planning_status: string;
+  planning_error: string | null;
+  hook_text: string | null;
+  /** Clip count the backend derived from the duration target. */
+  derived_clip_count: number;
+  derived_clip_duration_seconds: number;
+  /** Real total duration — always a multiple of the clip length, so it can
+   *  differ from target_duration_seconds (Veo snaps clips to 4/6/8/10s). */
+  derived_duration_seconds: number;
+  shot_count: number;
+  prompt_count: number;
+  render_project_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductVideoShotResponse {
+  id: string;
+  project_id: string;
+  shot_order: number;
+  shot_type: string | null;
+  framing: string | null;
+  camera_angle: string | null;
+  composition: string | null;
+  camera_motion: string | null;
+  subject_motion: string | null;
+  environment_motion: string | null;
+  lighting: string | null;
+  mood: string | null;
+  duration_seconds: number | null;
+  beat_role: string | null;
+  narration_text: string | null;
+  retention_notes: string | null;
+  transition_notes: string | null;
+  sound_design_notes: string | null;
+  created_at: string;
+}
+
+export interface ProductVideoPromptResponse {
+  id: string;
+  project_id: string;
+  shot_id: string;
+  shot_order: number;
+  prompt: string;
+  negative_prompt: string | null;
+  prompt_explanation_vi: string | null;
+  aspect_ratio: string;
+  created_at: string;
+}
+
+export interface ProductVideoPromptPackResponse {
+  project_id: string;
+  aspect_ratio: string;
+  target_language: string;
+  derived_clip_count: number;
+  derived_clip_duration_seconds: number;
+  derived_duration_seconds: number;
+  hook_text: string | null;
+  prompts: ProductVideoPromptResponse[];
+}
+
+export interface ProductVideoProjectDetailResponse extends ProductVideoProjectResponse {
+  shots: ProductVideoShotResponse[];
+  prompts: ProductVideoPromptResponse[];
+  render_shots: VideoShotResponse[];
 }

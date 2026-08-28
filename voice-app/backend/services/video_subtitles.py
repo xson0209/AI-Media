@@ -16,7 +16,7 @@ from ..database import (
     VideoShot as DBVideoShot,
     VideoSubtitle as DBVideoSubtitle,
 )
-from . import series_brain, video_errors, video_observability, video_rendering, video_state, video_storage
+from . import series_brain, video_errors, video_observability, video_rendering, video_speech, video_state, video_storage
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?\u3002\uff01\uff1f])\s+")
 _MAX_CHARS_BY_RATIO = {
@@ -59,6 +59,18 @@ def _requires_narration(scene: DBVideoScene) -> bool:
 
 def _requires_shot_narration(shot: DBVideoShot) -> bool:
     return bool((shot.english_narration or "").strip())
+
+
+def _clip_audio_mode_for_project(project_id: str, db: Session) -> str:
+    """The clip audio level the next render of this project will use.
+
+    Subtitles are generated outside the render call and get no settings from the caller, so
+    the level is read back from the project's saved render settings — the same source the
+    unattended render flow already reads.
+    """
+    return video_rendering.clip_audio_mode_for_settings(
+        video_rendering.render_settings_for_project(project_id, db)
+    )
 
 
 def _subtitle_response(row: DBVideoSubtitle) -> models.VideoSubtitleResponse:
@@ -194,13 +206,26 @@ def _cue_models(project: DBVideoProject, scenes: list[DBVideoScene]) -> list[mod
     return cues
 
 
-def _shot_cue_models(project: DBVideoProject, shots: list[DBVideoShot]) -> list[models.VideoSubtitleCue]:
+def _shot_cue_models(
+    project: DBVideoProject,
+    shots: list[DBVideoShot],
+    db: Session,
+) -> list[models.VideoSubtitleCue]:
     cues: list[models.VideoSubtitleCue] = []
     cursor = 0.0
     cue_index = 1
+    clips = video_rendering.active_clips_for_project(project.id, db)
+    native_speech = video_speech.uses_veo_native_speech(project)
+    clip_audio_mode = _clip_audio_mode_for_project(project.id, db)
     for shot in shots:
+        clip = clips.get(shot.id)
         if not _requires_shot_narration(shot):
-            duration = video_rendering.resolve_shot_duration(shot)
+            duration = video_rendering.resolve_shot_duration(
+                shot,
+                project=project,
+                clip=clip,
+                clip_audio_mode=clip_audio_mode,
+            )
             if duration is None:
                 raise VideoSubtitleError(
                     f"Segment {video_storage.shot_number(shot.shot_order)} không có narration nhưng thiếu duration timeline hợp lệ.",
@@ -208,9 +233,24 @@ def _shot_cue_models(project: DBVideoProject, shots: list[DBVideoShot]) -> list[
                 )
             cursor += float(duration)
             continue
-        duration = float(shot.audio_duration or 0)
-        chunks = _split_caption_text(shot.english_narration or "", aspect_ratio=project.aspect_ratio, duration=duration)
-        chunk_durations = _caption_chunk_durations(chunks, duration)
+        duration = video_rendering.resolve_shot_duration(
+            shot,
+            project=project,
+            clip=clip,
+            clip_audio_mode=clip_audio_mode,
+        )
+        if duration is None:
+            raise VideoSubtitleError(
+                f"Segment {video_storage.shot_number(shot.shot_order)} thiếu thời lượng audio hợp lệ.",
+                error_code="VIDEO_SUBTITLE_TIMELINE_DURATION_REQUIRED",
+            )
+        caption_text = (
+            video_speech.spoken_text_for_shot(shot, project)
+            if native_speech
+            else (shot.english_narration or "")
+        )
+        chunks = _split_caption_text(caption_text, aspect_ratio=project.aspect_ratio, duration=float(duration))
+        chunk_durations = _caption_chunk_durations(chunks, float(duration))
         for chunk, cue_duration in zip(chunks, chunk_durations, strict=True):
             start = cursor
             end = cursor + cue_duration
@@ -280,14 +320,34 @@ def validate_subtitle_inputs(project_id: str, db: Session) -> tuple[DBVideoProje
 
     use_shots = getattr(project, "phase", "phase1") == "phase2" and any(_requires_shot_narration(shot) for shot in shots)
     if use_shots:
+        if _clip_audio_mode_for_project(project_id, db) == video_rendering.CLIP_AUDIO_MODE_CLIP_ONLY:
+            # The clip-only level never plays the voice track, so demanding a completed voice
+            # here would only swap the render's two blockers for a missing-subtitle one.
+            return project, [], shots
         missing_shot_labels: list[str] = []
+        native_speech = video_speech.uses_veo_native_speech(project)
+        clips = video_rendering.active_clips_for_project(project_id, db) if native_speech else {}
         for shot in shots:
             if not _requires_shot_narration(shot):
                 continue
-            if shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration:
+            clip = clips.get(shot.id) if native_speech else None
+            if native_speech:
+                missing = (
+                    clip is None
+                    or clip.status != "ready"
+                    or not clip.has_audio
+                    or not clip.duration_seconds
+                )
+            else:
+                missing = shot.voice_status != "completed" or not shot.audio_path or not shot.audio_duration
+            if missing:
                 missing_shot_labels.append(video_storage.shot_number(shot.shot_order))
         if missing_shot_labels:
-            message = "Chưa thể tạo phụ đề vì còn shot chưa có giọng đọc hoàn tất: " + ", ".join(missing_shot_labels)
+            message = (
+                "Chưa thể tạo phụ đề vì clip Veo của các segment tiếng Việt chưa có audio lời thoại hợp lệ: "
+                if native_speech
+                else "Chưa thể tạo phụ đề vì còn shot chưa có giọng đọc hoàn tất: "
+            ) + ", ".join(missing_shot_labels)
             video_observability.log_event(
                 db,
                 step_name="subtitle_validation",
@@ -323,7 +383,7 @@ def validate_subtitle_inputs(project_id: str, db: Session) -> tuple[DBVideoProje
 
 def generate_subtitle(project_id: str, db: Session) -> models.VideoSubtitleResponse:
     project, scenes, shots = validate_subtitle_inputs(project_id, db)
-    cues = _shot_cue_models(project, shots) if shots else _cue_models(project, scenes)
+    cues = _shot_cue_models(project, shots, db) if shots else _cue_models(project, scenes)
     if not cues:
         video_observability.log_event(
             db,

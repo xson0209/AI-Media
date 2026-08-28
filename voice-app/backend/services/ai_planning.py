@@ -47,6 +47,11 @@ _TRANSIENT_PROVIDER_MARKERS = (
     "rate_limit",
     "try again",
 )
+_CODEX_EXEC_TIMEOUT_MARKERS = (
+    "codex exec timed out",
+    "exec timed out",
+    "timed out after",
+)
 _MODEL_CONFIG_FALLBACK_MARKERS = (
     "model does not exist",
     "unknown model",
@@ -153,11 +158,19 @@ def _looks_like_transient_provider_failure(value: str | None) -> bool:
         return True
     return any(marker in lowered for marker in _TRANSIENT_PROVIDER_MARKERS)
 
+def _looks_like_codex_exec_timeout(value: str | None) -> bool:
+    if not value:
+        return False
+    lowered = value.lower()
+    return any(marker in lowered for marker in _CODEX_EXEC_TIMEOUT_MARKERS)
+
 def _provider_failure_text(result: subprocess.CompletedProcess[str]) -> str:
     return "\n".join(part for part in (result.stderr, result.stdout) if part).strip()
 
 def _nonzero_error_code(provider_text: str | None) -> str:
     status_code = _provider_status_code(provider_text)
+    if _looks_like_codex_exec_timeout(provider_text):
+        return "CODEX_EXEC_TIMEOUT"
     if _looks_like_transient_provider_failure(provider_text):
         return "CODEX_PROVIDER_TEMPORARY_UNAVAILABLE"
     if status_code in {400, 401, 403, 404}:
@@ -167,6 +180,12 @@ def _nonzero_error_code(provider_text: str | None) -> str:
 def _nonzero_error_message(provider_text: str | None) -> str:
     status_code = _provider_status_code(provider_text)
     detail = _redact_provider_text(provider_text)
+    if _looks_like_codex_exec_timeout(provider_text):
+        return (
+            "AI xu ly qua lau khi tao noi dung. Hay thu lai; neu van loi, "
+            "hay rut ngan nguon noi dung hoac tang timeout trong Settings."
+            + (f" Chi tiet: {detail}" if detail else "")
+        )
     if _looks_like_transient_provider_failure(provider_text):
         return (
             "Codex provider dang qua tai hoac tam thoi khong on dinh khi tao noi dung. "
@@ -395,9 +414,19 @@ def _strict_response_format_schema(schema: dict[str, Any]) -> dict[str, Any]:
             node.setdefault("type", "object")
 
         if node.get("type") == "object":
+            if "properties" not in node:
+                raise ValueError(
+                    "Strict response schema contains a free-form object without properties; "
+                    "define a structured model before sending it to the provider."
+                )
             node["additionalProperties"] = False
             if isinstance(node.get("properties"), dict):
-                node.setdefault("required", list(node["properties"].keys()))
+                # Codex/OpenAI structured outputs require every property to be
+                # present in ``required``.  Pydantic's JSON schema preserves
+                # optional fields by leaving them out of ``required``; for the
+                # response format those fields must instead be required and
+                # represented as nullable in their property schema.
+                node["required"] = list(node["properties"].keys())
 
         items = node.get("items")
         if isinstance(items, dict):
@@ -953,7 +982,7 @@ def run_codex_exec(
                 except subprocess.TimeoutExpired as exc:
                     stdout = _process_text(exc.output)
                     stderr = _process_text(exc.stderr)
-                    provider_text = "\n".join(
+                    fallback_timeout_text = "\n".join(
                         part
                         for part in (
                             f"Codex inline schema fallback timed out after {timeout} seconds.",
@@ -962,6 +991,10 @@ def run_codex_exec(
                         )
                         if part
                     )
+                    provider_text = (
+                        f"Structured output error:\n{initial_provider_text}\n\n"
+                        f"Inline schema fallback error:\n{fallback_timeout_text}"
+                    ).strip()
                     video_errors.log_error(
                         "Codex CLI inline schema fallback timed out",
                         exc=exc,
@@ -980,6 +1013,8 @@ def run_codex_exec(
                         stderr_chars=len(stderr or ""),
                         stdout_tail=_trim(stdout[-_MAX_LOG_CHARS:] if stdout else None),
                         stderr_tail=_trim(stderr[-_MAX_LOG_CHARS:] if stderr else None),
+                        initial_provider_status_code=_provider_status_code(initial_provider_text),
+                        initial_provider_error=_redact_provider_text(initial_provider_text),
                         **_output_file_details(output_path),
                         request_id=request_id,
                         step_name="codex_exec_schema_fallback",

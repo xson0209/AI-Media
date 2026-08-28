@@ -76,6 +76,27 @@ def test_create_upload_job_and_list(client):
     assert len(pages["items"]) == 2
 
 
+def test_job_list_total_is_independent_of_limit_and_offset(client):
+    for index in range(3):
+        response = client.post(
+            "/comic-series-analysis/jobs/from-url",
+            json={"url": f"https://example.com/chapter-{index}"},
+        )
+        assert response.status_code == 200, response.text
+
+    listing = client.get(
+        "/comic-series-analysis/jobs",
+        params={"limit": 1, "offset": 1},
+    )
+
+    assert listing.status_code == 200, listing.text
+    payload = listing.json()
+    assert len(payload["jobs"]) == 1
+    assert payload["total"] == 3
+    assert payload["limit"] == 1
+    assert payload["offset"] == 1
+
+
 def test_analyze_package_and_rewrite_flow(client, monkeypatch):
     from backend.services.comic_series_analysis import rewrite, vision_adapters
 
@@ -247,16 +268,29 @@ def test_canon_mode_requires_rights(client):
 
 
 def test_delete_job(client):
-    from backend.database import ComicAnalysisJob, ComicSourceAsset, ComicSourceDocument, ComicSourcePage
+    from backend.database import (
+        ComicAnalysisJob,
+        ComicPanel,
+        ComicPlotAnalysis,
+        ComicSourceAsset,
+        ComicSourceDocument,
+        ComicSourcePage,
+    )
+    from backend.services.comic_series_analysis import vision_adapters
 
     files = [("files", ("a.png", _png_bytes(), "image/png"))]
     job_id = client.post("/comic-series-analysis/jobs/from-upload", files=files).json()["id"]
+    vision_adapters.set_vision_adapter(vision_adapters.NullVisionAdapter())
+    analyzed = client.post(f"/comic-series-analysis/jobs/{job_id}/analyze")
+    assert analyzed.status_code == 202, analyzed.text
     session = database_session.SessionLocal()
     try:
         assert session.query(ComicAnalysisJob).filter_by(id=job_id).count() == 1
         assert session.query(ComicSourceDocument).filter_by(job_id=job_id).count() == 1
         assert session.query(ComicSourcePage).filter_by(job_id=job_id).count() == 1
         assert session.query(ComicSourceAsset).filter_by(job_id=job_id).count() == 1
+        assert session.query(ComicPanel).filter_by(job_id=job_id).count() == 1
+        assert session.query(ComicPlotAnalysis).filter_by(job_id=job_id).count() == 1
     finally:
         session.close()
 
@@ -269,5 +303,33 @@ def test_delete_job(client):
         assert session.query(ComicSourceDocument).filter_by(job_id=job_id).count() == 0
         assert session.query(ComicSourcePage).filter_by(job_id=job_id).count() == 0
         assert session.query(ComicSourceAsset).filter_by(job_id=job_id).count() == 0
+        assert session.query(ComicPanel).filter_by(job_id=job_id).count() == 0
+        assert session.query(ComicPlotAnalysis).filter_by(job_id=job_id).count() == 0
     finally:
         session.close()
+
+
+@pytest.mark.parametrize("run_status", ["queued", "running"])
+def test_delete_active_job_returns_conflict(client, run_status):
+    created = client.post(
+        "/comic-series-analysis/jobs/from-url",
+        json={"url": "https://example.com/active-chapter"},
+    )
+    assert created.status_code == 200, created.text
+    job_id = created.json()["id"]
+
+    session = database_session.SessionLocal()
+    try:
+        from backend.database import ComicAnalysisJob
+
+        job = session.query(ComicAnalysisJob).filter_by(id=job_id).one()
+        job.run_status = run_status
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.delete(f"/comic-series-analysis/jobs/{job_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_code"] == "COMIC_ANALYSIS_INVALID_STATE"
+    assert client.get(f"/comic-series-analysis/jobs/{job_id}").status_code == 200

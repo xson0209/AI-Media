@@ -1,0 +1,500 @@
+- generic [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - img "Voicebox" [ref=f1e7]
+      - generic [ref=f1e8]:
+        - link "Tạo giọng" [ref=f1e9] [cursor=pointer]:
+          - /url: /generate
+        - link "Câu chuyện" [ref=f1e14] [cursor=pointer]:
+          - /url: /stories
+        - link "Ghi âm" [ref=f1e16] [cursor=pointer]:
+          - /url: /captures
+        - link "Giọng nói" [ref=f1e20] [cursor=pointer]:
+          - /url: /voices
+        - link "Hiệu ứng" [ref=f1e24] [cursor=pointer]:
+          - /url: /effects
+        - link "Lấy cảm hứng từ video" [ref=f1e28] [cursor=pointer]:
+          - /url: /video-inspiration
+        - link "Nghiên cứu ý tưởng" [ref=f1e33] [cursor=pointer]:
+          - /url: /research
+        - link "Dự án prompt video" [ref=f1e37] [cursor=pointer]:
+          - /url: /ai-video
+        - link "Prompt video sản phẩm" [ref=f1e43] [cursor=pointer]:
+          - /url: /product-video
+        - link "Phân tích truyện tranh" [ref=f1e48] [cursor=pointer]:
+          - /url: /comic-series-analysis
+        - link "Story Studio" [ref=f1e53] [cursor=pointer]:
+          - /url: /story-studio
+        - link "Mô hình" [ref=f1e56] [cursor=pointer]:
+          - /url: /models
+        - link "Cài đặt" [ref=f1e60] [cursor=pointer]:
+          - /url: /settings
+      - generic [ref=f1e64]: v0.5.0
+    - main [ref=f1e66]:
+      - generic [ref=f1e70]:
+        - complementary [ref=f1e71]:
+          - heading "Video sản phẩm" [level=1] [ref=f1e78]
+          - button "Dự án mới" [ref=f1e79]
+          - list [ref=f1e81]:
+            - listitem [ref=f1e82]:
+              - button "Combo bình giữ nhiệt 9:16 8 clip" [active] [ref=f1e83]:
+                - generic [ref=f1e84]: Combo bình giữ nhiệt
+                - generic [ref=f1e85]:
+                  - generic [ref=f1e86]: 9:16
+                  - generic [ref=f1e87]: 8 clip
+        - generic [ref=f1e88]:
+          - generic [ref=f1e89]:
+            - generic [ref=f1e90]:
+              - generic [ref=f1e91]:
+                - generic [ref=f1e92]: Sản phẩm và ý tưởng
+                - 'textbox "Ví dụ: hộp khô gà cay, nhấn vị cay và tiện mang đi, combo 2 hộp 99K" [ref=f1e93]': Combo bình giữ nhiệt
+                - paragraph [ref=f1e94]: Mô tả sản phẩm, điểm bán, và thông điệp muốn truyền.
+              - generic [ref=f1e95]:
+                - generic [ref=f1e96]:
+                  - generic [ref=f1e97]: Ngôn ngữ video
+                  - combobox [ref=f1e98]:
+                    - generic: Tiếng Việt
+                - generic [ref=f1e101]:
+                  - generic [ref=f1e102]: Tỉ lệ video
+                  - combobox [ref=f1e103]:
+                    - generic: Dọc 9:16
+                - generic [ref=f1e106]:
+                  - generic [ref=f1e107]: Thể loại
+                  - combobox [ref=f1e108]:
+                    - generic: Quảng cáo / bán hàng
+                - generic [ref=f1e111]:
+                  - generic [ref=f1e112]: Thời lượng mục tiêu
+                  - combobox [ref=f1e113]:
+                    - generic: 60 giây
+                  - paragraph [ref=f1e116]: 60s → 8 clip × 8s = 64s thực tế
+              - generic [ref=f1e117]:
+                - generic [ref=f1e118]:
+                  - generic [ref=f1e119]: Mode thoại
+                  - combobox [ref=f1e120]:
+                    - generic: Thuyết minh
+                - generic [ref=f1e123]:
+                  - generic [ref=f1e124]: Mật độ thoại
+                  - combobox [ref=f1e125]:
+                    - generic: Ít thoại
+                - generic [ref=f1e128]:
+                  - generic [ref=f1e129]: CTA
+                  - combobox [ref=f1e130]:
+                    - generic: Trực tiếp
+              - generic [ref=f1e133]:
+                - generic [ref=f1e134]:
+                  - generic [ref=f1e135]: Cách chạy
+                  - generic [ref=f1e136]: Tự chạy sau khi tạo
+                - generic [ref=f1e137]:
+                  - button "Dựng nhanh" [pressed] [ref=f1e138]
+                  - button "Thủ công" [ref=f1e139]
+              - generic [ref=f1e140]:
+                - generic [ref=f1e141]:
+                  - generic [ref=f1e142]: Mức tự động
+                  - generic [ref=f1e143]: Tự chạy hết
+                - generic [ref=f1e144]:
+                  - button "Duyệt từng chặng Dừng sau khi lập kế hoạch" [ref=f1e145]:
+                    - generic [ref=f1e146]:
+                      - generic [ref=f1e147]: Duyệt từng chặng
+                      - generic [ref=f1e148]: Dừng sau khi lập kế hoạch
+                  - button "Tự chạy hết Tự sinh prompt pack nội bộ" [pressed] [ref=f1e150]:
+                    - generic [ref=f1e151]:
+                      - generic [ref=f1e152]: Tự chạy hết
+                      - generic [ref=f1e153]: Tự sinh prompt pack nội bộ
+              - generic [ref=f1e155]:
+                - generic [ref=f1e156]:
+                  - generic [ref=f1e157]: Đầu ra tự chạy
+                  - generic [ref=f1e158]: Prompt + bridge dựng MP4
+                - generic [ref=f1e159]:
+                  - button "Sẵn sàng dựng MP4 Sinh prompt và chuẩn bị bridge; bạn vẫn upload clip rồi bấm Dựng MP4" [pressed] [ref=f1e160]:
+                    - generic [ref=f1e161]:
+                      - generic [ref=f1e162]: Sẵn sàng dựng MP4
+                      - generic [ref=f1e163]: Sinh prompt và chuẩn bị bridge; bạn vẫn upload clip rồi bấm Dựng MP4
+                  - button "Prompt + phụ đề thoại Sinh prompt pack để kiểm tra và tải xuống; không chạy provider/TTS" [ref=f1e165]:
+                    - generic [ref=f1e166]:
+                      - generic [ref=f1e167]: Prompt + phụ đề thoại
+                      - generic [ref=f1e168]: Sinh prompt pack để kiểm tra và tải xuống; không chạy provider/TTS
+                  - button "Chỉ câu lệnh video Chỉ lập kế hoạch cảnh, dừng trước bước sinh prompt" [ref=f1e170]:
+                    - generic [ref=f1e171]:
+                      - generic [ref=f1e172]: Chỉ câu lệnh video
+                      - generic [ref=f1e173]: Chỉ lập kế hoạch cảnh, dừng trước bước sinh prompt
+              - generic [ref=f1e175]:
+                - generic [ref=f1e176]: Phong cách
+                - combobox [ref=f1e177]:
+                  - generic: UGC cầm sản phẩm ngoài đường
+                - 'textbox "Mô tả phong cách bằng tiếng Anh: chủ thể, chuyển động camera, chuyển động hậu cảnh, ánh sáng." [ref=f1e180]': "Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. Background is softly out of focus and clearly in motion while the product stays sharp. Lighting: warm natural daylight, soft shadow, no harsh glare across the label surface."
+                - paragraph [ref=f1e181]: Chọn preset để điền sẵn rồi sửa thoải mái, hoặc chọn Tự nhập để viết từ đầu.
+              - generic [ref=f1e182]:
+                - generic [ref=f1e183]:
+                  - generic [ref=f1e184]: Độ dài mỗi clip
+                  - combobox [ref=f1e185]:
+                    - generic: 8 giây
+                  - paragraph [ref=f1e188]: Flow chỉ nhận 4, 6, 8 hoặc 10 giây.
+                - generic [ref=f1e189]:
+                  - generic [ref=f1e190]: Cảnh nhỏ mỗi clip
+                  - spinbutton [ref=f1e191]: "3"
+                  - paragraph [ref=f1e192]: Số nhịp hình bên trong một clip. 1 đến 5.
+              - paragraph [ref=f1e193]:
+                - generic [ref=f1e196]: Luồng này chỉ sinh prompt. Bạn tự mở Google Flow, chọn mode Ingredients to Video, upload ảnh sản phẩm, rồi dán từng prompt vào. Sẽ có 8 prompt cần dán.
+            - generic [ref=f1e197]:
+              - button "Lập kế hoạch 8 cảnh" [ref=f1e198]
+              - button "Lưu cấu hình" [ref=f1e199]
+              - button "Sinh prompt" [ref=f1e200]
+              - button "Xóa" [ref=f1e201]
+          - generic [ref=f1e202]:
+            - heading "Prompt pack" [level=2] [ref=f1e203]
+            - generic [ref=f1e204]:
+              - generic [ref=f1e205]:
+                - paragraph [ref=f1e206]: 8 prompt — dán lần lượt vào Flow, mỗi prompt một clip.
+                - button "Tải cả pack" [ref=f1e207]
+              - generic [ref=f1e208]:
+                - generic [ref=f1e209]:
+                  - generic [ref=f1e210]: Clip 1
+                  - generic [ref=f1e211]: Hook
+                  - generic [ref=f1e212]: hero shot
+                  - button "Copy prompt" [ref=f1e214]
+                - generic [ref=f1e215]: "Create a 8-second 9:16 live-action product video clip. This is clip 1 of 8 of a 64-second product video covering timeline 0-8s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Hook for the first 0-2 seconds: Nước vừa rót đã ấm? Nhìn combo này trước khi bạn ra đường! Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 0-8s Beat role: hook Shot type: hero shot Camera angle: Ngang tầm ngực, hơi chếch lên để sản phẩm nổi bật giữa dòng người. Framing: medium close-up Composition: Video dọc 9:16, dùng đúng ảnh sản phẩm người dùng đính kèm trong Flow; một bàn tay nâng bình vào giữa khung ở độ cao ngực, giữ nhãn trước vuông góc với camera. Camera movement: Điện thoại cầm tay rung nhẹ tự nhiên, trôi rất nhỏ sang trái rồi chỉnh lại để bình luôn ở trung tâm. Subject motion: Bàn tay nâng sản phẩm từ dưới khung lên, dừng ở ngực và siết nhẹ để giữ bình ổn định. Environment motion: Xe máy chạy ngang phía sau, người đi bộ lướt qua và một người bán hàng di chuyển ở khoảng cách trung bình. Lighting: Ánh nắng cuối chiều ấm, phản sáng nhẹ trên thân bình nhưng vẫn giữ rõ màu và chi tiết nhãn. Mood: Gần gũi, gây tò mò và chạm đúng nỗi khó chịu khi mang nước ra đường. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Bình nước của bạn hay nóng nhanh, đổ mồ hôi và bất tiện mỗi lần ra đường không? Retention notes: Đưa ngay sản phẩm vào khung trong hai giây đầu và giữ nhãn thẳng để người xem nhận diện tức thì. Transition notes: Kết thúc bằng một cú nghiêng máy rất nhẹ về phía nắp bình, tạo đà cho cảnh soi chi tiết tiếp theo. Sound design notes: Giữ tiếng xe máy và bước chân làm nền, thêm tiếng vải áo cọ nhẹ khi bàn tay nâng bình. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Bàn tay nâng sản phẩm từ dưới khung lên, dừng ở ngực và siết nhẹ để giữ bình ổn định.; Xe máy chạy ngang phía sau, người đi bộ lướt qua và một người bán hàng di chuyển ở khoảng cách trung bình. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Bình nước của bạn hay nóng nhanh, đổ mồ hôi và bất tiện mỗi lần ra đường không?\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e216]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e217] [cursor=pointer]
+              - generic [ref=f1e218]:
+                - generic [ref=f1e219]:
+                  - generic [ref=f1e220]: Clip 2
+                  - generic [ref=f1e221]: Vấn đề
+                  - generic [ref=f1e222]: macro detail
+                  - button "Copy prompt" [ref=f1e224]
+                - generic [ref=f1e225]: "Create a 8-second 9:16 live-action product video clip. This is clip 2 of 8 of a 64-second product video covering timeline 8-16s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 8-16s Beat role: problem Shot type: macro detail Camera angle: Góc cận ngang mặt nắp, hơi thấp hơn sản phẩm để thấy rõ miệng và vòng kín. Framing: close-up Composition: Cắt gần vào nắp, vòng gioăng và phần thân trên của sản phẩm trong ảnh tham chiếu; bàn tay giữ bình ở một bên, nền phố vẫn nhận ra mờ phía sau. Camera movement: Máy tiến rất ngắn bằng bước tay tự nhiên rồi trôi dọc theo đường viền nắp, không phóng đại kỹ thuật số. Subject motion: Ngón cái xoay nắp một phần tư vòng rồi nghiêng bình nhẹ để kiểm tra độ kín. Environment motion: Một xe máy vụt qua tạo vệt chuyển động phía sau, người bán hàng đổi vị trí và bóng người đi bộ lướt qua nền. Lighting: Nắng xiên cuối chiều bắt vào mép nắp, làm nổi đường gioăng và bề mặt chống trượt. Mood: Soi xét, thực tế và gợi cảm giác giải quyết lỗi rò rỉ thường gặp. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Mỗi ngụm nước ấm lên giữa buổi, miệng bình rò rỉ, tay bạn lại phải lau liên tục. Retention notes: Tập trung vào ba chi tiết người mua quan tâm nhất: miệng bình, gioăng kín và thao tác xoay nắp. Transition notes: Khi nắp vừa siết xong, máy hạ theo thân bình để nối liền sang cảnh so sánh trước và sau. Sound design notes: Thu rõ tiếng ren nắp khớp vào nhau và tiếng kim loại chạm nhẹ, để âm phố giảm một nhịp trong lúc kiểm tra. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Ngón cái xoay nắp một phần tư vòng rồi nghiêng bình nhẹ để kiểm tra độ kín.; Một xe máy vụt qua tạo vệt chuyển động phía sau, người bán hàng đổi vị trí và bóng người đi bộ lướt qua nền. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Mỗi ngụm nước ấm lên giữa buổi, miệng bình rò rỉ, tay bạn lại phải lau liên tục.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e226]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e227] [cursor=pointer]
+              - generic [ref=f1e228]:
+                - generic [ref=f1e229]:
+                  - generic [ref=f1e230]: Clip 3
+                  - generic [ref=f1e231]: Vấn đề
+                  - generic [ref=f1e232]: before-after
+                  - button "Copy prompt" [ref=f1e234]
+                - generic [ref=f1e235]: "Create a 8-second 9:16 live-action product video clip. This is clip 3 of 8 of a 64-second product video covering timeline 16-24s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 16-24s Beat role: problem Shot type: before-after Camera angle: Góc ngang eo, nhìn hơi chếch xuống mặt đường để tạo cảm giác đang chuẩn bị đi. Framing: medium shot Composition: Trong một cú máy liên tục, tay hạ chai cũ có nước đọng xuống mép khung rồi đưa combo bình giữ nhiệt lên vị trí trung tâm, không che khuất sản phẩm. Camera movement: Máy lùi nửa bước khi chai cũ hạ xuống, sau đó trôi nhẹ sang phải theo combo mới. Subject motion: Bàn tay đổi từ chai cũ sang combo, nhấc bộ bình lên và xoay rất nhẹ để mặt trước hướng về camera. Environment motion: Dòng xe máy nối tiếp phía sau, một người đi bộ băng qua khoảng trống và người bán hàng đẩy xe chậm rãi. Lighting: Ánh sáng vàng dịu phủ cả hai trạng thái, giữ khác biệt giữa chai cũ ướt và combo khô ráo. Mood: Chuyển biến rõ ràng, nhẹ nhõm và có tính thuyết phục bằng hình ảnh. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Từ cảnh nước nguội và túi ướt, chuyển sang ngày dài gọn gàng với bộ bình giữ nhiệt này. Retention notes: Cho người xem thấy sự thay đổi trong cùng một chuyển động tay để lợi ích được hiểu mà không cần giải thích dài. Transition notes: Kết thúc khi combo chạm đúng trung tâm khung, rồi giữ nhịp tay để mở sang cảnh khám phá đầy đủ bộ sản phẩm. Sound design notes: Thêm tiếng chai cũ đặt xuống và tiếng vải túi sột soạt, sau đó để tiếng bước chân dẫn nhịp chuyển cảnh. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Bàn tay đổi từ chai cũ sang combo, nhấc bộ bình lên và xoay rất nhẹ để mặt trước hướng về camera.; Dòng xe máy nối tiếp phía sau, một người đi bộ băng qua khoảng trống và người bán hàng đẩy xe chậm rãi. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Từ cảnh nước nguội và túi ướt, chuyển sang ngày dài gọn gàng với bộ bình giữ nhiệt này.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e236]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e237] [cursor=pointer]
+              - generic [ref=f1e238]:
+                - generic [ref=f1e239]:
+                  - generic [ref=f1e240]: Clip 4
+                  - generic [ref=f1e241]: product reveal
+                  - generic [ref=f1e242]: unboxing reveal
+                  - button "Copy prompt" [ref=f1e244]
+                - generic [ref=f1e245]: "Create a 8-second 9:16 live-action product video clip. This is clip 4 of 8 of a 64-second product video covering timeline 24-32s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 24-32s Beat role: product reveal Shot type: unboxing reveal Camera angle: Góc hơi từ trên xuống, đủ rộng để thấy tay mở túi và toàn bộ các món trong combo. Framing: medium wide shot Composition: Tay người mở túi đựng ngay trước ngực, lần lượt kéo bình chính, bình phụ và phụ kiện ra trong khung; dùng đúng hình dáng sản phẩm tham chiếu từ ảnh đính kèm. Camera movement: Máy nghiêng xuống theo tay mở túi rồi nâng lên nhẹ khi từng món được đưa vào vùng sáng. Subject motion: Hai tay mở khóa, lấy từng sản phẩm ra, đặt sát nhau và nâng combo lên ngang ngực. Environment motion: Xe máy và xe đạp chạy ở hậu cảnh, người bán hàng quay người và khách bộ hành đi qua liên tục. Lighting: Nắng cuối chiều hắt từ bên hông, tạo viền sáng quanh các món nhưng không làm mất chi tiết. Mood: Hào hứng khám phá, cho cảm giác nhận được nhiều giá trị trong một lần mua. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Mở combo ra, bạn có bình chính, bình phụ và phụ kiện vừa đủ cho công việc lẫn chuyến đi. Retention notes: Lần lượt hé lộ từng món trong nhịp nhanh, để người xem chờ xem thành phần cuối cùng của combo. Transition notes: Sau khi xếp đủ bộ, tay gom các món vào một tay và đưa bình chính lên trước để chuyển sang cảnh sử dụng. Sound design notes: Nhấn tiếng khóa kéo, tiếng vật liệu chạm nhau và tiếng đặt từng món, hòa cùng âm rao hàng xa. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Hai tay mở khóa, lấy từng sản phẩm ra, đặt sát nhau và nâng combo lên ngang ngực.; Xe máy và xe đạp chạy ở hậu cảnh, người bán hàng quay người và khách bộ hành đi qua liên tục. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Mở combo ra, bạn có bình chính, bình phụ và phụ kiện vừa đủ cho công việc lẫn chuyến đi.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e246]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e247] [cursor=pointer]
+              - generic [ref=f1e248]:
+                - generic [ref=f1e249]:
+                  - generic [ref=f1e250]: Clip 5
+                  - generic [ref=f1e251]: product reveal
+                  - generic [ref=f1e252]: in-use/lifestyle
+                  - button "Copy prompt" [ref=f1e254]
+                - generic [ref=f1e255]: "Create a 8-second 9:16 live-action product video clip. This is clip 5 of 8 of a 64-second product video covering timeline 32-40s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 32-40s Beat role: product reveal Shot type: in-use/lifestyle Camera angle: Góc ngang ngực, hơi xoay theo hướng người dùng đang bước đi. Framing: close-up Composition: Bàn tay cầm bình ở tiền cảnh với nhãn hướng camera, dây túi hoặc quai xách nằm gọn bên cạnh; phố đông tạo chiều sâu tự nhiên. Camera movement: Máy đi bộ song song với tay cầm, rung nhẹ theo bước chân và drift nhỏ để giữ bình giữa khung. Subject motion: Bàn tay nâng bình lên ngang vai, nghiêng nhẹ về phía miệng rồi hạ xuống khi tiếp tục bước. Environment motion: Xe máy lướt qua ở hậu cảnh, người đi bộ tránh nhau và người bán hàng di chuyển giữa các quầy. Lighting: Ánh sáng ấm phản chiếu mềm trên thân bình, giữ màu sản phẩm trung thực khi di chuyển. Mood: Tiện lợi, năng động và phù hợp nhịp sống bận rộn. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Cầm lên nhẹ tay, nắp kín chắc, mang theo dễ dàng mà nhãn bình luôn hướng thẳng về phía bạn. Retention notes: Cho sản phẩm hoạt động trong tình huống đi đường thật, thay vì chỉ trưng bày, để tăng khả năng người xem tưởng tượng mình đang dùng. Transition notes: Cuối shot, tay đưa bình sát cạnh một chai quen thuộc vừa xuất hiện từ bên hông khung để mở màn so kích thước. Sound design notes: Giữ nhịp bước chân, tiếng quai túi kéo nhẹ và tiếng xe chạy gần, không thêm hiệu ứng quá bóng bẩy. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Bàn tay nâng bình lên ngang vai, nghiêng nhẹ về phía miệng rồi hạ xuống khi tiếp tục bước.; Xe máy lướt qua ở hậu cảnh, người đi bộ tránh nhau và người bán hàng di chuyển giữa các quầy. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Cầm lên nhẹ tay, nắp kín chắc, mang theo dễ dàng mà nhãn bình luôn hướng thẳng về phía bạn.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e256]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e257] [cursor=pointer]
+              - generic [ref=f1e258]:
+                - generic [ref=f1e259]:
+                  - generic [ref=f1e260]: Clip 6
+                  - generic [ref=f1e261]: Bằng chứng
+                  - generic [ref=f1e262]: size comparison
+                  - button "Copy prompt" [ref=f1e264]
+                - generic [ref=f1e265]: "Create a 8-second 9:16 live-action product video clip. This is clip 6 of 8 of a 64-second product video covering timeline 40-48s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 40-48s Beat role: proof Shot type: size comparison Camera angle: Góc ngang thân, sản phẩm được giữ song song với một chai tham chiếu để dễ đối chiếu. Framing: medium shot Composition: Tay nâng combo bên trái và chai quen thuộc bên phải, hai vật cùng độ cao; nền đường phố vẫn chuyển động phía sau. Camera movement: Máy lùi nhẹ để chứa đủ hai vật, sau đó trôi ngang một đoạn ngắn theo tay đưa chúng sát nhau. Subject motion: Tay đưa hai chai cạnh nhau, hạ xuống vừa tầm túi rồi nâng lại để cho thấy kích thước thực tế. Environment motion: Một nhóm người đi bộ đi ngang, xe máy dừng rồi tăng ga và người bán hàng đẩy xe qua nền. Lighting: Ánh sáng vàng cuối ngày phủ đều hai chai, giảm bóng gắt để đường nét và tỷ lệ dễ so sánh. Mood: Rõ ràng, thực dụng và củng cố quyết định mua bằng bằng chứng trực quan. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Đặt cạnh chai quen thuộc, combo vừa tay, vừa ngăn túi, đủ dung tích cho trọn một buổi. Retention notes: Giữ hai chai song song đủ lâu để người xem tự đánh giá tỷ lệ thay vì phải tin vào lời quảng cáo. Transition notes: Khi hai chai chạm cùng mặt bàn tưởng tượng, tay rút chai tham chiếu và đưa nắp combo lên gần ống kính. Sound design notes: Thêm tiếng chai chạm khẽ khi đặt cạnh nhau, giữ âm động cơ xa và tiếng đế giày làm nhịp nền. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Tay đưa hai chai cạnh nhau, hạ xuống vừa tầm túi rồi nâng lại để cho thấy kích thước thực tế.; Một nhóm người đi bộ đi ngang, xe máy dừng rồi tăng ga và người bán hàng đẩy xe qua nền. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Đặt cạnh chai quen thuộc, combo vừa tay, vừa ngăn túi, đủ dung tích cho trọn một buổi.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e266]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e267] [cursor=pointer]
+              - generic [ref=f1e268]:
+                - generic [ref=f1e269]:
+                  - generic [ref=f1e270]: Clip 7
+                  - generic [ref=f1e271]: Bằng chứng
+                  - generic [ref=f1e272]: macro detail
+                  - button "Copy prompt" [ref=f1e274]
+                - generic [ref=f1e275]: "Create a 8-second 9:16 live-action product video clip. This is clip 7 of 8 of a 64-second product video covering timeline 48-56s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 48-56s Beat role: proof Shot type: macro detail Camera angle: Góc cận thấp vào nắp và đường nối thân, sản phẩm chiếm gần toàn bộ khung dọc. Framing: extreme close-up Composition: Chỉ giữ nắp, gioăng và phần vai bình trong ảnh tham chiếu; tay giữ chắc ở đáy để mặt trước vẫn không rời khung. Camera movement: Máy xoay cổ tay rất nhỏ theo hướng nghiêng bình, sau đó tiến gần một nhịp để bắt giọt nước không tràn. Subject motion: Tay nghiêng bình sang trái, lắc nhẹ hai lần rồi dựng thẳng lại, giữ chuyển động trong vùng an toàn. Environment motion: Bóng xe máy quét qua nền mờ, người bán hàng bước ngang và lá cờ nhỏ rung trong gió. Lighting: Ánh nắng xiên tạo điểm sáng trên mép nắp và làm rõ bề mặt khô sau khi dựng lại. Mood: Thuyết phục, đáng tin và có cảm giác kiểm tra thực tế ngay tại chỗ. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Test nhanh nắp bình: nghiêng nhẹ, lắc tay, nước vẫn gọn bên trong, không làm gián đoạn nhịp sống. Retention notes: Đặt hành động kiểm chứng ngay trước CTA để người xem nhận được bằng chứng cuối cùng thay vì chỉ nghe cam kết. Transition notes: Sau khi dựng bình thẳng, máy kéo lùi dần để lộ trọn combo và tạo khoảng thở cho cảnh chốt đơn. Sound design notes: Nhấn tiếng lắc nước rất nhẹ, tiếng nắp chạm vòng gioăng và hạ âm phố trong khoảnh khắc dựng bình. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Tay nghiêng bình sang trái, lắc nhẹ hai lần rồi dựng thẳng lại, giữ chuyển động trong vùng an toàn.; Bóng xe máy quét qua nền mờ, người bán hàng bước ngang và lá cờ nhỏ rung trong gió. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Test nhanh nắp bình: nghiêng nhẹ, lắc tay, nước vẫn gọn bên trong, không làm gián đoạn nhịp sống.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e276]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e277] [cursor=pointer]
+              - generic [ref=f1e278]:
+                - generic [ref=f1e279]:
+                  - generic [ref=f1e280]: Clip 8
+                  - generic [ref=f1e281]: CTA
+                  - generic [ref=f1e282]: CTA end-card
+                  - button "Copy prompt" [ref=f1e284]
+                - generic [ref=f1e285]: "Create a 8-second 9:16 live-action product video clip. This is clip 8 of 8 of a 64-second product video covering timeline 56-64s. Product reference: use the attached product image (Flow Ingredients / References to Video) as the single source of truth for the product's shape, colour and label. Segment structure: build 3 connected micro-scenes inside this one clip, all serving one primary visual action. Video language: Vietnamese Aspect ratio: 9:16 Clip length: 8 seconds Timeline position: 56-64s Beat role: cta Shot type: CTA end-card Camera angle: Góc ngang tầm mắt, hơi thấp để combo nổi bật trên nền phố cuối chiều. Framing: wide shot Composition: Tay đưa trọn combo lên giữa khung dọc, các bình xếp gọn với mặt trước hướng camera; đường phố đông tạo hậu cảnh sống động. Camera movement: Máy lùi chậm một bước rồi giữ drift rất nhỏ quanh trục giữa để tạo cảm giác kết thúc tự nhiên. Subject motion: Tay nâng combo lên ngang ngực, giữ vài nhịp, sau đó đưa nhẹ về phía camera như lời mời nhận sản phẩm. Environment motion: Xe máy tiếp tục chạy, người đi bộ tản qua hai bên và người bán hàng dừng lại phía xa. Lighting: Nắng cuối chiều phủ viền ấm quanh combo, nền hơi tối hơn để sản phẩm và bàn tay nổi bật. Mood: Dứt khoát, thân thiện và thúc đẩy hành động ngay. Visual style: Handheld vertical UGC look, shot on a phone, single continuous take. A hand raises the product into frame at chest height and holds it steady with the front label square to camera. Camera: handheld with slight natural shake, a small drift to keep the product centered, no zoom. Environment: a busy street in late afternoon — passing motorbikes, a vendor moving in the middle distance, foot traffic. B Narration: Muốn mang nước ngon lành cả ngày? Chọn combo bình giữ nhiệt, đặt ngay hôm nay để dùng liền. Retention notes: Kết thúc bằng hình ảnh combo đầy đủ được đưa gần người xem, giữ khung đủ lâu để lời mời mua đọng lại. Transition notes: Dùng động tác đưa sản phẩm về phía ống kính làm điểm kết, cắt ngay sau nhịp giữ cuối cùng. Sound design notes: Giảm dần tiếng phố, giữ một nhịp nâng sản phẩm rõ ràng rồi để giọng kêu gọi hành động đứng ở phía trước. Product fidelity — highest priority - Reproduce the product in the attached reference image exactly: keep every letter, word, number, typography, font weight, letter spacing, logo shape, colour and layout proportion of the label, packaging and any on-product text identical to the reference. - Do not redesign the product, the label, the packaging or the logo, and do not invent new text, badges, seals, taglines or brand marks that are not in the reference image. - Do not translate, localise or transliterate any text on the product. Keep the original language and the original spelling exactly as it appears. - Do not rearrange, remove, resize, mirror or re-stack the label elements. The order and position of the text blocks, logo and graphics must stay as in the reference. - The label must not drift, warp, melt, blur, re-letter or change in any way between the first frame and the last frame. A viewer must be able to read the same label text in the final frame as in the opening frame. - Keep the labelled face of the product turned toward the camera and keep it in sharp focus whenever it is visible. Product motion constraints - The product may be lifted, carried, moved through the frame, gently tilted, set down, and held or handled by a person's hands. Human interaction with the product is encouraged. - Forbidden: rotating the product through a full 360-degree turn. - Forbidden: fast spinning of the product. - Forbidden: letting the label leave the frame and then come back into frame. - Forbidden: moving the product behind an occluding object and out again. - Nothing else about product movement is restricted; do not render a frozen, static product. Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip: Use natural Vietnamese pronunciation and keep each named character's voice identity consistent throughout this clip. Speaker 1: Narrator - Character role: offscreen_narrator - Canonical voice: a stable natural Vietnamese cinematic voice, clear articulation, consistent timbre and age across the whole clip - Personality affecting delivery: follow the established character personality and remain consistent - Current emotion: natural emotion matching the scene - Delivery and pacing: clear Vietnamese speech paced to fit this clip without rushing or truncation - Scene context: Tay nâng combo lên ngang ngực, giữ vài nhịp, sau đó đưa nhẹ về phía camera như lời mời nhận sản phẩm.; Xe máy tiếp tục chạy, người đi bộ tản qua hai bên và người bán hàng dừng lại phía xa. - Lip sync: not required; use a natural off-screen voice if the speaker is not visible - Speak exactly once in Vietnamese: \"Muốn mang nước ngon lành cả ngày? Chọn combo bình giữ nhiệt, đặt ngay hôm nay để dùng liền.\" Audio restrictions: - No English speech, no paraphrase, no translated replacement, no extra narrator, and no additional spoken words. - Do not swap voices between characters and do not change a character's voice timbre during the clip. - Generate audible Vietnamese dialogue and natural scene ambience, but do not generate subtitles, captions, text overlays, letters, words, UI text, logos, or watermarks. Vietnamese dialogue length limit: about 18 to 20 Vietnamese words for one 8-second clip (roughly 2.3 words per second). Scale proportionally for other clip lengths and never write more words than can be spoken calmly inside the clip. Negative prompt: warped or re-lettered label text, misspelled brand name, translated packaging text, redesigned logo, duplicated product, extra fingers, plastic-looking skin, subtitles, captions, text overlays, UI text, watermarks, frozen static frame, full 360-degree product rotation, fast product spin"
+                - group [ref=f1e286]:
+                  - generic "Giải thích tiếng Việt" [ref=f1e287] [cursor=pointer]
+          - generic [ref=f1e288]:
+            - generic [ref=f1e294]:
+              - heading "Dựng nhanh MP4" [level=2] [ref=f1e295]
+              - paragraph [ref=f1e296]: Ghép clip, giọng đọc và phụ đề theo thời lượng thật
+            - generic [ref=f1e297]:
+              - generic [ref=f1e298]:
+                - generic [ref=f1e299]: Nạp nhiều clip theo số phân đoạn
+                - paragraph [ref=f1e304]: Đặt tên mỗi file theo số phân đoạn (1.mp4, 2.mp4, …) rồi chọn tất cả trong một lần. Bảng khớp hiện ra để bạn kiểm tra trước, chưa có gì được nạp cho tới khi bạn bấm xác nhận.
+                - generic [ref=f1e305] [cursor=pointer]:
+                  - generic [ref=f1e309]: Chọn nhiều clip video
+                  - button "Chọn nhiều clip video" [ref=f1e310]
+                - paragraph [ref=f1e311]: MP4, MOV, WEBM hoặc MKV.
+              - generic [ref=f1e312]:
+                - generic [ref=f1e313]:
+                  - generic [ref=f1e314]:
+                    - paragraph [ref=f1e315]: Phân đoạn 01
+                    - generic [ref=f1e316]: clip video sẵn sàng
+                  - generic [ref=f1e317]:
+                    - generic [ref=f1e318]:
+                      - paragraph [ref=f1e319]: Thời lượng
+                      - paragraph [ref=f1e320]: 47.0s
+                    - generic [ref=f1e321]:
+                      - paragraph [ref=f1e322]: Clip video
+                      - paragraph [ref=f1e323]: 47.0s
+                  - paragraph [ref=f1e324]: "Tệp: voicebox-demo.webm"
+                  - paragraph [ref=f1e325]: Clip có audio tiếng Việt để dùng khi dựng.
+                  - generic [ref=f1e326]:
+                    - generic [ref=f1e327]:
+                      - button "Xem clip video" [ref=f1e328]
+                      - button "Tải clip video" [ref=f1e329]
+                    - generic [ref=f1e330] [cursor=pointer]:
+                      - generic [ref=f1e334]: Thay clip video
+                      - button "Thay clip video" [ref=f1e335]
+                    - paragraph [ref=f1e336]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [ref=f1e337]
+                - generic [ref=f1e338]:
+                  - generic [ref=f1e339]:
+                    - paragraph [ref=f1e340]: Phân đoạn 02
+                    - generic [ref=f1e341]: thiếu clip video
+                  - generic [ref=f1e342]:
+                    - generic [ref=f1e343]:
+                      - paragraph [ref=f1e344]: Thời lượng
+                      - paragraph [ref=f1e345]: chưa rõ
+                    - generic [ref=f1e346]:
+                      - paragraph [ref=f1e347]: Clip video
+                      - paragraph [ref=f1e348]: chưa rõ
+                  - generic [ref=f1e349]:
+                    - generic [ref=f1e350]: Cần clip video
+                    - generic [ref=f1e351]: Cần thời lượng
+                  - generic [ref=f1e352]:
+                    - generic [ref=f1e353]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e354] [cursor=pointer]:
+                      - generic [ref=f1e358]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e359]
+                    - paragraph [ref=f1e360]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e361]:
+                  - generic [ref=f1e362]:
+                    - paragraph [ref=f1e363]: Phân đoạn 03
+                    - generic [ref=f1e364]: thiếu clip video
+                  - generic [ref=f1e365]:
+                    - generic [ref=f1e366]:
+                      - paragraph [ref=f1e367]: Thời lượng
+                      - paragraph [ref=f1e368]: chưa rõ
+                    - generic [ref=f1e369]:
+                      - paragraph [ref=f1e370]: Clip video
+                      - paragraph [ref=f1e371]: chưa rõ
+                  - generic [ref=f1e372]:
+                    - generic [ref=f1e373]: Cần clip video
+                    - generic [ref=f1e374]: Cần thời lượng
+                  - generic [ref=f1e375]:
+                    - generic [ref=f1e376]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e377] [cursor=pointer]:
+                      - generic [ref=f1e381]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e382]
+                    - paragraph [ref=f1e383]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e384]:
+                  - generic [ref=f1e385]:
+                    - paragraph [ref=f1e386]: Phân đoạn 04
+                    - generic [ref=f1e387]: thiếu clip video
+                  - generic [ref=f1e388]:
+                    - generic [ref=f1e389]:
+                      - paragraph [ref=f1e390]: Thời lượng
+                      - paragraph [ref=f1e391]: chưa rõ
+                    - generic [ref=f1e392]:
+                      - paragraph [ref=f1e393]: Clip video
+                      - paragraph [ref=f1e394]: chưa rõ
+                  - generic [ref=f1e395]:
+                    - generic [ref=f1e396]: Cần clip video
+                    - generic [ref=f1e397]: Cần thời lượng
+                  - generic [ref=f1e398]:
+                    - generic [ref=f1e399]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e400] [cursor=pointer]:
+                      - generic [ref=f1e404]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e405]
+                    - paragraph [ref=f1e406]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e407]:
+                  - generic [ref=f1e408]:
+                    - paragraph [ref=f1e409]: Phân đoạn 05
+                    - generic [ref=f1e410]: thiếu clip video
+                  - generic [ref=f1e411]:
+                    - generic [ref=f1e412]:
+                      - paragraph [ref=f1e413]: Thời lượng
+                      - paragraph [ref=f1e414]: chưa rõ
+                    - generic [ref=f1e415]:
+                      - paragraph [ref=f1e416]: Clip video
+                      - paragraph [ref=f1e417]: chưa rõ
+                  - generic [ref=f1e418]:
+                    - generic [ref=f1e419]: Cần clip video
+                    - generic [ref=f1e420]: Cần thời lượng
+                  - generic [ref=f1e421]:
+                    - generic [ref=f1e422]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e423] [cursor=pointer]:
+                      - generic [ref=f1e427]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e428]
+                    - paragraph [ref=f1e429]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e430]:
+                  - generic [ref=f1e431]:
+                    - paragraph [ref=f1e432]: Phân đoạn 06
+                    - generic [ref=f1e433]: thiếu clip video
+                  - generic [ref=f1e434]:
+                    - generic [ref=f1e435]:
+                      - paragraph [ref=f1e436]: Thời lượng
+                      - paragraph [ref=f1e437]: chưa rõ
+                    - generic [ref=f1e438]:
+                      - paragraph [ref=f1e439]: Clip video
+                      - paragraph [ref=f1e440]: chưa rõ
+                  - generic [ref=f1e441]:
+                    - generic [ref=f1e442]: Cần clip video
+                    - generic [ref=f1e443]: Cần thời lượng
+                  - generic [ref=f1e444]:
+                    - generic [ref=f1e445]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e446] [cursor=pointer]:
+                      - generic [ref=f1e450]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e451]
+                    - paragraph [ref=f1e452]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e453]:
+                  - generic [ref=f1e454]:
+                    - paragraph [ref=f1e455]: Phân đoạn 07
+                    - generic [ref=f1e456]: thiếu clip video
+                  - generic [ref=f1e457]:
+                    - generic [ref=f1e458]:
+                      - paragraph [ref=f1e459]: Thời lượng
+                      - paragraph [ref=f1e460]: chưa rõ
+                    - generic [ref=f1e461]:
+                      - paragraph [ref=f1e462]: Clip video
+                      - paragraph [ref=f1e463]: chưa rõ
+                  - generic [ref=f1e464]:
+                    - generic [ref=f1e465]: Cần clip video
+                    - generic [ref=f1e466]: Cần thời lượng
+                  - generic [ref=f1e467]:
+                    - generic [ref=f1e468]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e469] [cursor=pointer]:
+                      - generic [ref=f1e473]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e474]
+                    - paragraph [ref=f1e475]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+                - generic [ref=f1e476]:
+                  - generic [ref=f1e477]:
+                    - paragraph [ref=f1e478]: Phân đoạn 08
+                    - generic [ref=f1e479]: thiếu clip video
+                  - generic [ref=f1e480]:
+                    - generic [ref=f1e481]:
+                      - paragraph [ref=f1e482]: Thời lượng
+                      - paragraph [ref=f1e483]: chưa rõ
+                    - generic [ref=f1e484]:
+                      - paragraph [ref=f1e485]: Clip video
+                      - paragraph [ref=f1e486]: chưa rõ
+                  - generic [ref=f1e487]:
+                    - generic [ref=f1e488]: Cần clip video
+                    - generic [ref=f1e489]: Cần thời lượng
+                  - generic [ref=f1e490]:
+                    - generic [ref=f1e491]:
+                      - button "Xem clip video" [disabled]
+                      - button "Tải clip video" [disabled]
+                    - generic [ref=f1e492] [cursor=pointer]:
+                      - generic [ref=f1e496]: Chọn clip video
+                      - button "Chọn clip video" [ref=f1e497]
+                    - paragraph [ref=f1e498]: MP4, MOV, WEBM hoặc MKV.
+                    - button "Xóa clip video" [disabled]
+              - generic [ref=f1e499]:
+                - generic [ref=f1e500]: Thiết lập dựng
+                - generic [ref=f1e504]:
+                  - generic [ref=f1e505]:
+                    - generic [ref=f1e506]: Độ phân giải
+                    - combobox "Độ phân giải Có thể đổi trước khi bấm Dựng MP4." [ref=f1e507]:
+                      - option "Theo tỷ lệ dự án" [selected]
+                      - option "720p"
+                      - option "1080p"
+                    - generic [ref=f1e508]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=f1e509]:
+                    - generic [ref=f1e510]: Số khung/giây (FPS)
+                    - combobox "Số khung/giây (FPS) Có thể đổi trước khi bấm Dựng MP4." [ref=f1e511]:
+                      - option "24"
+                      - option "30" [selected]
+                      - option "60"
+                    - generic [ref=f1e512]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=f1e513]:
+                    - generic [ref=f1e514]: Khung hình
+                    - combobox "Khung hình Có thể đổi trước khi bấm Dựng MP4." [ref=f1e515]:
+                      - option "Cắt vừa khung" [selected]
+                      - option "Giữ toàn ảnh"
+                    - generic [ref=f1e516]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=f1e517]:
+                    - generic [ref=f1e518]: Phụ đề
+                    - combobox "Phụ đề Có thể đổi trước khi bấm Dựng MP4." [ref=f1e519]:
+                      - option "Nhúng phụ đề vào video" [selected]
+                      - option "SRT rời"
+                      - option "Không phụ đề"
+                    - generic [ref=f1e520]: Có thể đổi trước khi bấm Dựng MP4.
+                - generic [ref=f1e522]:
+                  - generic [ref=f1e523]: Âm thanh
+                  - combobox "Âm thanh Có thể đổi trước khi bấm Dựng MP4." [ref=f1e524]:
+                    - option "Kết hợp"
+                    - option "Voice" [selected]
+                    - option "Âm thanh gốc"
+                  - generic [ref=f1e525]: Có thể đổi trước khi bấm Dựng MP4.
+                - paragraph [ref=f1e526]: "Voice: MP4 chỉ dùng câu thoại tiếng Việt lấy từ clip Veo và bỏ phần tiếng gốc còn lại. Phân đoạn có thoại vẫn cần clip có audio mới dựng được."
+                - paragraph [ref=f1e527]: Nhúng phụ đề dùng câu thoại tiếng Việt đã duyệt và thời lượng clip Veo. Nếu thay clip, hãy tạo lại phụ đề trước khi dựng.
+              - generic [ref=f1e528]:
+                - generic [ref=f1e529]: Làm sạch dấu AI trước khi dựng
+                - generic [ref=f1e533]:
+                  - generic [ref=f1e534]: Làm sạch dấu AI trên clip trước khi dựng
+                  - checkbox "Làm sạch dấu AI trên clip trước khi dựng" [ref=f1e535]
+                - paragraph [ref=f1e536]: Chỉ dùng cho nội dung bạn có quyền chỉnh sửa. Hệ thống xử lý các dấu AI nhìn thấy được hỗ trợ và metadata đã xác minh; clip gốc luôn được giữ lại.
+              - generic [ref=f1e537]:
+                - generic [ref=f1e538]: Hiệu ứng giữ chân
+                - generic [ref=f1e541]:
+                  - generic [ref=f1e542]:
+                    - generic [ref=f1e543]: Chuyển cảnh/hiệu ứng âm thanh
+                    - checkbox "Chuyển cảnh/hiệu ứng âm thanh" [checked] [ref=f1e544]
+                  - generic [ref=f1e545]:
+                    - generic [ref=f1e546]: Trộn hiệu ứng/nhạc nền thật
+                    - checkbox "Trộn hiệu ứng/nhạc nền thật" [checked] [ref=f1e547]
+                  - generic [ref=f1e548]:
+                    - generic [ref=f1e549]: Đánh giá AI
+                    - checkbox "Đánh giá AI" [checked] [ref=f1e550]
+                - generic [ref=f1e551]:
+                  - generic [ref=f1e552]:
+                    - generic [ref=f1e553]: Số vòng tự sửa
+                    - combobox "Số vòng tự sửa Có thể đổi trước khi bấm Dựng MP4." [ref=f1e554]:
+                      - option "0"
+                      - option "1" [selected]
+                      - option "2"
+                    - generic [ref=f1e555]: Có thể đổi trước khi bấm Dựng MP4.
+                  - generic [ref=f1e556] [cursor=pointer]:
+                    - generic [ref=f1e560]: Thêm hiệu ứng/nhạc nền
+                    - button "Thêm hiệu ứng/nhạc nền" [ref=f1e561]
+                - paragraph [ref=f1e562]: Chưa có hiệu ứng/nhạc nền. Gợi ý như tiếng kính vỡ sẽ được ghi dự phòng nếu chưa tải tài nguyên thật.
+              - generic [ref=f1e567]:
+                - paragraph [ref=f1e568]: Chưa đủ điều kiện dựng MP4.
+                - list [ref=f1e569]:
+                  - listitem [ref=f1e570]: Thiếu video clip cho một số shot.
+                  - listitem [ref=f1e571]: Một số shot thiếu thời lượng render.
+                  - listitem [ref=f1e572]: Chưa có phụ đề hoàn tất để burn vào video.
+                - list [ref=f1e573]:
+                  - listitem [ref=f1e574]: Enhanced audio bật nhưng project chưa có asset SFX/BGM thật; report sẽ ghi fallback rõ ràng cho các cue thiếu asset.
+              - generic [ref=f1e575]:
+                - button "Dựng MP4" [disabled]
+                - button "Tải MP4" [disabled]
+                - button "Tải đánh giá AI" [disabled]
+                - button "Tải bảng dòng thời gian" [disabled]
+  - region "Notifications (F8)":
+    - list

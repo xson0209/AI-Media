@@ -791,6 +791,95 @@ def _optimized_rewrite_payload(*, title="New title", hook_3_5s=None):
         "originality_note": "New work, not a copy.",
     }
 
+def test_variant_pipeline_batches_scores_caches_and_selects_final(db, tmp_path, monkeypatch):
+    job = _seed_video_job(db, tmp_path, job_id="variant-pipeline")
+    job.status = "analyzed"
+    job.current_step = "completed"
+    job.analysis_mode = "high_quality"
+    job.analysis_json = {"main_idea_vi": "Ý chính"}
+    job.analysis_package_json = {"schema_version": "video_analysis_package.v1", "revision": 2}
+    db.commit()
+
+    calls = []
+
+    def fake_structured_ai(session, prompt, schema, *, timeout_seconds=600):
+        calls.append(schema)
+        if schema is video_inspiration.CREATIVE_BRIEF_SCHEMA:
+            return {
+                "strategy_summary": "Tạo hai hướng khác nhau.",
+                "core_insight": "Một hành động nhỏ tạo thay đổi lớn.",
+                "audience_promise": "Có payoff rõ ràng.",
+                "visual_direction": "Tối giản.",
+                "constraints": ["Không copy nguồn."],
+                "candidate_angles": ["Hook", "Cảm xúc"],
+            }
+        if schema is video_inspiration.REWRITE_CANDIDATES_SCHEMA:
+            return {"candidates": [_optimized_rewrite_payload(title="A"), _optimized_rewrite_payload(title="B")]}
+        if schema is video_inspiration.VARIANT_SCORE_SCHEMA:
+            reviews = []
+            for index in range(2):
+                reviews.append({
+                    "candidate_index": index,
+                    "score": 8.5 - index,
+                    "hook_score": 9,
+                    "clarity_score": 8,
+                    "originality_score": 8,
+                    "retention_score": 9,
+                    "production_feasibility_score": 8,
+                    "sound_design_score": 8,
+                    "alignment_score": 9,
+                    "strengths": ["Hook tốt"],
+                    "weaknesses": ["Cần gọn hơn"],
+                    "best_parts": ["Mở đầu"],
+                    "recommendation": "Giữ hook, rút gọn phần giữa.",
+                })
+            return {"reviews": reviews, "synthesis_direction": "Kết hợp hai bản.", "rubric_version": video_inspiration.VARIANT_RUBRIC_VERSION}
+        if schema is video_inspiration.VARIANT_SYNTHESIS_SCHEMA:
+            return {"final_versions": [{"variant_id": "final-1", "strategy": "balanced", "source_basis": ["candidate-1", "candidate-2"], "payload": _optimized_rewrite_payload(title="Final")} ]}
+        raise AssertionError("unexpected schema")
+
+    monkeypatch.setattr(video_inspiration, "_run_structured_ai", fake_structured_ai)
+    monkeypatch.setattr(video_inspiration, "_variant_model_key", lambda session: "codex:test-model")
+
+    generated = video_inspiration.generate_variant_candidates(job.id, models.VideoInspirationVariantGenerateRequest(candidate_count=2), db)
+    assert generated is not None
+    candidate_ids = [item["variant_id"] for item in generated.analysis_json["variant_pipeline"]["candidates"]]
+    assert len(candidate_ids) == 2
+    assert generated.analysis_json["variant_pipeline"]["candidate_generation"]["metrics"]["prompt_chars"] > 0
+
+    # An identical request is served from the stage cache.
+    video_inspiration.generate_variant_candidates(job.id, models.VideoInspirationVariantGenerateRequest(candidate_count=2), db)
+    assert calls.count(video_inspiration.REWRITE_CANDIDATES_SCHEMA) == 1
+
+    scored = video_inspiration.score_variant_candidates(job.id, models.VideoInspirationVariantScoreRequest(variant_ids=candidate_ids), db)
+    assert scored is not None
+    assert len(scored.analysis_json["variant_pipeline"]["scoring"]["reviews"]) == 2
+    video_inspiration.score_variant_candidates(job.id, models.VideoInspirationVariantScoreRequest(variant_ids=candidate_ids), db)
+    assert calls.count(video_inspiration.VARIANT_SCORE_SCHEMA) == 1
+
+    synthesized = video_inspiration.synthesize_variant_versions(job.id, models.VideoInspirationVariantSynthesisRequest(variant_ids=candidate_ids), db)
+    assert synthesized is not None
+    final = synthesized.analysis_json["variant_pipeline"]["synthesis"]["versions"][0]
+    assert final["source_basis"] == ["candidate-1", "candidate-2"]
+    assert final["revision"] == 1
+
+    selected = video_inspiration.select_variant_version(job.id, models.VideoInspirationVariantSelectRequest(variant_id="final-1"), db)
+    assert selected is not None
+    assert selected.script_title == "Final"
+    assert "New English script" in selected.rewritten_script
+
+def test_variant_pipeline_kill_switch(db, tmp_path, monkeypatch):
+    job = _seed_video_job(db, tmp_path, job_id="variant-disabled")
+    job.status = "analyzed"
+    job.analysis_json = {"main_idea_vi": "Ý chính"}
+    db.commit()
+    monkeypatch.setenv(video_inspiration.VARIANT_PIPELINE_FEATURE_ENV, "false")
+
+    with pytest.raises(video_inspiration.VideoInspirationError) as exc:
+        video_inspiration.generate_variant_candidates(job.id, models.VideoInspirationVariantGenerateRequest(), db)
+
+    assert exc.value.error_code == "VIDEO_INSPIRATION_VARIANTS_DISABLED"
+
 def test_rewrite_prompt_uses_target_language_and_bold_remix(db, monkeypatch):
     now = datetime.utcnow()
     job = DBVideoInspirationJob(

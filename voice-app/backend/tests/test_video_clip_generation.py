@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from backend.services import video_clip_generation
+import asyncio
+from types import SimpleNamespace
+
+from backend import models
+from backend.services import video_clip_generation, video_rendering
 
 
 def test_compact_prompt_for_veo_provider_keeps_provider_critical_sections():
@@ -97,3 +101,100 @@ def test_provider_safe_prompt_for_veo_keeps_text_context_but_blocks_rendered_tex
     assert "yellow karaoke subtitle added during render" not in lowered
     assert "use english voiceover narration" not in lowered
     assert "no watermark" in lowered
+
+
+def test_provider_safe_prompt_for_veo_appends_exact_vietnamese_native_speech_without_audio_blocker():
+    prompt = (
+        "Create a 10-second 9:16 cinematic video. A young detective turns toward the camera.\n\n"
+        "Retention notes: Hold on her eyes before the reveal.\n\n"
+        "Negative prompt:\nNo readable text, no burned-in subtitles, no watermark."
+    )
+    native_speech = "\n".join(
+        [
+            "Vietnamese spoken dialogue — generate this as audible audio inside the Veo clip:",
+            "Speaker 1: Lan",
+            "- Canonical voice: warm low female voice, calm and precise",
+            "- Current emotion: controlled fear",
+            "- Scene context: Lan sees the hidden door open behind the suspect",
+            "- Lip sync: required for the visible speaker",
+            '- Speak exactly once in Vietnamese: "Tôi biết anh đã giấu cánh cửa ở đâu."',
+        ]
+    )
+
+    safe, changed = video_clip_generation.provider_safe_prompt_for_veo(
+        prompt,
+        narration_context="This context must not be appended for native speech.",
+        native_speech_section=native_speech,
+    )
+    lowered = safe.casefold()
+
+    assert changed is True
+    assert "Create a 10-second 9:16 cinematic video" in safe
+    assert native_speech in safe
+    assert '"Tôi biết anh đã giấu cánh cửa ở đâu."' in safe
+    assert "warm low female voice" in safe
+    assert "narration/subtitle context only" not in lowered
+    assert "do not render subtitles, captions, spoken audio" not in lowered
+
+
+def test_auto_render_handoff_uses_saved_project_settings(monkeypatch):
+    chosen = models.VideoRenderSettings(mute_clip_audio=False, fps=60, subtitle_mode="none")
+    job = SimpleNamespace(
+        id="clip-job",
+        project_id="project-1",
+        status="completed",
+        current_step="completed",
+        failure_reason=None,
+        render_job_id=None,
+        updated_at=None,
+    )
+    render = SimpleNamespace(id="render-job")
+    captured: dict[str, models.VideoRenderSettings] = {}
+
+    class FakeQuery:
+        def filter(self, *args):
+            return self
+
+        def first(self):
+            return job
+
+    class FakeDb:
+        def query(self, model):
+            return FakeQuery()
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    fake_db = FakeDb()
+    monkeypatch.setattr(video_clip_generation, "get_db", lambda: iter([fake_db]))
+    monkeypatch.setattr(
+        video_rendering,
+        "render_settings_for_project",
+        lambda project_id, session: chosen,
+    )
+    monkeypatch.setattr(
+        video_rendering,
+        "get_render_readiness",
+        lambda project_id, session, settings: models.VideoRenderReadinessResponse(
+            project_id=project_id,
+            ready=True,
+            ffmpeg_ready=True,
+            ffprobe_ready=True,
+        ),
+    )
+
+    async def fake_create(project_id, data, session):
+        captured["settings"] = data.settings
+        return render
+
+    monkeypatch.setattr(video_rendering, "create_render_job", fake_create)
+
+    asyncio.run(video_clip_generation._handoff_render(job.id))
+
+    assert captured["settings"] == chosen
+    assert captured["settings"].mute_clip_audio is False
+    assert job.render_job_id == "render-job"
+    assert job.current_step == "auto_render_started"

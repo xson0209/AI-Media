@@ -1,51 +1,63 @@
-## 1. Planning Pool Và Cấu Hình
+## 1. Điều Phối Workflow Và Planning
 
-- [ ] 1.1 Thêm service quản lý Codex planning pool dùng chung cho AI Video, với global `max_concurrency = 2` mặc định.
-- [ ] 1.2 Thêm cách đọc override concurrency  từ env/config nội bộ, validate giá trị hợp lệ và fallback an toàn về 2 khi cấu hình thiếu hoặc sai.
-- [ ] 1.3 Implement acquire/release slot bằng context manager hoặc helper tương đương để đảm bảo release trong mọi path success, validation fail, timeout và exception.
-- [ ] 1.4 Implement per-project active planning registry đểchặn nhiều planning jobs cùng lúc trên một project.
-- [ ] 1.5 Thêm lỗi domain tiếng Việt cho trường hợp project đang có planning job active và không được tạo job trùng.
+- [x] 1.1 Thêm workflow coordinator FIFO dùng chung, mặc định tối đa 3 work keys active và chặn chạy trùng cùng key.
+- [x] 1.2 Thêm snapshot workflow gồm running, queued, max concurrency và work keys; bảo đảm release slot ở mọi success/error/cancel path.
+- [x] 1.3 Tích hợp AI Video auto-run với workflow coordinator; release khi terminal hoặc dừng chờ người dùng, acquire lại khi continue/retry.
+- [x] 1.4 Tổng quát hóa planning pool cho AI Video và Video Inspiration với work key/loại workflow rõ ràng, mặc định tối đa 3.
+- [x] 1.5 Giữ per-work-key planning lock, retry trong cùng slot và full-pack prompt generation trong một AI Video project.
+- [x] 1.6 Ghi debug event đã redaction cho lúc chờ/lấy/trả slot workflow và planning.
 
-## 2. Tích Hợp Vào Codex Planning Calls
+## 2. Video Inspiration Chạy Nền
 
-- [ ] 2.1 Bọc `_run_structured_codex` của `video_phase2` bằng planning pool, truyền `project_id`, `step_name`, provider/model và metadata đã redaction.
-- [ ] 2.2 Bọc các AI Video planning calls legacy trong `video_planning` để manual project plan, scene regenerate và prompt ảnh không bypass pool.
-- [ ] 2.3 Đảm bảo `generate_video_prompt_pack` vẫn build một full prompt pack call cho toàn bộ shot/segment cần prompt trong project, không chia batch theo shot.
-- [ ] 2.4 Đảm bảo retry hiện có của Codex planning vẫn hoạt động bên trong một acquired slot, không release/re-acquire giữa các retry của cùng step.
-- [ ] 2.5 Không đưa planning jobs vào `task_queue.enqueue_generation` và không thay đổi TTS generation queue serial hiện có.
+- [x] 2.1 Chuyển analyze endpoint thành thao tác xếp lịch trả nhanh; background runner dùng DB session riêng.
+- [x] 2.2 Chuyển rewrite endpoint thành thao tác xếp lịch trả nhanh và không giữ HTTP request đến khi bốn bước Codex hoàn tất.
+- [x] 2.3 Đưa phần blocking của FFmpeg/frame extraction/Codex sang thread để health, polling và UI vẫn phản hồi.
+- [x] 2.4 Đưa toàn bộ Codex calls của Video Inspiration qua planning pool chung.
+- [x] 2.5 Thêm STT gate mặc định 1 và trạng thái chờ nhận dạng lời nói.
+- [x] 2.6 Chặn analyze/rewrite trùng trên cùng job nhưng cho phép job khác sử dụng ba workflow slots.
+- [x] 2.7 Thêm cancel/retry; queued job dừng ngay, active job dừng ở checkpoint an toàn.
+- [x] 2.8 Khi backend restart, đánh dấu job active bị mất runtime là interrupted/failed rõ ràng và cho retry.
 
-## 3. Auto-Run Và Manual API Behavior
+## 3. Voice Hard Cap Và Hủy Theo Dự Án
 
-- [ ] 3.1 Cập nhật auto-run để khi planning pool đầy thì run hiển thị current step tiếng Việt rõ ràng là đang chờ slot Codex/planning.
-- [ ] 3.2 Đảm bảo auto-run đang chờ slot tiếp tục đúng step sau khi có slot, không skip validation và không tạo artifact giả.
-- [ ] 3.3 Đảm bảo cancel/retry/failure của auto-run không để rò rỉ project lock hoặc global planning slot.
-- [ ] 3.4 Cập nhật các manual AI Video endpoints dùng Codex để đi qua pool và trả lỗi tiếng Việt khi request trùng project đang planning.
-- [ ] 3.5 Đảm bảo nhiều project auto-run khác nhau có thể cùng tiến tới planning song song trong giới hạn 2 job toàn app.
+- [x] 3.1 Clamp generation concurrency tối đa 2, không cho env/config nâng cao hơn 2.
+- [x] 3.2 Thêm inference gate dùng chung cho generation workers và `/generate/stream` để tổng voice inference không vượt 2.
+- [x] 3.3 Kiểm tra và đưa mọi direct TTS path còn lại qua inference gate hoặc generation queue.
+- [x] 3.4 Ghi trạng thái voice đúng theo `queued -> loading_model -> generating -> terminal` cho generation và scene/shot.
+- [x] 3.5 Mở rộng resource API trả voice `running`, `queued`, `max_concurrency = 2`.
+- [x] 3.6 Khi hủy AI Video auto-run, hủy các generation queued thuộc project và không dùng kết quả active generation để tiếp tục run.
+- [x] 3.7 Giữ generation queue FIFO và xác nhận slot được release sau success, lỗi, timeout hoặc cancel.
 
-## 4. Observability Và Debug
+## 4. API Và UI Tiếng Việt
 
-- [ ] 4.1 Ghi debug event khi planning job bắt đầu chờ slot, lấy slot, release slot, hoàn tất hoặc lỗi.
-- [ ] 4.2 Log wait duration, active count hoặc thông tin queue an toàn nếu có, project id, step name, provider/model và error code.
-- [ ] 4.3 Đảm bảo technical details không lưu full prompt, source text dài, narration dài hoặc secret; chỉ lưu count, ids, text length hoặc preview rút gọn.
-- [ ] 4.4 Cập nhật summary/status frontend nếu cần để auto-run panel hiển thị trạng thái chờ planning tự nhiên bằng tiếng Việt.
+- [x] 4.1 Mở rộng API/types cho workflow, planning, voice và STT resource snapshots.
+- [x] 4.2 AI Video hiển thị số dự án đang chạy/chờ và `Tạo giọng: x/2 · N đang chờ` bằng tiếng Việt.
+- [x] 4.3 Video Inspiration bỏ `busy` toàn trang; chỉ khóa action của đúng job đang xử lý.
+- [x] 4.4 Video Inspiration cho phép bắt đầu/chọn job thứ hai, thứ ba trong khi job trước chạy nền.
+- [x] 4.5 Thêm nút/trạng thái cancel và retry Video Inspiration bằng tiếng Việt.
+- [x] 4.6 Map toàn bộ trạng thái nội bộ mới sang câu tiếng Việt dễ hiểu; không hiển thị raw status code.
+- [x] 4.7 Giảm polling detail dư thừa, dùng list/resource summary cho các project không được chọn.
 
 ## 5. Backend Tests
 
-- [ ] 5.1 Thêm unit tests cho planning pool: default concurrency 2, override hợp lệ, override sai fallback an toàn.
-- [ ] 5.2 Thêm test hai project planning chạy song song và project thứ ba không chạy Codex trước khi slot được release.
-- [ ] 5.3 Thêm test chặn request planning trùng cùng project và đảm bảo không tạo Codex subprocess thứ hai.
-- [ ] 5.4 Thêm test release slot/project lock sau Codex timeout, invalid output, validation error và exception bất ngờ.
-- [ ] 5.5 Thêm test `generate_video_prompt_pack` vẫn gọi Codex đúng một lần cho full pack của project và validate/ghi prompt như hiện tại.
-- [ ] 5.6 Thêm test auto-run nhiều project: tối đa 2 planning jobs active cùng lúc, run thứ ba chờ và tiếp tục sau khi có slot.
-- [ ] 5.7 Thêm test manual endpoint không bypass pool và trả lỗi tiếng Việt khi cùng project đang có auto-run planning active.
-- [ ] 5.8 Thêm regression test chứng minh TTS generation queue vẫn serial và planning pool không enqueue vào generation queue.
-- [ ] 5.9 Thêm test debug redaction cho planning concurrency event, không chứa full prompt/source/narration.
+- [x] 5.1 Test ba workflow khác nhau chạy, workflow thứ tư chờ rồi tự tiếp tục theo FIFO.
+- [x] 5.2 Test cùng một project/job không chạy trùng và slot được release sau error/cancel.
+- [x] 5.3 Test mixed flow gồm 2 AI Video + 1 Video Inspiration dùng đủ ba slot.
+- [x] 5.4 Test Video Inspiration analyze/rewrite endpoint trả nhanh và polling/health vẫn phản hồi khi Codex giả lập đang chạy.
+- [x] 5.5 Test cancel queued, cancel active checkpoint, retry và restart/interrupted cho Video Inspiration.
+- [x] 5.6 Test planning pool không vượt 3 và full prompt pack vẫn chỉ dùng một Codex call.
+- [x] 5.7 Test tổng voice inference không vượt 2 khi queue và streaming chạy đồng thời.
+- [x] 5.8 Test voice state transitions, cancel queued generation theo project và release slot ở mọi terminal path.
+- [x] 5.9 Test STT không vượt 1 và job chờ tiếp tục sau khi slot được trả.
+- [x] 5.10 Chạy regression tests AI Video auto-run, Video Inspiration, generation queue và resource status.
 
-## 6. Frontend, Type Check Và QA
+## 6. Frontend, OpenSpec Và QA
 
-- [ ] 6.1 Cập nhật frontend types/labels nếu auto-run current step hoặc status mới được thêm cho trạng thái chờ planning.
-- [ ] 6.2 Chạy frontend type/build checks liên quan đến AI Video Assistant và api client.
-- [ ] 6.3 Chạy focused backend tests cho AI Video planning, auto-run, prompt generation và task queue.
-- [ ] 6.4 Manual QA với 3 project auto-run: xác nhận 2 project chạy Codex cùng lúc, project thứ ba chờ slot rồi tiếp tục.
-- [ ] 6.5 Manual QA một project bị bấm manual prompt trong lúc auto-run planning: xác nhận không tạo job trùng và lỗi/status tiếng Việt rõ ràng.
-- [ ] 6.6 Manual QA rollback/config: đặt concurrency 1 để xác nhận behavior quay về gần tuần tự và vẫn hoàn tất project.
+- [x] 6.1 Chạy frontend typecheck và production web build.
+- [x] 6.2 Chạy focused backend pytest và kiểm tra diff formatting.
+- [x] 6.3 Validate OpenSpec change và cập nhật checklist theo kết quả thực tế.
+- [ ] 6.4 Manual QA: bắt đầu 2 AI Video + 1 Video Inspiration, chuyển màn hình và xác nhận cả ba tiếp tục chạy nền.
+- [ ] 6.5 Manual QA: bắt đầu dự án thứ tư và xác nhận UI báo đang chờ rồi tự chạy khi có slot.
+- [ ] 6.6 Manual QA: đưa ít nhất 3 voice vào hàng đợi, xác nhận chỉ `2/2` chạy và phần còn lại hiển thị đang chờ.
+- [ ] 6.7 Manual QA: hủy một dự án có voice queued, refresh ứng dụng và xác nhận voice đó không chạy lại.
+- [ ] 6.8 Smoke test bằng voice engine/GPU thật; nếu engine không ổn với 2 inference, ghi rõ cấu hình tạm hạ về 1 nhưng vẫn giữ hard cap 2.

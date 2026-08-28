@@ -12,8 +12,10 @@ import {
   FileText,
   Film,
   Gauge,
+  Image as ImageIcon,
   Loader2,
   Lock,
+  Maximize2,
   type LucideIcon,
   MemoryStick,
   Mic2,
@@ -30,6 +32,7 @@ import {
   Thermometer,
   Trash2,
   Unlock,
+  Users,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -42,7 +45,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AI_VIDEO_DRAFT_STORAGE_KEY, type AIVideoFormDraft } from '@/lib/aiVideoDraft';
+import {
+  AI_VIDEO_DRAFT_STORAGE_KEY,
+  type AIVideoFormDraft,
+  aiVideoDraftFormConfig,
+} from '@/lib/aiVideoDraft';
 import { apiClient } from '@/lib/api/client';
 import type {
   AIPlanningProviderCheckResponse,
@@ -58,7 +65,10 @@ import type {
   VideoAutoRunResponse,
   VideoAutoRunStatus,
   VideoAutoRunStep,
+  CharacterProposalDecision,
+  NewCharacterProposal,
   VideoLanguage,
+  VideoProjectCharacterFlowResponse,
   VideoPublishingPlatform,
   VideoProjectContextTaskType,
   VideoProjectDetailResponse,
@@ -76,6 +86,14 @@ import { ALL_LANGUAGES, LANGUAGE_OPTIONS, getLanguageOptionsForEngine } from '@/
 import { useProfiles } from '@/lib/hooks/useProfiles';
 import { cn } from '@/lib/utils/cn';
 import { usePlatform } from '@/platform/PlatformContext';
+import {
+  defaultSeriesModeForContext,
+  SeriesCreateDialog,
+  type SeriesCreateNextAction,
+  type SeriesPickerContext,
+  type SeriesDraftInput,
+  SeriesPickerDialog,
+} from '@/components/SeriesDialogs/SeriesDialogs';
 import { AIVideoRenderPanel } from './AIVideoRenderPanel';
 import { AIVideoPublishingMetadataPanel } from './AIVideoPublishingMetadataPanel';
 import { AIVideoVeoChromePanel } from './AIVideoVeoChromePanel';
@@ -84,6 +102,10 @@ type AspectRatio = '9:16' | '16:9' | '1:1';
 type ProjectCreationMode = 'quick' | 'manual';
 
 const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
+const AI_VIDEO_TITLE_MAX_LENGTH = 160;
+const AI_VIDEO_TOPIC_MAX_LENGTH = 4000;
+const AI_VIDEO_SOURCE_BLOCK_MAX_LENGTH = 30000;
+const RESEARCH_FEATURE_ENABLED = import.meta.env.VITE_FEATURE_RESEARCH !== 'false';
 
 interface SourceDraft {
   block_type: string;
@@ -171,9 +193,9 @@ const initialForm: DraftForm = {
   dialogueMode: 'voiceover',
   narrationDensity: 'dense',
   callToActionStyle: 'soft',
-  promptSegmentCount: 6,
-  promptSegmentDuration: 10,
-  microScenesPerPrompt: 3,
+  promptSegmentCount: 7,
+  promptSegmentDuration: 8,
+  microScenesPerPrompt: 4,
   aspectRatio: '9:16',
   visualStyle:
     'cinematic realistic video, natural light, consistent character details, fast editorial pacing',
@@ -309,10 +331,29 @@ const emptyEpisodeDraft: EpisodeDraft = {
   topic: '',
 };
 
-const DEFAULT_PROMPT_SEGMENT_SECONDS = 10;
+const DEFAULT_PROMPT_SEGMENT_SECONDS = 8;
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Có lỗi không xác định.';
+}
+
+async function writeClipboardText(value: string) {
+  if (!value.trim()) throw new Error('Không có nội dung prompt để copy.');
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  if (!ok) throw new Error('Clipboard rejected');
 }
 
 function isSceneBusy(scene: VideoSceneResponse): boolean {
@@ -557,6 +598,68 @@ function missingPromptExplanationText(): string {
   return 'Chưa có bản giải thích tiếng Việt riêng. Hãy tạo lại câu lệnh video nếu cần bản giải thích đầy đủ.';
 }
 
+function videoPromptBlock(
+  shot: VideoShotResponse,
+  prompt: VideoPromptContentResponse | undefined,
+): string {
+  const lines = [`PROMPT VIDEO ${String(shot.shot_order).padStart(2, '0')}`];
+  const explanation = prompt?.prompt_explanation_vi?.trim();
+  const retention = prompt?.retention_notes?.trim();
+  const transition = prompt?.transition_notes?.trim();
+  const soundDesign = prompt?.sound_design_notes?.trim();
+  const content = prompt?.content?.trim();
+  const negative = prompt?.negative_prompt?.trim();
+
+  if (explanation) lines.push(`BẢN DUYỆT TIẾNG VIỆT:\n${explanation}`);
+  if (retention) lines.push(`GIỮ CHÂN:\n${retention}`);
+  if (transition) lines.push(`CHUYỂN CẢNH:\n${transition}`);
+  if (soundDesign) lines.push(`ÂM THANH/SFX:\n${soundDesign}`);
+  if (content) lines.push(`BẢN GỬI AI VIDEO:\n${content}`);
+  if (negative) lines.push(`NEGATIVE PROMPT:\n${negative}`);
+
+  if (lines.length === 1) {
+    lines.push('Chưa tải được nội dung prompt video.');
+  }
+
+  return lines.join('\n\n');
+}
+
+function isFreshVideoPrompt(
+  shot: VideoShotResponse,
+  prompt: VideoPromptContentResponse | undefined,
+): boolean {
+  return (
+    shot.prompt_status !== 'missing' &&
+    shot.prompt_status !== 'stale' &&
+    Boolean(prompt?.content?.trim())
+  );
+}
+
+function allVideoPromptsText(
+  shots: VideoShotResponse[],
+  promptByShotId: Record<string, VideoPromptContentResponse | undefined>,
+): string {
+  return shots
+    .map((shot) => {
+      const prompt = promptByShotId[shot.id];
+      // Copy only the generation prompt. Review notes and the negative prompt
+      // stay visible in the UI but must not be mixed into clipboard content.
+      return isFreshVideoPrompt(shot, prompt) ? prompt?.content?.trim() ?? '' : '';
+    })
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+}
+
+function availableVideoPromptsText(
+  shots: VideoShotResponse[],
+  promptByShotId: Record<string, VideoPromptContentResponse | undefined>,
+): string {
+  return shots
+    .map((shot) => promptByShotId[shot.id]?.content?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+}
+
 function metadataText(
   data: Record<string, unknown> | null | undefined,
   keys: string[],
@@ -657,6 +760,7 @@ const AUTO_RUN_STEPS: Array<{ step: VideoAutoRunStep; label: string }> = [
   { step: 'waiting_workflow', label: 'Chờ lượt xử lý' },
   { step: 'develop_story', label: 'Phát triển kịch bản' },
   { step: 'waiting_planning', label: 'Chờ Codex' },
+  { step: 'review_character_proposals', label: 'Duyệt nhân vật mới' },
   { step: 'review_story', label: 'Duyệt kịch bản' },
   { step: 'generate_shots', label: 'Phân đoạn' },
   { step: 'generate_prompts', label: 'Câu lệnh video' },
@@ -792,6 +896,7 @@ function autoRunStatusLabel(run: VideoAutoRunResponse): string {
 function autoRunReviewLabel(stage: VideoAutoRunResponse['review_stage']): string {
   if (stage === 'story') return 'chiến lược, tính nhất quán và kịch bản';
   if (stage === 'prompts') return 'câu lệnh video và nội dung đăng';
+  if (stage === 'character_proposals') return 'nhân vật mới trong series';
   return 'nội dung';
 }
 
@@ -1003,6 +1108,8 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
     const reviewTarget =
       run.review_stage === 'story'
         ? 'kịch bản và hướng kể chuyện'
+        : run.review_stage === 'character_proposals'
+          ? 'nhân vật mới ảnh hưởng canon series'
         : run.review_stage === 'prompts'
           ? promptsOnly
             ? 'câu lệnh video trước khi tải ảnh'
@@ -1092,6 +1199,12 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
         title: 'Đang chờ lượt dùng AI planning',
         detail: 'Project đang xếp hàng để tránh chạy nhiều tác vụ AI nặng cùng lúc.',
         next: 'Khi có slot trống, hệ thống sẽ tự tiếp tục bước đang chờ.',
+      };
+    case 'review_character_proposals':
+      return {
+        title: 'Đang chờ duyệt nhân vật mới',
+        detail: 'AI đã đề xuất nhân vật có thể ảnh hưởng canon series nên auto-run đang dừng.',
+        next: 'Quyết định từng nhân vật: thêm vào Series, chỉ dùng trong tập này hoặc từ chối.',
       };
     case 'generate_shots':
       return {
@@ -1213,16 +1326,233 @@ function autoRunMilestoneStatus(
   return 'pending';
 }
 
+function proposalStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'pending_review':
+      return 'Chờ quyết định';
+    case 'approved_as_series_character':
+      return 'Đã thêm vào Series';
+    case 'episode_only':
+      return 'Chỉ dùng trong tập này';
+    case 'rejected':
+      return 'Đã từ chối';
+    case 'background_extra':
+      return 'Người nền không canon';
+    default:
+      return status ? 'Đã cập nhật' : 'Chưa có trạng thái';
+  }
+}
+
+function canonImpactLabel(value: string | null | undefined): string {
+  const normalized = (value || '').trim().toLowerCase();
+  if (!normalized || normalized === 'unknown') return 'Chưa rõ';
+  if (['none', 'background', 'background_extra', 'non_canon'].includes(normalized)) return 'Không ảnh hưởng canon';
+  if (normalized === 'episode_only') return 'Chỉ trong tập';
+  if (normalized === 'low') return 'Thấp';
+  if (normalized === 'medium') return 'Trung bình';
+  if (normalized === 'high') return 'Cao';
+  return value || 'Chưa rõ';
+}
+
+function proposalDetailList(proposal: NewCharacterProposal): Array<{ label: string; value: string }> {
+  return [
+    { label: 'Ngoại hình', value: [proposal.face_description, proposal.hair_description, proposal.body_description].filter(Boolean).join(' · ') },
+    { label: 'Trang phục', value: proposal.signature_outfit || '' },
+    { label: 'Tính cách', value: proposal.personality || '' },
+    { label: 'Cách nói', value: proposal.speech_style || '' },
+    { label: 'Khóa nhận diện', value: proposal.fixed_traits || '' },
+    { label: 'Artifact', value: proposal.affected_artifacts?.length ? proposal.affected_artifacts.join(', ') : '' },
+  ].filter((item) => item.value.trim());
+}
+
+function proposalRiskBadges(proposal: NewCharacterProposal): string[] {
+  return [
+    proposal.foreground ? 'Foreground' : '',
+    proposal.has_dialogue ? 'Có thoại' : '',
+    proposal.affects_plot ? 'Ảnh hưởng plot' : '',
+    proposal.reappears_likely ? 'Có thể tái xuất' : '',
+    proposal.background_extra ? 'Background extra' : '',
+  ].filter(Boolean);
+}
+
+function CharacterProposalReviewPanel({
+  flow,
+  loading,
+  error,
+  decisionPendingId,
+  continuePending,
+  onDecision,
+  onContinue,
+}: {
+  flow: VideoProjectCharacterFlowResponse | null | undefined;
+  loading: boolean;
+  error: string | null;
+  decisionPendingId: string | null;
+  continuePending: boolean;
+  onDecision: (proposalId: string, decision: CharacterProposalDecision) => void;
+  onContinue: () => void;
+}) {
+  const proposals = flow?.new_character_proposals ?? [];
+  const orderedProposals = [...proposals].sort((left, right) => {
+    const leftPending = left.status === 'pending_review' && left.requires_review;
+    const rightPending = right.status === 'pending_review' && right.requires_review;
+    return Number(rightPending) - Number(leftPending);
+  });
+  const readyToContinue = Boolean(flow?.required_proposals_decided);
+  const resumeLabel = autoRunStepLabel(flow?.resume_step || 'generate_shots');
+
+  return (
+    <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-950 dark:text-amber-50">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <p className="font-semibold">Duyệt nhân vật mới trước khi auto-run chạy tiếp</p>
+          <p className="mt-1 text-xs leading-relaxed opacity-85">
+            {flow?.message ||
+              'AI đã đề xuất nhân vật mới trong series. Full-auto vẫn dừng để bạn quyết định canon.'}
+          </p>
+        </div>
+        <span className="inline-flex w-fit shrink-0 rounded-full border border-amber-500/30 bg-background/70 px-2.5 py-1 text-xs font-medium">
+          Còn {flow?.pending_required_count ?? 0} cần duyệt
+        </span>
+      </div>
+
+      {error ? (
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      ) : loading ? (
+        <div className="mt-3 flex items-center gap-2 rounded-md border border-border/70 bg-background/70 p-3 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Đang tải danh sách nhân vật cần duyệt...
+        </div>
+      ) : !orderedProposals.length ? (
+        <div className="mt-3 rounded-md border border-dashed border-border bg-background/70 p-4 text-muted-foreground">
+          Chưa có proposal nhân vật mới cho tập này.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          {orderedProposals.map((proposal) => {
+            const pending = proposal.status === 'pending_review' && proposal.requires_review;
+            const deciding = decisionPendingId === proposal.proposal_id;
+            const details = proposalDetailList(proposal);
+            const badges = proposalRiskBadges(proposal);
+            return (
+              <div
+                key={proposal.proposal_id}
+                className={cn(
+                  'rounded-lg border bg-background/85 p-3 text-foreground',
+                  pending ? 'border-amber-500/35' : 'border-border/70',
+                )}
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-base font-semibold">{proposal.name || 'Nhân vật mới'}</p>
+                      <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
+                        {proposalStatusLabel(proposal.status)}
+                      </span>
+                      <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
+                        {canonImpactLabel(proposal.canon_impact)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {proposal.episode_role || 'Chưa có vai trò rõ'} ·{' '}
+                      {proposal.reason_vi || 'Chưa có lý do đề xuất.'}
+                    </p>
+                    {badges.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {badges.map((item) => (
+                          <span
+                            key={item}
+                            className="rounded-full border border-border/70 bg-muted/35 px-2 py-0.5 text-[11px] text-muted-foreground"
+                          >
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={!pending || Boolean(decisionPendingId)}
+                      onClick={() => onDecision(proposal.proposal_id, 'approve_as_series_character')}
+                    >
+                      {deciding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                      Thêm vào Series
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!pending || Boolean(decisionPendingId)}
+                      onClick={() => onDecision(proposal.proposal_id, 'keep_episode_only')}
+                    >
+                      <ImageIcon className="h-4 w-4" />
+                      Chỉ dùng trong tập này
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!pending || Boolean(decisionPendingId)}
+                      onClick={() => onDecision(proposal.proposal_id, 'reject')}
+                    >
+                      <X className="h-4 w-4" />
+                      Từ chối
+                    </Button>
+                  </div>
+                </div>
+                {details.length ? (
+                  <div className="mt-3 grid gap-1.5 rounded-md border border-border/70 bg-muted/25 p-2 text-xs leading-5 text-muted-foreground">
+                    {details.map((item) => (
+                      <p key={item.label}>
+                        <span className="font-medium text-foreground">{item.label}: </span>
+                        {item.value}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={!readyToContinue || continuePending || loading || Boolean(error)}
+          onClick={onContinue}
+        >
+          {continuePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          Tiếp tục từ {resumeLabel}
+        </Button>
+        {!readyToContinue ? (
+          <span className="text-xs leading-relaxed opacity-80">
+            Hãy xử lý xong các proposal bắt buộc trước khi tiếp tục auto-run.
+          </span>
+        ) : (
+          <span className="text-xs leading-relaxed opacity-80">
+            Mọi proposal bắt buộc đã có quyết định.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AutoRunProgressPanel({
   run,
   isFetching,
   onCancel,
   cancelPending,
+  usesVeoNativeVietnameseSpeech,
 }: {
   run: VideoAutoRunResponse;
   isFetching: boolean;
   onCancel: () => void;
   cancelPending: boolean;
+  usesVeoNativeVietnameseSpeech: boolean;
 }) {
   const summary = autoRunPlainSummary(run);
   const percent = autoRunProgressPercent(run);
@@ -1269,8 +1599,10 @@ function AutoRunProgressPanel({
     },
     {
       step: 'generate_voice',
-      label: 'Tạo giọng đọc',
-      detail: 'Giọng đọc cho các phân đoạn có lời kể.',
+      label: usesVeoNativeVietnameseSpeech ? 'Audio lời thoại Veo' : 'Tạo giọng đọc',
+      detail: usesVeoNativeVietnameseSpeech
+        ? 'Dùng audio có sẵn trong clip Veo 3, không tạo TTS riêng.'
+        : 'Giọng đọc cho các phân đoạn có lời kể.',
       metric: formatAutoRunCount(
         run.summary.voice_completed_count,
         run.summary.voice_required_count,
@@ -1279,13 +1611,17 @@ function AutoRunProgressPanel({
     {
       step: 'generate_subtitle',
       label: 'Tạo phụ đề',
-      detail: 'File .srt theo giọng đọc đã tạo.',
+      detail: usesVeoNativeVietnameseSpeech
+        ? 'File .srt theo câu thoại và thời lượng clip Veo.'
+        : 'File .srt theo giọng đọc đã tạo.',
       metric: subtitleStatusLabel(run.summary.subtitle_status),
     },
     {
       step: 'generate_render',
       label: 'Dựng MP4',
-      detail: 'Dựng clip, giọng đọc và phụ đề thành file cuối.',
+      detail: usesVeoNativeVietnameseSpeech
+        ? 'Dựng clip, audio tiếng Việt từ Veo và phụ đề thành file cuối.'
+        : 'Dựng clip, giọng đọc và phụ đề thành file cuối.',
       metric: run.summary.render_job_status
         ? renderStatusLabel(run.summary.render_job_status)
         : undefined,
@@ -1328,7 +1664,9 @@ function AutoRunProgressPanel({
                   ? 'Câu lệnh + nội dung đăng'
                 : run.material_target === 'video_clips'
                   ? 'Veo + MP4'
-                  : 'Câu lệnh + giọng đọc + SRT'}
+                  : usesVeoNativeVietnameseSpeech
+                    ? 'Câu lệnh + audio Veo + SRT'
+                    : 'Câu lệnh + giọng đọc + SRT'}
             </span>
             <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">
               {run.mode === 'review_gated' ? 'Duyệt từng chặng' : 'Tự chạy hết'}
@@ -1633,7 +1971,7 @@ function formatStructuredPreview(value: unknown, limit = 900): string {
     return String(item ?? '').trim();
   };
   const text = format(value).trim();
-  if (!text) return 'ChÆ°a cÃ³ dá»¯ liá»‡u.';
+  if (!text) return 'Chưa có dữ liệu.';
   return text.length > limit ? `${text.slice(0, limit).trimEnd()}...` : text;
 }
 
@@ -1799,6 +2137,12 @@ function normalizeVisualStyleInput(value: string | null | undefined): string | n
   return text.slice(0, AI_VIDEO_VISUAL_STYLE_MAX_LENGTH).trimEnd();
 }
 
+function truncateProjectText(value: string | null | undefined, limit: number): string {
+  const text = (value || '').trim();
+  if (text.length <= limit) return text;
+  return text.slice(0, limit).trimEnd();
+}
+
 function sourcesFromAIVideoDraft(draft: AIVideoFormDraft): SourceDraft[] {
   const contentByType = new Map(
     draft.sources
@@ -1822,10 +2166,18 @@ export function AIVideoAssistant() {
   const [creationMode, setCreationMode] = useState<ProjectCreationMode>('quick');
   const [autoMode, setAutoMode] = useState<VideoAutoRunMode>('full_auto');
   const [autoMaterialTarget, setAutoMaterialTarget] =
-    useState<VideoAutoRunMaterialTarget>('full_materials');
+    useState<VideoAutoRunMaterialTarget>('prompts_only');
   const [seriesDraft, setSeriesDraft] = useState<SeriesDraft>(emptySeriesDraft);
   const [episodeDraft, setEpisodeDraft] = useState<EpisodeDraft>(emptyEpisodeDraft);
   const [episodeDialogOpen, setEpisodeDialogOpen] = useState(false);
+  const [seriesPickerOpen, setSeriesPickerOpen] = useState(false);
+  const [seriesPickerContext, setSeriesPickerContext] =
+    useState<SeriesPickerContext>('view_all');
+  const [seriesCreateDialogOpen, setSeriesCreateDialogOpen] = useState(false);
+  const [seriesCreateContext, setSeriesCreateContext] =
+    useState<SeriesPickerContext>('ai_video_direct');
+  const [videoPromptLibraryOpen, setVideoPromptLibraryOpen] = useState(false);
+  const [copiedVideoPromptKey, setCopiedVideoPromptKey] = useState<string | null>(null);
   const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [localizeTargetLanguage, setLocalizeTargetLanguage] = useState<VideoLanguage>('en');
@@ -1943,7 +2295,8 @@ export function AIVideoAssistant() {
     queries: (projectsQuery.data ?? [])
       .filter(
         (project) =>
-          project.id !== selectedProjectId && isAutoRunBusyStatus(project.active_run_status),
+          project.id !== selectedProjectId &&
+          (isAutoRunBusyStatus(project.active_run_status) || project.active_run_status === 'failed'),
       )
       .map((project) => ({
         queryKey: ['ai-video', 'auto-run', 'latest', project.id],
@@ -1956,6 +2309,17 @@ export function AIVideoAssistant() {
   const selectedProject = projectQuery.data;
   const activeProjectId = selectedProject?.id ?? selectedProjectId;
   const latestAutoRun = autoRunQuery.data ?? null;
+  const characterFlowQuery = useQuery({
+    queryKey: ['ai-video', 'character-flow', activeProjectId],
+    queryFn: () => apiClient.getVideoProjectCharacterFlow(activeProjectId!),
+    enabled: !!activeProjectId && !!selectedProject?.series_id,
+    refetchInterval: (query) =>
+      latestAutoRun?.status === 'needs_review' &&
+      latestAutoRun.review_stage === 'character_proposals' &&
+      !query.state.error
+        ? 2000
+        : false,
+  });
   const liveAutoRunsByProjectId = new Map<string, VideoAutoRunResponse>();
   for (const query of projectAutoRunQueries) {
     const run = query.data;
@@ -1988,6 +2352,10 @@ export function AIVideoAssistant() {
     () => seriesQuery.data?.find((series) => series.id === selectedProject?.series_id) ?? null,
     [selectedProject?.series_id, seriesQuery.data],
   );
+  const editingSeries = useMemo(
+    () => seriesQuery.data?.find((series) => series.id === editingSeriesId) ?? null,
+    [editingSeriesId, seriesQuery.data],
+  );
   const videoOnlySeries = useMemo(
     () => (seriesQuery.data ?? []).filter((series) => series.series_mode === 'video_story_only'),
     [seriesQuery.data],
@@ -1998,6 +2366,8 @@ export function AIVideoAssistant() {
   );
   const activeVideoLanguage = selectedProject?.target_language ?? form.targetLanguage;
   const activeVideoLanguageLabel = videoLanguageLabel(activeVideoLanguage);
+  const usesVeoNativeVietnameseSpeech =
+    activeVideoLanguage === 'vi' && (selectedProject?.phase ?? 'phase2') === 'phase2';
   const selectedPurposeOption = purposeOption(form.videoPurpose);
   const activeVoiceProfileId = form.voiceProfileId.trim();
   const hasVoiceProfile = activeVoiceProfileId.length > 0;
@@ -2062,6 +2432,22 @@ export function AIVideoAssistant() {
     },
   });
   const promptByShotId = promptContentsQuery.data ?? {};
+  const videoPromptText = useMemo(
+    () => allVideoPromptsText(shots, promptByShotId),
+    [shots, promptByShotId],
+  );
+  const availableVideoPromptText = useMemo(
+    () => availableVideoPromptsText(shots, promptByShotId),
+    [shots, promptByShotId],
+  );
+  const videoPromptReadyCount = shots.filter((shot) =>
+    shot.prompt_status !== 'missing' &&
+    shot.prompt_status !== 'stale' &&
+    promptByShotId[shot.id]?.content?.trim(),
+  ).length;
+  const videoPromptAvailableCount = shots.filter(
+    (shot) => shot.prompt_status !== 'missing',
+  ).length;
   const qualityReport = qualityReportQuery.data ?? null;
   const qualitySections = qualitySectionEntries(qualityReport);
   const latestRetentionDataset = retentionDatasetsQuery.data?.items[0] ?? null;
@@ -2077,6 +2463,20 @@ export function AIVideoAssistant() {
     ? `Dự án đang chạy AI planning (${planningStepLabel(planningActiveStep)}). Hãy chờ bước này hoàn tất rồi thử lại.`
     : 'Dự án đang chạy AI planning. Hãy chờ bước này hoàn tất rồi thử lại.';
   const projectPlanningBusy = autoRunBusy || planningActive;
+  // Chỉ chặn khi thiếu project id (mutation cần id) — mọi rào về độ hoàn thiện nội dung
+  // chỉ còn là cảnh báo chất lượng, người dùng vẫn tạo được nội dung đăng bất cứ lúc nào.
+  const publishingMetadataDisabledReason = !activeProjectId
+    ? 'Chưa chọn dự án. Hãy chọn hoặc tạo dự án trước.'
+    : null;
+  const publishingMetadataWarning = !activeProjectId
+    ? null
+    : !shots.length
+      ? 'Dự án chưa có shot nào. Nội dung đăng sẽ chỉ dựa trên kịch bản hiện có nên có thể còn chung chung.'
+      : videoPromptReadyCount !== shots.length
+        ? `Mới có ${videoPromptReadyCount}/${shots.length} shot đủ prompt video đạt chất lượng. Vẫn tạo được, nhưng nội dung đăng sẽ chính xác hơn khi prompt hoàn tất.`
+        : projectPlanningBusy
+          ? 'Dự án đang chạy AI planning. Nội dung đăng tạo lúc này có thể lệch với kết quả planning sắp xong.'
+          : null;
   const activeProjectRuns = projectsWithLiveRunState.filter((project) =>
     isAutoRunActiveStatus(project.active_run_status),
   );
@@ -2084,6 +2484,9 @@ export function AIVideoAssistant() {
     isAutoRunBusyStatus(project.active_run_status),
   ).length;
   const waitingProjectRunCount = activeProjectRuns.length - busyProjectRunCount;
+  const failedProjectRuns = projectsWithLiveRunState.filter(
+    (project) => project.active_run_status === 'failed',
+  );
   const currentVoiceQueueSummary = voiceQueueSummary(resourceStatusQuery.data?.generation_queue);
 
   const selectedVoiceProfile = useMemo(() => {
@@ -2136,12 +2539,11 @@ export function AIVideoAssistant() {
       setSelectedProjectId(null);
       setProjectMenuId(null);
       setVoiceSelectorOpen(false);
-      setCreationMode('quick');
-      setAutoMode('full_auto');
-      setAutoMaterialTarget('full_materials');
+      setCreationMode('manual');
       setForm((current) => ({
         ...current,
         title: draft.title?.trim() || '',
+        ...aiVideoDraftFormConfig(draft),
         visualStyle: normalizeVisualStyleInput(draft.visualStyle) || current.visualStyle,
         sources: sourcesFromAIVideoDraft(draft),
       }));
@@ -2196,6 +2598,9 @@ export function AIVideoAssistant() {
       queryKey: ['ai-video', 'package-readiness', latestAutoRun.project_id],
     });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'debug', latestAutoRun.project_id] });
+    queryClient.invalidateQueries({
+      queryKey: ['ai-video', 'character-flow', latestAutoRun.project_id],
+    });
   }, [latestAutoRun, queryClient, selectedProjectId]);
 
   useEffect(() => {
@@ -2225,6 +2630,27 @@ export function AIVideoAssistant() {
   }, []);
 
   const invalidateProject = () => queryClient.invalidateQueries({ queryKey: ['ai-video'] });
+
+  const selectSeriesForContext = (series: VideoSeriesResponse) => {
+    setEditingSeriesId(series.id);
+    setEpisodeDraft((current) => ({ ...current, seriesId: series.id }));
+    setSeriesPickerOpen(false);
+    setNotice(
+      seriesPickerContext === 'ai_video_direct'
+        ? 'Đã chọn series video cho tập mới.'
+        : 'Đã chọn series để quản lý sổ tay.',
+    );
+  };
+
+  const openSeriesPicker = (context: SeriesPickerContext) => {
+    setSeriesPickerContext(context);
+    setSeriesPickerOpen(true);
+  };
+
+  const openSeriesCreateDialog = (context: SeriesPickerContext) => {
+    setSeriesCreateContext(context);
+    setSeriesCreateDialogOpen(true);
+  };
 
   const upsertProjectListItem = (
     project: VideoProjectResponse,
@@ -2302,12 +2728,21 @@ export function AIVideoAssistant() {
     mutationFn: async () => {
       const sourceBlocks = form.sources
         .filter((source) => source.content.trim())
-        .map((source) => ({ block_type: source.block_type, content: source.content.trim() }));
-      const topic = sourceBlocks[0]?.content || form.title.trim() || 'Dự án video mới';
+        .map((source) => ({
+          block_type: source.block_type,
+          content: truncateProjectText(source.content, AI_VIDEO_SOURCE_BLOCK_MAX_LENGTH),
+        }));
+      const title = truncateProjectText(form.title, AI_VIDEO_TITLE_MAX_LENGTH);
+      const topic = truncateProjectText(
+        sourceBlocks[0]?.content || title || 'Dự án video mới',
+        AI_VIDEO_TOPIC_MAX_LENGTH,
+      );
       const project = await apiClient.createVideoProject({
-        title: form.title.trim() || null,
+        title: title || null,
         topic,
-        language: 'vi',
+        // English is the conversion/source language for AI Video projects.
+        // target_language remains the user-selected output language.
+        language: 'en',
         target_language: form.targetLanguage,
         video_purpose: form.videoPurpose,
         dialogue_mode: form.dialogueMode,
@@ -2389,6 +2824,53 @@ export function AIVideoAssistant() {
     },
   });
 
+  const createSeriesFromDialog = useMutation({
+    mutationFn: (variables: {
+      draft: SeriesDraftInput;
+      nextAction: SeriesCreateNextAction;
+    }) =>
+      apiClient.createVideoSeries({
+        title: variables.draft.title.trim(),
+        series_mode: variables.draft.series_mode,
+        character_bible: variables.draft.character_bible.trim() || null,
+        world_bible: variables.draft.world_bible.trim() || null,
+        style_bible: variables.draft.style_bible.trim() || null,
+        continuity_rules: variables.draft.continuity_rules.trim() || null,
+        negative_rules: variables.draft.negative_rules.trim() || null,
+        previous_episode_summary: variables.draft.previous_episode_summary.trim() || null,
+      }),
+    onSuccess: (series, variables) => {
+      setEditingSeriesId(series.id);
+      setSeriesDraft({
+        title: series.title,
+        series_mode: series.series_mode ?? 'video_story_only',
+        character_bible: series.character_bible || '',
+        world_bible: series.world_bible || '',
+        style_bible: series.style_bible || '',
+        continuity_rules: series.continuity_rules || '',
+        negative_rules: series.negative_rules || '',
+        previous_episode_summary: series.previous_episode_summary || '',
+      });
+      setEpisodeDraft((current) => ({ ...current, seriesId: series.id }));
+      setSeriesCreateDialogOpen(false);
+      setSeriesPickerOpen(false);
+      if (variables.nextAction === 'create_episode') {
+        if (series.series_mode === 'video_story_only') {
+          openEpisodeDialog(series.id);
+          setNotice('Đã tạo series mới. Hãy nhập ý tưởng tập đầu tiên trong popup tạo tập.');
+        } else {
+          setNotice('Đã tạo series mới. Series truyện ảnh/hybrid cần tạo tập từ Xưởng truyện.');
+        }
+      } else if (variables.nextAction === 'manage_characters') {
+        setSidePanelOpen(true);
+        setNotice('Đã tạo series mới. Bạn có thể bổ sung hồ sơ nhân vật trong khu quản lý series.');
+      } else {
+        setNotice('Đã tạo và chọn series mới.');
+      }
+      invalidateProject();
+    },
+  });
+
   const createEpisode = useMutation({
     mutationFn: async () => {
       if (!episodeDraft.seriesId) throw new Error('Chọn series trước khi tạo tập.');
@@ -2422,6 +2904,44 @@ export function AIVideoAssistant() {
       setNotice('Đã tạo tập mới trong series. Dự án này sẽ dùng cùng sổ tay series khi lập kế hoạch.');
       invalidateProject();
     },
+  });
+
+  const createSeriesResearch = useMutation({
+    mutationFn: async ({
+      seriesId,
+      seriesTitle,
+    }: {
+      seriesId: string;
+      seriesTitle: string;
+    }) => {
+      const normalizedTitle = seriesTitle.trim() || 'Series chưa đặt tên';
+      const researchProject = await apiClient.createResearchProject({
+        title: truncateProjectText(`Nghiên cứu Series: ${normalizedTitle}`, 200),
+        description: `Được tạo từ Series “${normalizedTitle}” trong AI Video.`,
+        brief:
+          `Nghiên cứu và phát triển nội dung tiếp theo dựa trên canon đã duyệt, ` +
+          `hồ sơ nhân vật và continuity của Series “${normalizedTitle}”.`,
+        tags: ['series', 'ai-video'],
+      });
+
+      try {
+        await apiClient.linkResearchSeriesMemory(researchProject.id, {
+          series_id: seriesId,
+          max_chars: 40000,
+        });
+      } catch (error) {
+        throw new Error(
+          `Đã tạo dự án nghiên cứu “${researchProject.title}” nhưng chưa liên kết được Series Memory. ` +
+            `Mở Không gian nghiên cứu để liên kết lại. ${getErrorMessage(error)}`,
+        );
+      }
+
+      return researchProject;
+    },
+    onSuccess: (researchProject) => {
+      window.location.assign(`/research?projectId=${encodeURIComponent(researchProject.id)}`);
+    },
+    onError: (error) => setNotice(getErrorMessage(error)),
   });
 
   const renameProject = useMutation({
@@ -2737,7 +3257,11 @@ export function AIVideoAssistant() {
   const generateSubtitle = useMutation({
     mutationFn: () => apiClient.generateVideoSubtitle(activeProjectId!),
     onSuccess: () => {
-      setNotice('Đã tạo phụ đề .srt theo thời lượng thật của âm thanh.');
+      setNotice(
+        usesVeoNativeVietnameseSpeech
+          ? 'Đã tạo phụ đề .srt từ câu thoại tiếng Việt và thời lượng clip Veo.'
+          : 'Đã tạo phụ đề .srt theo thời lượng thật của âm thanh.',
+      );
       invalidateProject();
     },
   });
@@ -2804,6 +3328,37 @@ export function AIVideoAssistant() {
     },
   });
 
+  const decideCharacterProposal = useMutation({
+    mutationFn: ({
+      proposalId,
+      decision,
+    }: {
+      proposalId: string;
+      decision: CharacterProposalDecision;
+    }) => {
+      if (!activeProjectId) throw new Error('Chưa chọn dự án để duyệt nhân vật.');
+      return apiClient.decideVideoProjectCharacterProposal(activeProjectId, proposalId, {
+        decision,
+      });
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData(
+        ['ai-video', 'character-flow', result.character_flow.project_id],
+        result.character_flow,
+      );
+      setNotice(result.message);
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'series'] });
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'project', result.character_flow.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'auto-run', 'latest', result.character_flow.project_id],
+      });
+    },
+  });
+  const characterDecisionPendingId = decideCharacterProposal.isPending
+    ? decideCharacterProposal.variables?.proposalId ?? null
+    : null;
+
   const cancelAutoRun = useMutation({
     mutationFn: () => {
       if (!activeProjectId || !latestAutoRun) throw new Error('Không tìm thấy lượt tự chạy để hủy.');
@@ -2823,6 +3378,43 @@ export function AIVideoAssistant() {
     onSuccess: (run) => {
       setNotice('Tự chạy đang chạy lại từ bước còn thiếu hoặc lỗi gần nhất.');
       refreshAfterAutoRun(run);
+    },
+  });
+
+  const retryFailedAutoRuns = useMutation({
+    mutationFn: async (projectIds: string[]) => {
+      const runsByProjectId = new Map<string, VideoAutoRunResponse>();
+      for (const query of projectAutoRunQueries) {
+        const run = query.data;
+        if (run && run.status === 'failed') {
+          runsByProjectId.set(run.project_id, run);
+        }
+      }
+      if (latestAutoRun?.status === 'failed') {
+        runsByProjectId.set(latestAutoRun.project_id, latestAutoRun);
+      }
+
+      const results = await Promise.allSettled(
+        projectIds.map(async (projectId) => {
+          const run = runsByProjectId.get(projectId);
+          if (!run) throw new Error(`Không tìm thấy lượt lỗi mới nhất của dự án ${projectId}.`);
+          return apiClient.retryVideoAutoRun(projectId, run.id);
+        }),
+      );
+
+      return {
+        succeeded: results.filter((result) => result.status === 'fulfilled').length,
+        failed: results.filter((result) => result.status === 'rejected').length,
+      };
+    },
+    onSuccess: ({ succeeded, failed }) => {
+      setNotice(
+        failed > 0
+          ? `Đã chạy lại ${succeeded} dự án lỗi; ${failed} dự án chưa chạy lại được.`
+          : `Đã đưa ${succeeded} dự án lỗi vào hàng đợi chạy lại.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'projects'] });
+      queryClient.invalidateQueries({ queryKey: ['ai-video', 'auto-run'] });
     },
   });
 
@@ -2873,10 +3465,29 @@ export function AIVideoAssistant() {
     ]);
   };
 
+  const copyVideoPromptText = async (key: string, value: string, noticeText?: string) => {
+    try {
+      await writeClipboardText(value);
+      setCopiedVideoPromptKey(key);
+      setNotice(noticeText ?? 'Đã sao chép prompt video.');
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+    }
+  };
+
   const copyShotPrompt = async (shot: VideoShotResponse) => {
+    if (shot.prompt_status === 'missing' || shot.prompt_status === 'stale') {
+      throw new Error('Câu lệnh video cần được tạo lại theo ngôn ngữ tiếng Anh trước khi copy sang Veo 3.');
+    }
     const prompt = await apiClient.getVideoShotPrompt(shot.project_id, shot.id);
-    await navigator.clipboard.writeText(prompt.content);
-    setNotice(`Đã sao chép câu lệnh gốc của ${shotLabel(shot)}.`);
+    if (!prompt.content.trim()) {
+      throw new Error('Câu lệnh video đang trống. Hãy tạo lại prompt trước khi copy sang Veo 3.');
+    }
+    await copyVideoPromptText(
+      `shot-${shot.id}`,
+      prompt.content,
+      `Đã sao chép câu lệnh gốc của ${shotLabel(shot)}.`,
+    );
   };
 
   const copyDebug = async () => {
@@ -3141,6 +3752,24 @@ export function AIVideoAssistant() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-semibold">Dự án gần đây</p>
         <div className="flex flex-wrap justify-end gap-2">
+          {failedProjectRuns.length ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 rounded-full border-red-500/35 bg-red-500/10 px-2.5 text-[10px] font-medium uppercase tracking-[0.08em] text-red-700 hover:bg-red-500/20 dark:text-red-200"
+              disabled={retryFailedAutoRuns.isPending}
+              onClick={() => retryFailedAutoRuns.mutate(failedProjectRuns.map((project) => project.id))}
+              title="Chạy lại tất cả dự án đang dừng vì lỗi"
+            >
+              {retryFailedAutoRuns.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              Chạy lại lỗi ({failedProjectRuns.length})
+            </Button>
+          ) : null}
           {activeProjectRuns.length ? (
             <span className="rounded-full border border-sky-500/25 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-sky-700 dark:text-sky-200">
               {busyProjectRunCount ? `${busyProjectRunCount} chạy` : null}
@@ -3228,39 +3857,71 @@ export function AIVideoAssistant() {
         </div>
       ) : null}
       <div className="mt-3 space-y-2">
-        {groupedProjects.seriesGroups.map((group) => (
-          <div
-            key={group.series?.id ?? group.projects[0]?.series_id}
-            className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-2"
-          >
-            <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
-              <span className="min-w-0 truncate">
-                {group.series?.title ?? group.projects[0]?.series_title ?? 'Series'}
-              </span>
-              <span>{group.projects.length} tập</span>
-            </div>
-            {group.projects
-              .slice()
-              .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0))
-              .map(renderRecentProject)}
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                const seriesId = group.series?.id ?? group.projects[0]?.series_id ?? '';
-                openEpisodeDialog(seriesId);
-              }}
+        {groupedProjects.seriesGroups.map((group) => {
+          const seriesId = group.series?.id ?? group.projects[0]?.series_id ?? '';
+          const seriesTitle = group.series?.title ?? group.projects[0]?.series_title ?? 'Series';
+          const researchingThisSeries =
+            createSeriesResearch.isPending &&
+            createSeriesResearch.variables?.seriesId === seriesId;
+
+          return (
+            <div
+              key={seriesId}
+              className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-2"
             >
-              <Plus className="h-4 w-4" />
-              Tạo tập mới
-            </Button>
-          </div>
-        ))}
+              <div className="flex items-center justify-between gap-2 px-1 text-xs font-medium uppercase text-muted-foreground">
+                <span className="min-w-0 truncate">{seriesTitle}</span>
+                <span>{group.projects.length} tập</span>
+              </div>
+              {group.projects
+                .slice()
+                .sort((a, b) => (a.episode_number ?? 0) - (b.episode_number ?? 0))
+                .map(renderRecentProject)}
+              <div
+                className={cn(
+                  'grid gap-2',
+                  RESEARCH_FEATURE_ENABLED ? 'grid-cols-2' : 'grid-cols-1',
+                )}
+              >
+                {RESEARCH_FEATURE_ENABLED ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="min-w-0"
+                    aria-label={`Nghiên cứu Series ${seriesTitle}`}
+                    disabled={!seriesId || createSeriesResearch.isPending}
+                    onClick={() => createSeriesResearch.mutate({ seriesId, seriesTitle })}
+                  >
+                    {researchingThisSeries ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <BookOpen className="h-4 w-4" />
+                    )}
+                    <span className="truncate">
+                      {researchingThisSeries ? 'Đang tạo' : 'Nghiên cứu'}
+                    </span>
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="min-w-0"
+                  disabled={!seriesId}
+                  onClick={() => openEpisodeDialog(seriesId)}
+                >
+                  <Plus className="h-4 w-4" />
+                  <span className="truncate">Tạo tập mới</span>
+                </Button>
+              </div>
+            </div>
+          );
+        })}
         {groupedProjects.standalone.length ? (
           <div className="space-y-2">
             <p className="px-1 text-xs font-medium uppercase text-muted-foreground">Dự án lẻ</p>
-            {groupedProjects.standalone.slice(0, 12).map(renderRecentProject)}
+            <div className="max-h-[34rem] space-y-2 overflow-y-scroll pr-1">
+              {groupedProjects.standalone.map(renderRecentProject)}
+            </div>
           </div>
         ) : null}
         {!projectsQuery.data?.length && (
@@ -3481,9 +4142,13 @@ export function AIVideoAssistant() {
               <span className="text-sm font-medium">Đầu ra tự chạy</span>
               <span className="truncate text-[11px] text-muted-foreground">
                 {autoMaterialTarget === 'video_clips'
-                  ? 'Veo + giọng/SRT + MP4'
+                  ? form.targetLanguage === 'vi'
+                    ? 'Veo + audio Việt/SRT + MP4'
+                    : 'Veo + giọng/SRT + MP4'
                   : autoMaterialTarget === 'full_materials'
-                    ? 'Giọng + phụ đề khớp thời gian'
+                    ? form.targetLanguage === 'vi'
+                      ? 'Audio Veo + phụ đề theo clip'
+                      : 'Giọng + phụ đề khớp thời gian'
                     : 'Chỉ câu lệnh, tải ảnh ngay'}
               </span>
             </div>
@@ -3492,13 +4157,19 @@ export function AIVideoAssistant() {
                 {
                   target: 'video_clips' as const,
                   label: 'Tạo MP4 bằng Veo',
-                  helper: 'Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4',
+                  helper:
+                    form.targetLanguage === 'vi'
+                      ? 'Câu lệnh có thoại Việt, gửi Veo, dùng audio clip, tạo SRT và dựng MP4'
+                      : 'Câu lệnh, gửi Veo, tải clip, tạo giọng/SRT và dựng MP4',
                   icon: Clapperboard,
                 },
                 {
                   target: 'full_materials' as const,
-                  label: 'Tạo giọng + phụ đề',
-                  helper: 'Câu lệnh, giọng và SRT theo mốc âm thanh',
+                  label: form.targetLanguage === 'vi' ? 'Audio Veo + phụ đề' : 'Tạo giọng + phụ đề',
+                  helper:
+                    form.targetLanguage === 'vi'
+                      ? 'Câu lệnh có thoại Việt và SRT theo thời lượng clip Veo'
+                      : 'Câu lệnh, giọng và SRT theo mốc âm thanh',
                   icon: Mic2,
                 },
                 {
@@ -3728,23 +4399,35 @@ export function AIVideoAssistant() {
                       placeholder="Ví dụ: Cú trở lại ở World Cup"
                     />
                   </FieldBlock>
-                  <FieldBlock label="Hồ sơ giọng" help={`Đang chọn: ${selectedVoiceName}`}>
-                    <select
-                      value={form.voiceProfileId}
-                      onChange={(event) => handleVoiceProfileChange(event.target.value)}
-                      disabled={saveProjectVoice.isPending}
-                      className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
+                  {form.targetLanguage === 'vi' ? (
+                    <FieldBlock
+                      label="Giọng tiếng Việt"
+                      help="Veo 3 tạo trực tiếp lời thoại và âm thanh trong từng clip."
                     >
-                      <option value="">Chọn sau</option>
-                      {profiles?.map((profile) => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.name}
-                        </option>
-                      ))}
-                    </select>
-                  </FieldBlock>
+                      <div className="flex min-h-10 items-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm leading-relaxed text-emerald-800 dark:text-emerald-200">
+                        Không cần chọn hồ sơ TTS. Prompt sẽ kèm câu thoại, chất giọng, cảm xúc,
+                        bối cảnh và yêu cầu khớp môi của từng nhân vật.
+                      </div>
+                    </FieldBlock>
+                  ) : (
+                    <FieldBlock label="Hồ sơ giọng" help={`Đang chọn: ${selectedVoiceName}`}>
+                      <select
+                        value={form.voiceProfileId}
+                        onChange={(event) => handleVoiceProfileChange(event.target.value)}
+                        disabled={saveProjectVoice.isPending}
+                        className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
+                      >
+                        <option value="">Chọn sau</option>
+                        {profiles?.map((profile) => (
+                          <option key={profile.id} value={profile.id}>
+                            {profile.name}
+                          </option>
+                        ))}
+                      </select>
+                    </FieldBlock>
+                  )}
                 </div>
-                {voiceCompatibilityWarning ? (
+                {form.targetLanguage !== 'vi' && voiceCompatibilityWarning ? (
                   <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:text-amber-200">
                     {voiceCompatibilityWarning}
                   </div>
@@ -4380,14 +5063,19 @@ export function AIVideoAssistant() {
                       {
                         target: 'video_clips' as const,
                         label: 'Tạo MP4 bằng Veo',
-                        helper: 'Tạo câu lệnh, nội dung đăng, Veo, giọng/SRT và dựng MP4.',
+                        helper: usesVeoNativeVietnameseSpeech
+                          ? 'Tạo câu lệnh có thoại Việt, nội dung đăng, clip Veo có audio, SRT và dựng MP4.'
+                          : 'Tạo câu lệnh, nội dung đăng, Veo, giọng/SRT và dựng MP4.',
                         icon: Clapperboard,
                       },
                       {
                         target: 'full_materials' as const,
-                        label: 'Tạo giọng + phụ đề',
-                        helper:
-                          'Tạo câu lệnh, nội dung đăng, giọng và .srt chia mốc theo âm thanh.',
+                        label: usesVeoNativeVietnameseSpeech
+                          ? 'Audio Veo + phụ đề'
+                          : 'Tạo giọng + phụ đề',
+                        helper: usesVeoNativeVietnameseSpeech
+                          ? 'Tạo câu lệnh có thoại Việt, nội dung đăng và .srt chia mốc theo clip Veo.'
+                          : 'Tạo câu lệnh, nội dung đăng, giọng và .srt chia mốc theo âm thanh.',
                         icon: Mic2,
                       },
                       {
@@ -4456,38 +5144,55 @@ export function AIVideoAssistant() {
                     run={latestAutoRun}
                     isFetching={autoRunQuery.isFetching}
                     cancelPending={cancelAutoRun.isPending}
+                    usesVeoNativeVietnameseSpeech={usesVeoNativeVietnameseSpeech}
                     onCancel={() => cancelAutoRun.mutate()}
                   />
 
                   {latestAutoRun.status === 'needs_review' ? (
-                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
-                      <p className="font-medium">
-                        Cần duyệt {autoRunReviewLabel(latestAutoRun.review_stage)}.
-                      </p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          disabled={continueAutoRun.isPending}
-                          onClick={() => continueAutoRun.mutate(true)}
-                        >
-                          {continueAutoRun.isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Check className="h-4 w-4" />
-                          )}
-                          Tiếp tục sau khi duyệt
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={continueAutoRun.isPending}
-                          onClick={() => continueAutoRun.mutate(false)}
-                        >
-                          <X className="h-4 w-4" />
-                          Không duyệt
-                        </Button>
+                    latestAutoRun.review_stage === 'character_proposals' ? (
+                      <CharacterProposalReviewPanel
+                        flow={characterFlowQuery.data}
+                        loading={characterFlowQuery.isLoading || characterFlowQuery.isFetching}
+                        error={
+                          characterFlowQuery.error ? getErrorMessage(characterFlowQuery.error) : null
+                        }
+                        decisionPendingId={characterDecisionPendingId}
+                        continuePending={continueAutoRun.isPending}
+                        onDecision={(proposalId, decision) =>
+                          decideCharacterProposal.mutate({ proposalId, decision })
+                        }
+                        onContinue={() => continueAutoRun.mutate(true)}
+                      />
+                    ) : (
+                      <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
+                        <p className="font-medium">
+                          Cần duyệt {autoRunReviewLabel(latestAutoRun.review_stage)}.
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={continueAutoRun.isPending}
+                            onClick={() => continueAutoRun.mutate(true)}
+                          >
+                            {continueAutoRun.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )}
+                            Tiếp tục sau khi duyệt
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={continueAutoRun.isPending}
+                            onClick={() => continueAutoRun.mutate(false)}
+                          >
+                            <X className="h-4 w-4" />
+                            Không duyệt
+                          </Button>
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : null}
 
                   {['needs_input', 'failed'].includes(latestAutoRun.status) ? (
@@ -4660,6 +5365,7 @@ export function AIVideoAssistant() {
                   const timelineLabel = segmentTimelineLabel(selectedProject, shot.shot_order);
                   const promptDuration = projectPromptDuration(selectedProject);
                   const microScenes = shotMicroScenes(shot);
+                  const speechCues = shot.speech_cues ?? [];
                   const microSceneCount =
                     selectedProject?.micro_scenes_per_prompt || microScenes.length || 0;
                   const cameraDisplayItems = [
@@ -4761,6 +5467,31 @@ export function AIVideoAssistant() {
                           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
                             {shot.english_narration || 'Phân đoạn không có lời kể riêng.'}
                           </p>
+                          {usesVeoNativeVietnameseSpeech && speechCues.length > 0 ? (
+                            <div className="mt-3 space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+                                Lời thoại và giọng gửi Veo 3
+                              </p>
+                              {speechCues.map((cue, cueIndex) => (
+                                <div
+                                  key={`${shot.id}-speech-${cueIndex}`}
+                                  className="rounded-md border border-border/60 bg-background/75 p-2.5 text-xs leading-relaxed"
+                                >
+                                  <p className="font-semibold text-foreground">
+                                    {cue.speaker_name || 'Người kể'}
+                                    {cue.lip_sync_required ? ' · khớp môi trong hình' : ' · giọng ngoài hình'}
+                                  </p>
+                                  <p className="mt-1 text-foreground/90">“{cue.text}”</p>
+                                  <div className="mt-1.5 space-y-0.5 text-muted-foreground">
+                                    {cue.voice_description ? <p>Chất giọng: {cue.voice_description}</p> : null}
+                                    {cue.delivery ? <p>Cách nói: {cue.delivery}</p> : null}
+                                    {cue.emotion ? <p>Cảm xúc: {cue.emotion}</p> : null}
+                                    {cue.context ? <p>Bối cảnh: {cue.context}</p> : null}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                           {cameraDisplayItems.length > 0 ? (
                             <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
                               {cameraDisplayItems.map((item) => (
@@ -4844,18 +5575,46 @@ export function AIVideoAssistant() {
                 title="Câu lệnh video"
                 meta="Câu lệnh gốc để sao chép, kèm bản giải thích tiếng Việt để đọc hiểu"
               />
-              <Button
-                variant="outline"
-                disabled={!shots.length || generatePrompts.isPending || projectPlanningBusy}
-                onClick={() => generatePrompts.mutate()}
-              >
-                {generatePrompts.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                Tạo câu lệnh video
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  disabled={!videoPromptAvailableCount}
+                  onClick={() => setVideoPromptLibraryOpen(true)}
+                >
+                  <Maximize2 className="h-4 w-4" />
+                  Mở popup câu lệnh
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!videoPromptText.trim()}
+                  onClick={() =>
+                    void copyVideoPromptText(
+                      'all-video-prompts',
+                      videoPromptText,
+                      `Đã sao chép toàn bộ ${videoPromptReadyCount} prompt video.`,
+                    )
+                  }
+                >
+                  {copiedVideoPromptKey === 'all-video-prompts' ? (
+                    <Check className="h-4 w-4" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                  Sao chép toàn bộ câu lệnh
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!shots.length || generatePrompts.isPending || projectPlanningBusy}
+                  onClick={() => generatePrompts.mutate()}
+                >
+                  {generatePrompts.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  Tạo câu lệnh video
+                </Button>
+              </div>
             </div>
             <div className="mt-4 space-y-3">
               {shots.length === 0 ? (
@@ -4895,16 +5654,20 @@ export function AIVideoAssistant() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing'}
+                            disabled={shot.prompt_status === 'missing' || shot.prompt_status === 'stale'}
                             onClick={() => copyShotPrompt(shot)}
                           >
-                            <Copy className="h-4 w-4" />
+                            {copiedVideoPromptKey === `shot-${shot.id}` ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
                             Sao chép câu lệnh gốc
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing'}
+                            disabled={shot.prompt_status === 'missing' || shot.prompt_status === 'stale'}
                             onClick={() =>
                               saveDownload(
                                 apiClient.downloadVideoShotPrompt(shot.project_id, shot.id),
@@ -4964,7 +5727,10 @@ export function AIVideoAssistant() {
             metadata={publishingMetadataQuery.data ?? null}
             isLoading={publishingMetadataQuery.isLoading}
             isGenerating={generatePublishingMetadata.isPending}
-            disabled={!activeProjectId || projectPlanningBusy}
+            disabled={!activeProjectId}
+            disabledReason={publishingMetadataDisabledReason}
+            warning={publishingMetadataWarning}
+            projectTitle={selectedProject?.title ?? null}
             onGenerateAll={() => generatePublishingMetadata.mutate({ platform: 'all', force: true })}
             onGeneratePlatform={(platform) =>
               generatePublishingMetadata.mutate({ platform, force: true })
@@ -4975,9 +5741,26 @@ export function AIVideoAssistant() {
             <StepHeader
               icon={Mic2}
               title="Giọng và phụ đề"
-              meta={`Giọng hiện tại: ${selectedVoiceName}`}
+              meta={
+                usesVeoNativeVietnameseSpeech
+                  ? 'Audio lời thoại: trực tiếp từ clip Veo 3'
+                  : `Giọng hiện tại: ${selectedVoiceName}`
+              }
             />
             <div className="mt-4 space-y-3">
+              {usesVeoNativeVietnameseSpeech ? (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-relaxed text-emerald-900 dark:text-emerald-100">
+                  <p className="font-semibold">Tiếng Việt dùng audio trực tiếp từ Veo 3</p>
+                  <p className="mt-1 text-xs leading-relaxed opacity-90">
+                    Hệ thống không tạo TTS rời. Mỗi prompt Veo giữ nguyên phần hình ảnh hiện tại và
+                    nối thêm đúng câu thoại tiếng Việt, chất giọng canon, tính cách, cảm xúc, bối
+                    cảnh lúc nói và yêu cầu khớp môi khi nhân vật xuất hiện trong hình.
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed opacity-80">
+                    Các ngôn ngữ khác vẫn dùng hồ sơ giọng và audio hiện tại của dự án.
+                  </p>
+                </div>
+              ) : (
               <div
                 className={cn(
                   'rounded-lg border p-4',
@@ -5056,6 +5839,7 @@ export function AIVideoAssistant() {
                   </div>
                 ) : null}
               </div>
+              )}
               {usesShotNarration ? (
                 narratedShots.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border p-8 text-sm text-muted-foreground">
@@ -5070,13 +5854,19 @@ export function AIVideoAssistant() {
                       <div className="min-w-0">
                         <p className="text-sm font-semibold">{shotLabel(shot)}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          giọng: {voiceStatusLabel(shot.voice_status)} · phụ đề:{' '}
-                          {subtitleStatusLabel(shot.subtitle_status)}
+                          {usesVeoNativeVietnameseSpeech
+                            ? `audio: chờ/đọc từ clip Veo 3 · phụ đề: ${subtitleStatusLabel(shot.subtitle_status)}`
+                            : `giọng: ${voiceStatusLabel(shot.voice_status)} · phụ đề: ${subtitleStatusLabel(shot.subtitle_status)}`}
                         </p>
                         <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-foreground/80">
                           {shot.english_narration}
                         </p>
                       </div>
+                      {usesVeoNativeVietnameseSpeech ? (
+                        <div className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-800 dark:text-emerald-200">
+                          Không tạo TTS riêng
+                        </div>
+                      ) : (
                       <div className="flex shrink-0 flex-wrap gap-2">
                         <Button
                           size="sm"
@@ -5133,6 +5923,7 @@ export function AIVideoAssistant() {
                           Tải âm thanh
                         </Button>
                       </div>
+                      )}
                     </div>
                   ))
                 )
@@ -5361,7 +6152,12 @@ export function AIVideoAssistant() {
                 onNotice={setNotice}
               />
 
-              <AIVideoRenderPanel projectId={activeProjectId} shots={shots} onNotice={setNotice} />
+              <AIVideoRenderPanel
+                projectId={activeProjectId}
+                shots={shots}
+                targetLanguage={activeVideoLanguage}
+                onNotice={setNotice}
+              />
 
               <section className="rounded-lg border border-border/80 bg-card/60 p-5">
                 <StepHeader icon={Bug} title="Gỡ lỗi cục bộ" meta="Dùng khi cần gửi lỗi để sửa" />
@@ -5406,23 +6202,58 @@ export function AIVideoAssistant() {
                   meta="Tuỳ chọn cho video dài tập"
                 />
                 <div className="mt-4 space-y-3">
-                  <select
-                    value={editingSeriesId ?? ''}
-                    onChange={(event) => {
-                      const value = event.target.value || null;
-                      setEditingSeriesId(value);
-                      setEpisodeDraft((current) => ({ ...current, seriesId: value || '' }));
-                      if (!value) setSeriesDraft(emptySeriesDraft);
-                    }}
-                    className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
-                  >
-                    <option value="">Tạo series mới</option>
-                    {seriesQuery.data?.map((series) => (
-                      <option key={series.id} value={series.id}>
-                        {series.title} · {seriesModeLabel(series.series_mode)}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="rounded-lg border border-border/70 bg-background/70 p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">
+                          {editingSeries ? editingSeries.title : 'Chưa chọn series'}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          {editingSeries
+                            ? `${seriesModeLabel(editingSeries.series_mode)} · ${
+                                editingSeries.episode_count ?? 0
+                              } tập · ${
+                                editingSeries.character_profiles?.length ?? 0
+                              } hồ sơ nhân vật`
+                            : 'Mở popup để xem đủ Bible, số tập, nhân vật, provider binding và chọn đúng series.'}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openSeriesPicker('view_all')}
+                        >
+                          <BookOpen className="h-4 w-4" />
+                          Chọn series
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openSeriesCreateDialog('view_all')}
+                        >
+                          <Plus className="h-4 w-4" />
+                          Tạo series
+                        </Button>
+                      </div>
+                    </div>
+                    {editingSeries ? (
+                      <div className="mt-3 grid gap-1.5 rounded-md border border-border/60 bg-muted/25 p-2 text-xs leading-5 text-muted-foreground">
+                        <p>
+                          <span className="font-medium text-foreground">Nhân vật: </span>
+                          {editingSeries.character_bible?.trim() || 'Chưa có nội dung'}
+                        </p>
+                        <p>
+                          <span className="font-medium text-foreground">World/style: </span>
+                          {[editingSeries.world_bible, editingSeries.style_bible]
+                            .filter((item) => item?.trim())
+                            .join(' · ') || 'Chưa có nội dung'}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
                   <input
                     value={seriesDraft.title}
                     onChange={(event) =>
@@ -5493,6 +6324,7 @@ export function AIVideoAssistant() {
                       onClick={() => {
                         setEditingSeriesId(null);
                         setSeriesDraft(emptySeriesDraft);
+                        setEpisodeDraft((current) => ({ ...current, seriesId: '' }));
                       }}
                     >
                       <Plus className="h-4 w-4" />
@@ -5528,7 +6360,13 @@ export function AIVideoAssistant() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => openEpisodeDialog(editingSeriesId)}
+                        onClick={() => {
+                          if (!editingSeriesId) {
+                            openSeriesPicker('ai_video_direct');
+                            return;
+                          }
+                          openEpisodeDialog(editingSeriesId);
+                        }}
                       >
                         <Plus className="h-4 w-4" />
                         Tạo tập mới
@@ -5540,6 +6378,56 @@ export function AIVideoAssistant() {
             </>
           ) : null}
         </aside>
+        <VideoPromptLibraryDialog
+          open={videoPromptLibraryOpen}
+          shots={shots}
+          promptByShotId={promptByShotId}
+          allPromptText={availableVideoPromptText}
+          readyCount={videoPromptReadyCount}
+          copiedPromptKey={copiedVideoPromptKey}
+          onOpenChange={setVideoPromptLibraryOpen}
+          onCopy={(key, value, noticeText) => void copyVideoPromptText(key, value, noticeText)}
+        />
+        <SeriesPickerDialog
+          open={seriesPickerOpen}
+          onOpenChange={setSeriesPickerOpen}
+          context={seriesPickerContext}
+          series={seriesQuery.data ?? []}
+          selectedSeriesId={
+            seriesPickerContext === 'ai_video_direct' ? episodeDraft.seriesId : editingSeriesId
+          }
+          loading={seriesQuery.isLoading || seriesQuery.isFetching}
+          error={seriesQuery.error ? getErrorMessage(seriesQuery.error) : null}
+          disabled={saveSeries.isPending || createSeriesFromDialog.isPending || createEpisode.isPending}
+          onSelect={selectSeriesForContext}
+          onCreateNew={() => {
+            setSeriesPickerOpen(false);
+            openSeriesCreateDialog(seriesPickerContext);
+          }}
+        />
+        <SeriesCreateDialog
+          open={seriesCreateDialogOpen}
+          onOpenChange={setSeriesCreateDialogOpen}
+          context={seriesCreateContext}
+          defaultMode={defaultSeriesModeForContext(seriesCreateContext)}
+          saving={createSeriesFromDialog.isPending}
+          error={
+            createSeriesFromDialog.error ? getErrorMessage(createSeriesFromDialog.error) : null
+          }
+          nextActions={
+            seriesCreateContext === 'ai_video_direct'
+              ? ['select', 'create_episode']
+              : ['select', 'manage_characters', 'create_episode']
+          }
+          defaultNextAction={seriesCreateContext === 'ai_video_direct' ? 'create_episode' : 'select'}
+          submitLabel="Tạo series"
+          onSubmit={(draft, nextAction) =>
+            createSeriesFromDialog.mutate({
+              draft,
+              nextAction,
+            })
+          }
+        />
         <Dialog
           open={episodeDialogOpen}
           onOpenChange={(nextOpen) => {
@@ -5556,22 +6444,28 @@ export function AIVideoAssistant() {
             </DialogHeader>
             <div className="grid gap-4">
               <FieldBlock label="Series">
-                <select
-                  value={episodeDraft.seriesId}
-                  onChange={(event) => {
-                    const seriesId = event.target.value;
-                    setEpisodeDraft((current) => ({ ...current, seriesId }));
-                    setEditingSeriesId(seriesId || null);
-                  }}
-                  className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
-                >
-                  <option value="">Chọn series</option>
-                  {videoOnlySeries.map((series) => (
-                    <option key={series.id} value={series.id}>
-                      {series.title} · {seriesModeLabel(series.series_mode)}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-10 justify-start sm:flex-1"
+                    onClick={() => openSeriesPicker('ai_video_direct')}
+                    disabled={createEpisode.isPending}
+                  >
+                    <BookOpen className="h-4 w-4" />
+                    {episodeDialogSeries ? episodeDialogSeries.title : 'Chọn series video'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-10"
+                    onClick={() => openSeriesCreateDialog('ai_video_direct')}
+                    disabled={createEpisode.isPending}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Tạo series video
+                  </Button>
+                </div>
               </FieldBlock>
               {episodeDialogSeries ? (
                 <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
@@ -5645,5 +6539,135 @@ export function AIVideoAssistant() {
         </Dialog>
       </div>
     </div>
+  );
+}
+
+function VideoPromptLibraryDialog({
+  open,
+  shots,
+  promptByShotId,
+  allPromptText,
+  readyCount,
+  copiedPromptKey,
+  onOpenChange,
+  onCopy,
+}: {
+  open: boolean;
+  shots: VideoShotResponse[];
+  promptByShotId: Record<string, VideoPromptContentResponse | undefined>;
+  allPromptText: string;
+  readyCount: number;
+  copiedPromptKey: string | null;
+  onOpenChange: (open: boolean) => void;
+  onCopy: (key: string, value: string, noticeText?: string) => void;
+}) {
+  const promptShots = shots.filter((shot) => shot.prompt_status !== 'missing');
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90vh] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden p-0 sm:max-w-6xl">
+        <div className="border-b border-border/70 p-4 pr-12">
+          <DialogHeader>
+            <DialogTitle>Toàn bộ prompt video</DialogTitle>
+            <DialogDescription>
+              {readyCount}/{promptShots.length} prompt đạt chất lượng. Cuộn để đọc đầy đủ trước khi
+              copy sang tool render video.
+            </DialogDescription>
+          </DialogHeader>
+          {promptShots.some(
+            (shot) =>
+              shot.prompt_status === 'stale' && Boolean(promptByShotId[shot.id]?.content?.trim()),
+          ) ? (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-300">
+              Prompt đang cần tạo lại vẫn có thể copy để tham khảo. Hãy tạo lại trước khi render để
+              dùng bản đã được xác nhận chất lượng.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!allPromptText.trim()}
+              onClick={() =>
+                onCopy(
+                  'all-video-prompts-modal',
+                  allPromptText,
+                  `Đã sao chép toàn bộ ${promptShots.filter((shot) => promptByShotId[shot.id]?.content?.trim()).length} prompt video.`,
+                )
+              }
+            >
+              {copiedPromptKey === 'all-video-prompts-modal' ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <Copy className="h-4 w-4" />
+              )}
+              Copy tất cả
+            </Button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+          {promptShots.length ? (
+            <div className="grid gap-4">
+              {promptShots.map((shot) => {
+                const prompt = promptByShotId[shot.id];
+                const block = videoPromptBlock(shot, prompt);
+                const copyKey = `modal-video-shot-${shot.id}`;
+                const copyValue = prompt?.content?.trim() ?? '';
+                const canCopy = Boolean(copyValue);
+                const copyNotice =
+                  shot.prompt_status === 'stale'
+                    ? `Đã sao chép prompt cũ của ${shotLabel(shot)}. Hãy tạo lại trước khi render.`
+                    : `Đã sao chép prompt video của ${shotLabel(shot)}.`;
+
+                return (
+                  <article
+                    key={`video-prompt-modal-${shot.id}`}
+                    className="rounded-lg border border-border/70 bg-card/70 p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">
+                          {shotLabel(shot)}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Trạng thái câu lệnh: {promptStatusLabel(shot.prompt_status)}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!canCopy}
+                        onClick={() =>
+                          onCopy(
+                            copyKey,
+                            copyValue,
+                            copyNotice,
+                          )
+                        }
+                      >
+                        {copiedPromptKey === copyKey ? (
+                          <Check className="h-4 w-4" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                        Copy prompt
+                      </Button>
+                    </div>
+                    <pre className="mt-3 max-h-[52vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border/60 bg-muted/20 p-3 text-sm leading-6 text-foreground">
+                      {block}
+                    </pre>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+              Chưa có prompt video để hiển thị. Hãy bấm “Tạo câu lệnh video” trước.
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
