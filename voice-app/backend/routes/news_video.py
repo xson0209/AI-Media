@@ -7,9 +7,9 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from .. import models
-from . import video_errors
+from ..services import video_errors
 from ..database import VideoProject as DBVideoProject, VideoShot as DBVideoShot, NewsVideoWorkflow as DBNewsWorkflow, get_db
-from ..services import video_phase2, video_projects, video_rendering, video_speech
+from ..services import video_phase2, video_projects, video_rendering, video_speech, video_voice, video_publishing_metadata, video_auto_runs
 
 router = APIRouter(prefix="/news-video", tags=["news-video"], route_class=video_errors.AIVideoRoute)
 
@@ -194,3 +194,44 @@ async def create_news_render_job(project_id: str, data: models.VideoRenderJobCre
         return await video_rendering.create_render_job(project_id, data or models.VideoRenderJobCreateRequest(), db)
     except video_rendering.VideoRenderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.post("/projects/{project_id}/shots/{shot_id}/voice", response_model=models.VideoShotVoiceStatusResponse)
+async def create_news_shot_voice(project_id: str, shot_id: str, data: models.VideoSceneNarrationRequest, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    try:
+        result = await video_voice.create_shot_narration(project_id, shot_id, data, db)
+    except video_voice.VideoVoiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
+    return result
+
+@router.get("/projects/{project_id}/shots/{shot_id}/voice/status", response_model=models.VideoShotVoiceStatusResponse)
+def news_shot_voice_status(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_voice.sync_shot_voice_status(project_id, shot_id, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
+    return result
+
+@router.get("/projects/{project_id}/publishing-metadata", response_model=models.VideoPublishingMetadataResponse)
+def news_publishing_metadata(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_publishing_metadata.get_publishing_metadata(project_id, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Chưa có dữ liệu xuất bản.")
+    return result
+
+@router.post("/projects/{project_id}/auto-runs", response_model=models.VideoAutoRunResponse)
+async def start_news_auto_run(project_id: str, data: models.VideoAutoRunStartRequest | None = None, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    request = data or models.VideoAutoRunStartRequest(material_target=video_auto_runs.MATERIAL_TARGET_PROMPTS_ONLY)
+    try:
+        return await video_auto_runs.start_auto_run(project_id, request, db)
+    except video_auto_runs.VideoAutoRunError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@router.get("/projects/{project_id}/auto-runs/latest", response_model=models.VideoAutoRunResponse | None)
+def latest_news_auto_run(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    return video_auto_runs.get_latest_auto_run(project_id, db)

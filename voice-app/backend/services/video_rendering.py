@@ -1257,7 +1257,6 @@ def get_render_readiness(
                             ),
                         )
                     )
-    native_speech = video_speech.uses_veo_native_speech(project)
     clip_audio_mode = clip_audio_mode_for_settings(settings)
     clip_only = clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY
     has_sound_metadata = any(bool(getattr(shot, "sound_design_json", None)) for shot in shots)
@@ -1300,7 +1299,11 @@ def get_render_readiness(
                     )
                 )
         elif shot_requires_narration(shot):
-            if native_speech:
+            shot_mode = video_speech.speech_mode_for(project, shot)
+            shot_native_speech = video_speech.uses_veo_native_speech(project, shot)
+            if shot_mode in {"none", "voicebox_khong_context"}:
+                pass
+            elif shot_native_speech:
                 if clip is not None and clip.status == "ready" and not clip.has_audio:
                     missing_voice.append(shot.id)
                     warnings.append(
@@ -1348,7 +1351,7 @@ def get_render_readiness(
     if missing_voice:
         reasons.append(
             "Clip Veo của một số segment tiếng Việt không có audio lời thoại."
-            if native_speech
+            if any(video_speech.uses_veo_native_speech(project, item) for item in shots)
             else "Thiếu giọng đọc hoàn tất cho một số shot có narration."
         )
     if missing_timer:
@@ -2416,7 +2419,7 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     else:
         audio_segments = _build_audio_segments(
             tools.ffmpeg or "ffmpeg",
-            project_target_language,
+            project,
             timeline,
             shots_by_id,
             clips,
@@ -2907,16 +2910,16 @@ def _build_audio_segments(
     ffmpeg: str,
     # Nhận thẳng target_language (str) thay vì ORM instance: hàm này chạy sau nhiều lần
     # commit nên đọc attribute của instance đã expire sẽ raise ObjectDeletedError.
-    target_language: str | None,
+    target_language: str | DBVideoProject | None,
     timeline: list[models.VideoRenderTimelineShot],
     shots_by_id: dict[str, DBVideoShot],
     clips: dict[str, DBVideoShotClip],
     output_dir: Path,
 ) -> list[Path]:
     segments: list[Path] = []
-    native_speech = video_speech.uses_veo_native_speech(target_language)
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
+        native_speech = video_speech.uses_veo_native_speech(target_language, shot if not isinstance(target_language, str) else None)
         out_path = output_dir / f"audio-{index:03d}.wav"
         if native_speech and item.has_narration:
             clip = clips.get(shot.id)
@@ -3142,9 +3145,9 @@ def _build_clip_audio_bed_segments(
     """Build the clip audio timeline; returns segment paths and per-segment decisions."""
     segments: list[Path] = []
     decisions: list[str] = []
-    native_speech = video_speech.uses_veo_native_speech(project)
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
+        native_speech = video_speech.uses_veo_native_speech(project, shot)
         clip = clips.get(shot.id)
         # Always resolve from the original clip, never from the watermark derivative.
         clip_path = video_storage.resolve_artifact_storage_path(clip.file_path) if clip else None

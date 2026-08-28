@@ -3812,7 +3812,7 @@ Yêu cầu bắt buộc:
 - Mỗi prompt phải mô tả animation cụ thể theo timeline: entry motion, hold beat, exit/transition motion, speed/rhythm, camera/object movement và điểm nhấn hình ảnh bám narration.
 - Không yêu cầu công cụ tạo video render phụ đề/chữ trực tiếp. Nếu workflow có voice + SRT/subtitle, prompt render phải ghi rõ không render subtitles, captions, karaoke lyrics, text overlays, letters, words hoặc UI text trong video; voice và phụ đề được tạo ở bước sau.
 - Prompt chính và các field riêng phải nói rõ: nhân vật trông như thế nào, trang phục và sandals/footwear cụ thể, subject motion căn theo duration_seconds thật của shot, bối cảnh + lighting, cảm xúc/mood chi tiết.
-- prompt là prompt gốc để copy sang công cụ tạo video; không trộn bản dịch hoặc giải thích tiếng Việt vào field prompt.
+- `prompt` chỉ mô tả hình ảnh, hành động, máy quay, ánh sáng và continuity; CẤM viết câu thoại/narration vào field này. Lời nói chính xác chỉ nằm trong `speech_cues` để shared provider builder ghép theo speech_mode.
 - prompt_explanation_vi bắt buộc viết bằng tiếng Việt tự nhiên để người dùng hiểu prompt đang yêu cầu gì: timeline, hình ảnh, hành động, camera, ánh sáng, mood, continuity và ngôn ngữ người xem nếu có.
 - prompt_explanation_vi cũng phải giải thích retention purpose, chuyển cảnh và cue âm thanh/SFX của segment.
 - Nếu prompt dùng tiếng Anh kỹ thuật cho camera/visual, vẫn phải chỉ dẫn rõ viewer-facing narration, speech, subtitle hoặc on-screen text dùng {video_language.video_language_label(project.target_language)}.

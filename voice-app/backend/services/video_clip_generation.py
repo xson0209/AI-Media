@@ -134,7 +134,6 @@ FLOW_PROVIDER_CONTEXT_ONLY_NOTE = (
 FLOW_PROVIDER_POST_RENDER_CUE_REPLACEMENTS = (
     (re.compile(r"\bAnimation and subtitle-safe rule:\s*", re.IGNORECASE), "Motion and context rule: "),
     (re.compile(r"\balign visible action beats with(?: the)? narration timing\b", re.IGNORECASE), "align visible action beats with the provided story timing"),
-    (re.compile(r"\s*(?:while|so that|so)\s+(?:the\s+)?(?:voice[-\s]?over|narration|narrator|spoken audio)[^.,;\n]*(?=[.,;\n]|$)", re.IGNORECASE), ""),
     (re.compile(r",?\s*(?:and\s+)?leave the lower caption area[^.\n]*(?:\.|$)", re.IGNORECASE), "."),
     (re.compile(r"\b(?:yellow\s+)?karaoke\s+subtitle\s+added\s+during\s+render\b", re.IGNORECASE), "post-render subtitle added by Voicebox"),
 )
@@ -254,19 +253,6 @@ def compact_prompt_for_veo_provider(prompt: str) -> str:
             sections.append(section)
     compact = _normalize_flow_provider_prompt("\n\n".join(sections))
     return _truncate_flow_provider_prompt(compact)
-
-def _strip_provider_spoken_audio_blockers(prompt: str) -> str:
-    safe = str(prompt or "")
-    safe = safe.replace(FLOW_PROVIDER_CONTEXT_ONLY_NOTE, "")
-    safe = re.sub(
-        r"\b(?:do not|don't|never)\s+(?:render|generate|include)\s+(?:any\s+)?spoken audio\b[.,;:]?",
-        "",
-        safe,
-        flags=re.IGNORECASE,
-    )
-    safe = re.sub(r"\bno\s+spoken audio\b[.,;:]?", "", safe, flags=re.IGNORECASE)
-    return _normalize_flow_provider_prompt(safe)
-
 
 def provider_safe_prompt_for_veo(
     prompt: str,
