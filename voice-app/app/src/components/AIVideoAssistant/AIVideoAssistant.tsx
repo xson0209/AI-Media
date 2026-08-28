@@ -28,7 +28,9 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
+  SlidersHorizontal,
   Thermometer,
   Trash2,
   Unlock,
@@ -100,6 +102,7 @@ import { AIVideoVeoChromePanel } from './AIVideoVeoChromePanel';
 
 type AspectRatio = '9:16' | '16:9' | '1:1';
 type ProjectCreationMode = 'quick' | 'manual';
+type ProjectPickerFilter = 'all' | 'standalone' | 'series' | 'running' | 'failed';
 
 const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
 const AI_VIDEO_TITLE_MAX_LENGTH = 160;
@@ -646,16 +649,6 @@ function allVideoPromptsText(
       // stay visible in the UI but must not be mixed into clipboard content.
       return isFreshVideoPrompt(shot, prompt) ? prompt?.content?.trim() ?? '' : '';
     })
-    .filter(Boolean)
-    .join('\n\n---\n\n');
-}
-
-function availableVideoPromptsText(
-  shots: VideoShotResponse[],
-  promptByShotId: Record<string, VideoPromptContentResponse | undefined>,
-): string {
-  return shots
-    .map((shot) => promptByShotId[shot.id]?.content?.trim() ?? '')
     .filter(Boolean)
     .join('\n\n---\n\n');
 }
@@ -2177,6 +2170,9 @@ export function AIVideoAssistant() {
   const [seriesCreateContext, setSeriesCreateContext] =
     useState<SeriesPickerContext>('ai_video_direct');
   const [videoPromptLibraryOpen, setVideoPromptLibraryOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectPickerSearch, setProjectPickerSearch] = useState('');
+  const [projectPickerFilter, setProjectPickerFilter] = useState<ProjectPickerFilter>('all');
   const [copiedVideoPromptKey, setCopiedVideoPromptKey] = useState<string | null>(null);
   const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
@@ -2196,6 +2192,8 @@ export function AIVideoAssistant() {
 
   const selectProject = (projectId: string | null) => {
     setSelectedProjectId(projectId);
+    setProjectPickerOpen(false);
+    setProjectMenuId(null);
     setVoiceSelectorOpen(false);
     setQualityOverrideReason('');
   };
@@ -2348,6 +2346,27 @@ export function AIVideoAssistant() {
     () => groupProjectsBySeries(projectsWithLiveRunState, seriesQuery.data),
     [projectsWithLiveRunState, seriesQuery.data],
   );
+  const projectPickerProjects = useMemo(() => {
+    const query = projectPickerSearch.trim().toLocaleLowerCase();
+    const filtered = projectsWithLiveRunState.filter((project) => {
+      const matchesQuery = !query ||
+        [project.title, project.topic, project.series_title]
+          .filter(Boolean)
+          .some((value) => value!.toLocaleLowerCase().includes(query));
+      if (!matchesQuery) return false;
+      if (projectPickerFilter === 'standalone') return !project.series_id;
+      if (projectPickerFilter === 'series') return Boolean(project.series_id);
+      if (projectPickerFilter === 'running') return isAutoRunActiveStatus(project.active_run_status);
+      if (projectPickerFilter === 'failed') return project.active_run_status === 'failed' || project.status === 'failed';
+      return true;
+    });
+    return filtered.slice().sort((a, b) => {
+      const aPinned = isAutoRunActiveStatus(a.active_run_status) || a.active_run_status === 'failed' || a.status === 'failed';
+      const bPinned = isAutoRunActiveStatus(b.active_run_status) || b.active_run_status === 'failed' || b.status === 'failed';
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
+  }, [projectPickerFilter, projectPickerSearch, projectsWithLiveRunState]);
   const selectedSeries = useMemo(
     () => seriesQuery.data?.find((series) => series.id === selectedProject?.series_id) ?? null,
     [selectedProject?.series_id, seriesQuery.data],
@@ -2434,10 +2453,6 @@ export function AIVideoAssistant() {
   const promptByShotId = promptContentsQuery.data ?? {};
   const videoPromptText = useMemo(
     () => allVideoPromptsText(shots, promptByShotId),
-    [shots, promptByShotId],
-  );
-  const availableVideoPromptText = useMemo(
-    () => availableVideoPromptsText(shots, promptByShotId),
     [shots, promptByShotId],
   );
   const videoPromptReadyCount = shots.filter((shot) =>
@@ -3476,7 +3491,7 @@ export function AIVideoAssistant() {
   };
 
   const copyShotPrompt = async (shot: VideoShotResponse) => {
-    if (shot.prompt_status === 'missing' || shot.prompt_status === 'stale') {
+    if (shot.prompt_status === 'missing') {
       throw new Error('Câu lệnh video cần được tạo lại theo ngôn ngữ tiếng Anh trước khi copy sang Veo 3.');
     }
     const prompt = await apiClient.getVideoShotPrompt(shot.project_id, shot.id);
@@ -3486,7 +3501,9 @@ export function AIVideoAssistant() {
     await copyVideoPromptText(
       `shot-${shot.id}`,
       prompt.content,
-      `Đã sao chép câu lệnh gốc của ${shotLabel(shot)}.`,
+      shot.prompt_status === 'stale'
+        ? `Đã sao chép prompt cũ của ${shotLabel(shot)}. Hãy tạo lại trước khi render.`
+        : `Đã sao chép prompt của ${shotLabel(shot)}.`,
     );
   };
 
@@ -3856,7 +3873,26 @@ export function AIVideoAssistant() {
           </div>
         </div>
       ) : null}
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 grid gap-2">
+        {projectsWithLiveRunState.slice(0, 8).map(renderRecentProject)}
+        {projectsWithLiveRunState.length > 8 ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-1 h-9 w-full justify-center gap-2 text-xs"
+            onClick={() => setProjectPickerOpen(true)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Xem tất cả dự án ({projectsWithLiveRunState.length})
+          </Button>
+        ) : null}
+        {!projectsQuery.data?.length ? (
+          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+            Chưa có dự án nào. Tạo dự án mới ở khu vực chính để bắt đầu.
+          </div>
+        ) : null}
+      </div>
+      <div className="hidden" aria-hidden="true">
         {groupedProjects.seriesGroups.map((group) => {
           const seriesId = group.series?.id ?? group.projects[0]?.series_id ?? '';
           const seriesTitle = group.series?.title ?? group.projects[0]?.series_title ?? 'Series';
@@ -4362,6 +4398,29 @@ export function AIVideoAssistant() {
             sidePanelOpen ? null : 'xl:pl-14',
           )}
         >
+          <section className="flex items-center gap-3 rounded-lg border border-border/80 bg-card/60 p-3 xl:hidden">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+              <Clapperboard className="h-4 w-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                Dự án hiện tại
+              </p>
+              <p className="truncate text-sm font-semibold">
+                {selectedProject ? selectedProject.title : 'Chưa chọn dự án'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 gap-1.5 px-2.5 text-xs"
+              onClick={() => setProjectPickerOpen(true)}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Đổi dự án
+            </Button>
+          </section>
           <section className="rounded-lg border border-border/80 bg-card/45 p-4 shadow-[0_18px_42px_-32px_rgba(0,0,0,0.45)] sm:p-5 md:p-6">
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-1">
               <div className="min-w-0">
@@ -4528,6 +4587,42 @@ export function AIVideoAssistant() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2 md:justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setProjectPickerOpen(true)}
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Đổi dự án
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!videoPromptAvailableCount}
+                      onClick={() => setVideoPromptLibraryOpen(true)}
+                    >
+                      <FileText className="h-4 w-4" />
+                      Thư viện prompt
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!videoPromptText.trim()}
+                      onClick={() =>
+                        void copyVideoPromptText(
+                          'all-video-prompts-context',
+                          videoPromptText,
+                          `Đã sao chép ${videoPromptReadyCount}/${shots.length} prompt đủ điều kiện.`,
+                        )
+                      }
+                    >
+                      {copiedVideoPromptKey === 'all-video-prompts-context' ? (
+                        <Check className="h-4 w-4" />
+                      ) : (
+                        <Copy className="h-4 w-4" />
+                      )}
+                      Copy {videoPromptReadyCount} prompt đủ điều kiện
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -5591,7 +5686,7 @@ export function AIVideoAssistant() {
                     void copyVideoPromptText(
                       'all-video-prompts',
                       videoPromptText,
-                      `Đã sao chép toàn bộ ${videoPromptReadyCount} prompt video.`,
+                      `Đã sao chép ${videoPromptReadyCount}/${shots.length} prompt đủ điều kiện.`,
                     )
                   }
                 >
@@ -5600,7 +5695,7 @@ export function AIVideoAssistant() {
                   ) : (
                     <Copy className="h-4 w-4" />
                   )}
-                  Sao chép toàn bộ câu lệnh
+                  Copy {videoPromptReadyCount} prompt đủ điều kiện
                 </Button>
                 <Button
                   variant="outline"
@@ -5654,7 +5749,7 @@ export function AIVideoAssistant() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing' || shot.prompt_status === 'stale'}
+                            disabled={shot.prompt_status === 'missing' || !promptContent?.content?.trim()}
                             onClick={() => copyShotPrompt(shot)}
                           >
                             {copiedVideoPromptKey === `shot-${shot.id}` ? (
@@ -5662,12 +5757,12 @@ export function AIVideoAssistant() {
                             ) : (
                               <Copy className="h-4 w-4" />
                             )}
-                            Sao chép câu lệnh gốc
+                            {shot.prompt_status === 'stale' ? 'Copy bản cũ' : 'Copy prompt'}
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing' || shot.prompt_status === 'stale'}
+                            disabled={shot.prompt_status === 'missing' || !promptContent?.content?.trim()}
                             onClick={() =>
                               saveDownload(
                                 apiClient.downloadVideoShotPrompt(shot.project_id, shot.id),
@@ -5705,14 +5800,14 @@ export function AIVideoAssistant() {
                             </p>
                           )}
                           {promptContent?.content ? (
-                            <details className="mt-3 text-sm">
-                              <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
+                            <div className="mt-3 text-sm">
+                              <p className="text-xs font-medium text-muted-foreground">
                                 Xem câu lệnh gốc tiếng Anh để sao chép
-                              </summary>
+                              </p>
                               <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs leading-relaxed text-muted-foreground">
                                 {promptContent.content}
                               </pre>
-                            </details>
+                            </div>
                           ) : null}
                         </div>
                       ) : null}
@@ -6039,7 +6134,7 @@ export function AIVideoAssistant() {
 
         <aside
           className={cn(
-            'order-1 space-y-3',
+            'order-1 hidden space-y-3 xl:block',
             sidePanelOpen
               ? 'xl:h-full xl:min-h-0 xl:self-stretch xl:overflow-y-auto xl:overscroll-contain xl:pb-4 xl:pr-1 [scrollbar-gutter:stable]'
               : 'xl:absolute xl:left-0 xl:top-0',
@@ -6382,11 +6477,22 @@ export function AIVideoAssistant() {
           open={videoPromptLibraryOpen}
           shots={shots}
           promptByShotId={promptByShotId}
-          allPromptText={availableVideoPromptText}
+          allPromptText={videoPromptText}
           readyCount={videoPromptReadyCount}
           copiedPromptKey={copiedVideoPromptKey}
           onOpenChange={setVideoPromptLibraryOpen}
           onCopy={(key, value, noticeText) => void copyVideoPromptText(key, value, noticeText)}
+        />
+        <ProjectPickerDialog
+          open={projectPickerOpen}
+          projects={projectPickerProjects}
+          selectedProjectId={selectedProjectId}
+          search={projectPickerSearch}
+          filter={projectPickerFilter}
+          onOpenChange={setProjectPickerOpen}
+          onSearchChange={setProjectPickerSearch}
+          onFilterChange={setProjectPickerFilter}
+          onSelect={selectProject}
         />
         <SeriesPickerDialog
           open={seriesPickerOpen}
@@ -6542,6 +6648,136 @@ export function AIVideoAssistant() {
   );
 }
 
+function ProjectPickerDialog({
+  open,
+  projects,
+  selectedProjectId,
+  search,
+  filter,
+  onOpenChange,
+  onSearchChange,
+  onFilterChange,
+  onSelect,
+}: {
+  open: boolean;
+  projects: VideoProjectResponse[];
+  selectedProjectId: string | null;
+  search: string;
+  filter: ProjectPickerFilter;
+  onOpenChange: (open: boolean) => void;
+  onSearchChange: (value: string) => void;
+  onFilterChange: (value: ProjectPickerFilter) => void;
+  onSelect: (projectId: string) => void;
+}) {
+  const filters: Array<{ value: ProjectPickerFilter; label: string }> = [
+    { value: 'all', label: 'Tất cả' },
+    { value: 'standalone', label: 'Dự án lẻ' },
+    { value: 'series', label: 'Series' },
+    { value: 'running', label: 'Đang chạy' },
+    { value: 'failed', label: 'Lỗi' },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[min(90vh,760px)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:max-w-2xl">
+        <div className="border-b border-border/70 p-4 pr-12">
+          <DialogHeader>
+            <DialogTitle>Chọn dự án</DialogTitle>
+            <DialogDescription>
+              Tìm nhanh theo tên hoặc ý tưởng. Dự án đang chạy và dự án lỗi luôn được ghim lên đầu.
+            </DialogDescription>
+          </DialogHeader>
+          <label className="relative mt-3 block">
+            <span className="sr-only">Tìm dự án</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Tìm theo tên dự án, ý tưởng hoặc series…"
+              className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+            />
+          </label>
+          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Lọc dự án">
+            {filters.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                role="tab"
+                aria-selected={filter === item.value}
+                onClick={() => onFilterChange(item.value)}
+                className={cn(
+                  'shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+                  filter === item.value
+                    ? 'border-foreground bg-foreground text-background'
+                    : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-gutter:stable]">
+          {projects.length ? (
+            <div className="grid gap-2">
+              {projects.map((project) => {
+                const selected = selectedProjectId === project.id;
+                const running = isAutoRunActiveStatus(project.active_run_status);
+                const failed = project.active_run_status === 'failed' || project.status === 'failed';
+                const progress = Math.min(100, Math.max(0, Math.round((project.active_run_progress ?? 0) * 100)));
+                return (
+                  <button
+                    key={project.id}
+                    type="button"
+                    onClick={() => onSelect(project.id)}
+                    className={cn(
+                      'group flex min-h-14 w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition active:scale-[0.995]',
+                      selected
+                        ? 'border-foreground bg-foreground text-background'
+                        : failed
+                          ? 'border-red-500/35 bg-red-500/5 hover:bg-red-500/10'
+                          : running
+                            ? 'border-sky-500/35 bg-sky-500/5 hover:bg-sky-500/10'
+                            : 'border-border/75 bg-card/60 hover:bg-muted/50',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold',
+                        selected ? 'bg-background/15' : failed ? 'bg-red-500/15 text-red-700 dark:text-red-200' : running ? 'bg-sky-500/15 text-sky-700 dark:text-sky-200' : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {project.series_id ? 'S' : 'P'}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {project.series_id ? episodeDisplay(project) : project.title}
+                      </span>
+                      <span className={cn('mt-0.5 block truncate text-xs', selected ? 'text-background/70' : 'text-muted-foreground')}>
+                        {project.series_id ? project.series_title ?? 'Series' : project.topic || 'Dự án lẻ'}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end gap-1 text-[10px] uppercase tracking-[0.1em]">
+                      <span className={cn(selected ? 'text-background/80' : failed ? 'text-red-700 dark:text-red-200' : running ? 'text-sky-700 dark:text-sky-200' : 'text-muted-foreground')}>
+                        {failed ? 'Lỗi' : running ? autoRunStatusText(project.active_run_status) : projectStatusLabel(project.status)}
+                      </span>
+                      {running ? <span className="font-mono tabular-nums opacity-80">{progress}%</span> : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              Không tìm thấy dự án phù hợp. Hãy thử từ khóa khác hoặc bỏ bộ lọc.
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function VideoPromptLibraryDialog({
   open,
   shots,
@@ -6562,6 +6798,23 @@ function VideoPromptLibraryDialog({
   onCopy: (key: string, value: string, noticeText?: string) => void;
 }) {
   const promptShots = shots.filter((shot) => shot.prompt_status !== 'missing');
+  const promptShotKey = promptShots.map((shot) => shot.id).join('|');
+  const [selectedPromptShotId, setSelectedPromptShotId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const promptShotIds = promptShotKey ? promptShotKey.split('|') : [];
+    setSelectedPromptShotId((current) =>
+      current && promptShotIds.includes(current)
+        ? current
+        : promptShotIds[0] ?? null,
+    );
+  }, [open, promptShotKey]);
+
+  const focusedShot = promptShots.find((shot) => shot.id === selectedPromptShotId) ?? promptShots[0];
+  const focusedPrompt = focusedShot ? promptByShotId[focusedShot.id] : undefined;
+  const focusedCopyValue = focusedPrompt?.content?.trim() ?? '';
+  const focusedCopyKey = focusedShot ? `modal-video-shot-${focusedShot.id}` : '';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -6592,7 +6845,7 @@ function VideoPromptLibraryDialog({
                 onCopy(
                   'all-video-prompts-modal',
                   allPromptText,
-                  `Đã sao chép toàn bộ ${promptShots.filter((shot) => promptByShotId[shot.id]?.content?.trim()).length} prompt video.`,
+                  `Đã sao chép ${readyCount}/${promptShots.length} prompt đủ điều kiện.`,
                 )
               }
             >
@@ -6606,7 +6859,121 @@ function VideoPromptLibraryDialog({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 grid gap-3 overflow-hidden p-4 md:grid-cols-[210px_minmax(0,1fr)] [scrollbar-gutter:stable]">
+          {promptShots.length ? (
+            <>
+              <div className="hidden min-h-0 overflow-hidden rounded-lg border border-border/70 bg-card/50 p-2 md:block">
+                <p className="px-2 pb-2 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                  Danh sách cảnh
+                </p>
+                <div className="grid gap-1">
+                  {promptShots.map((shot) => {
+                    const active = shot.id === focusedShot?.id;
+                    const hasPrompt = Boolean(promptByShotId[shot.id]?.content?.trim());
+                    return (
+                      <button
+                        key={`prompt-nav-${shot.id}`}
+                        type="button"
+                        onClick={() => setSelectedPromptShotId(shot.id)}
+                        className={cn(
+                          'flex min-h-10 items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-xs transition',
+                          active
+                            ? 'bg-foreground text-background'
+                            : 'text-foreground/80 hover:bg-muted/60',
+                        )}
+                      >
+                        <span className="min-w-0 truncate">{shotLabel(shot)}</span>
+                        <span
+                          className={cn(
+                            'h-1.5 w-1.5 shrink-0 rounded-full',
+                            shot.prompt_status === 'stale'
+                              ? active
+                                ? 'bg-amber-300'
+                                : 'bg-amber-500'
+                              : hasPrompt
+                                ? active
+                                  ? 'bg-emerald-300'
+                                  : 'bg-emerald-500'
+                                : active
+                                  ? 'bg-background/60'
+                                  : 'bg-muted-foreground/40',
+                          )}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex min-h-0 flex-col gap-3">
+                <div className="md:hidden">
+                  <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                    Chọn cảnh
+                    <select
+                      value={focusedShot?.id ?? ''}
+                      onChange={(event) => setSelectedPromptShotId(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+                    >
+                      {promptShots.map((shot) => (
+                        <option key={`prompt-select-${shot.id}`} value={shot.id}>
+                          {shotLabel(shot)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {focusedShot ? (
+                  <article className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/70 bg-card/70 p-3 sm:p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">{shotLabel(focusedShot)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {focusedShot.prompt_status === 'stale'
+                            ? 'Bản cũ · nên tạo lại trước khi render'
+                            : `Prompt ${promptStatusLabel(focusedShot.prompt_status)}`}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={focusedShot.prompt_status === 'stale' ? 'outline' : 'default'}
+                        disabled={!focusedCopyValue}
+                        onClick={() =>
+                          onCopy(
+                            focusedCopyKey,
+                            focusedCopyValue,
+                            focusedShot.prompt_status === 'stale'
+                              ? `Đã sao chép bản cũ của ${shotLabel(focusedShot)}. Hãy tạo lại trước khi render.`
+                              : `Đã sao chép prompt video của ${shotLabel(focusedShot)}.`,
+                          )
+                        }
+                      >
+                        {copiedPromptKey === focusedCopyKey ? (
+                          <Check className="h-4 w-4" />
+                        ) : (
+                          <Copy className="h-4 w-4" />
+                        )}
+                        {focusedShot.prompt_status === 'stale' ? 'Copy bản cũ' : 'Copy prompt'}
+                      </Button>
+                    </div>
+                    <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 p-3 [scrollbar-gutter:stable]">
+                      <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                        Prompt và ghi chú duyệt
+                      </p>
+                      <pre className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
+                        {videoPromptBlock(focusedShot, focusedPrompt)}
+                      </pre>
+                    </div>
+                  </article>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground md:col-span-2">
+              Chưa có prompt video để hiển thị. Hãy bấm “Tạo câu lệnh video” trước.
+            </div>
+          )}
+        </div>
+
+        <div className="hidden min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable]" aria-hidden="true">
           {promptShots.length ? (
             <div className="grid gap-4">
               {promptShots.map((shot) => {
