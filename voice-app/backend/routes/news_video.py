@@ -40,7 +40,7 @@ def create_news_project(data: models.VideoProjectCreate, db: Session = Depends(g
     })
     try:
         project = video_projects.create_project(payload, db)
-        db.add(DBNewsWorkflow(project_id=project.id, visual_format="9:16", default_speech_source=payload.speech_source))
+        db.add(DBNewsWorkflow(project_id=project.id, visual_format="9:16", source_note=data.source_note, default_speech_source=payload.speech_source))
         db.commit()
         return project
     except ValueError as exc:

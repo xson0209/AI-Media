@@ -1838,6 +1838,7 @@ class VideoProjectCreate(_VisualStyleLimitedModel):
     """Request model for creating an AI Video Assistant project."""
 
     topic: str = Field(..., min_length=1, max_length=4000)
+    source_note: Optional[str] = Field(default=None, max_length=10000)
     title: Optional[str] = Field(default=None, max_length=160)
     series_id: Optional[str] = None
     story_episode_id: Optional[str] = None

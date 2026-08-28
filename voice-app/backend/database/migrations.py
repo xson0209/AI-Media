@@ -1133,7 +1133,7 @@ def _migrate_ai_video_assistant(engine) -> None:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS news_video_workflows (
                 project_id VARCHAR PRIMARY KEY,
-                visual_format VARCHAR NOT NULL DEFAULT 'tech_explainer',
+                visual_format VARCHAR NOT NULL DEFAULT '9:16',
                 source_note TEXT,
                 default_speech_source VARCHAR NOT NULL DEFAULT 'voicebox_khong_context',
                 created_at DATETIME,

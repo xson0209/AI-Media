@@ -31,7 +31,7 @@ export function NewsVideo() {
   });
   const create = useMutation({
     mutationFn: () => apiClient.createNewsVideoProject({
-      topic: `${topic}\n\nGhi chú nguồn:\n${sourceNote}`.trim(),
+      topic: topic.trim(), source_note: sourceNote.trim() || undefined,
       title: topic.slice(0, 160) || 'Video tin tức',
       language: 'vi', target_language: 'vi', phase: 'phase2', aspect_ratio: '9:16',
       speech_source: speechSource, prompt_segment_duration_seconds: 8,
@@ -78,6 +78,7 @@ export function NewsVideo() {
             <p className="rounded-md bg-muted p-3 text-sm">3. Copy provider-ready prompt sang Veo 3, tự render và tải MP4. 4. Quay lại chọn đúng shot để upload clip thủ công. Không tự mở Veo hoặc tự tiêu credit.</p>
             {notice && <p className="text-sm text-amber-600">{notice}</p>}
             <div className="space-y-2">{project.shots?.map((shot) => <div key={shot.id} className="rounded border p-3 text-sm"><div className="flex items-center justify-between"><span>Shot {String(shot.shot_order).padStart(2, '0')}</span><div className="flex items-center gap-2"><Badge variant="outline">{shot.prompt_status}</Badge><Button size="sm" variant="outline" onClick={() => void copyShotPrompt(shot.id)}><Copy className="mr-1 h-3 w-3" />Copy prompt</Button></div></div><p className="mt-1 text-muted-foreground">{shot.vietnamese_description || shot.english_narration || 'Chưa có mô tả'}</p></div>)}</div>
+            <div className="space-y-2">{project.shots?.map((shot) => <div key={`${shot.id}-mode`} className="flex items-center gap-2 text-xs"><span className="w-16">Shot {shot.shot_order}</span><select className="rounded border bg-background p-1" value={shot.speech_source_override ?? ''} onChange={(e) => void apiClient.updateNewsVideoShot(selectedId!, shot.id, { speech_mode: (e.target.value || null) as NewsSpeechMode }).then(() => detail.refetch())}><option value="">Theo project</option>{speechOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>)}</div>
           </>}
         </CardContent></Card>
       </div>

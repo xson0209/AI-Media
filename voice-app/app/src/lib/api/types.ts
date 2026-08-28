@@ -676,6 +676,7 @@ export interface AIPlanningProviderCheckResponse {
 
 export interface VideoProjectCreate {
   topic: string;
+  source_note?: string | null;
   title?: string | null;
   series_id?: string | null;
   story_episode_id?: string | null;
@@ -698,6 +699,15 @@ export interface VideoProjectCreate {
   prompt_segment_duration_seconds?: number | null;
   micro_scenes_per_prompt?: number | null;
   source_blocks?: VideoSourceBlockDraft[];
+}
+
+export interface VideoShotUpdate {
+  duration_seconds?: number | null;
+  speech_source_override?: NewsSpeechMode | null;
+  speech_mode?: NewsSpeechMode | null;
+  vietnamese_description?: string | null;
+  english_narration?: string | null;
+  speech_cues?: VideoShotSpeechCue[];
 }
 
 export interface VideoProjectUpdate {

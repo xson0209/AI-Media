@@ -202,6 +202,7 @@ import type {
   VideoProjectStatusResponse,
   VideoProjectTargetTimelineResponse,
   VideoProjectUpdate,
+  VideoShotUpdate,
   VideoPromptContentResponse,
   VideoRenderJobResponse,
   VideoRenderReadinessResponse,
@@ -1029,6 +1030,14 @@ class ApiClient {
 
   async getNewsVideoProject(projectId: string): Promise<VideoProjectDetailResponse> {
     return this.request<VideoProjectDetailResponse>(`/news-video/projects/${projectId}`);
+  }
+
+  async updateNewsVideoProject(projectId: string, data: Partial<VideoProjectUpdate> & { speech_mode?: NewsSpeechMode }): Promise<VideoProjectResponse> {
+    return this.request<VideoProjectResponse>(`/news-video/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(data) });
+  }
+
+  async updateNewsVideoShot(projectId: string, shotId: string, data: Partial<VideoShotUpdate> & { speech_mode?: NewsSpeechMode }): Promise<VideoShotResponse> {
+    return this.request<VideoShotResponse>(`/news-video/projects/${projectId}/shots/${shotId}`, { method: 'PATCH', body: JSON.stringify(data) });
   }
 
   async planNewsVideoProject(projectId: string): Promise<VideoShotResponse[]> {
