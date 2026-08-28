@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse
+from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -12,6 +13,21 @@ from ..database import VideoProject as DBVideoProject, VideoShot as DBVideoShot,
 from ..services import video_phase2, video_projects, video_rendering, video_speech, video_voice, video_publishing_metadata, video_auto_runs
 
 router = APIRouter(prefix="/news-video", tags=["news-video"], route_class=video_errors.AIVideoRoute)
+
+def _sanitize_source_note(value: str | None) -> str | None:
+    note = (value or "").strip()
+    if not note:
+        return None
+    parsed = urlparse(note)
+    if parsed.scheme and parsed.scheme.lower() not in {"http", "https"}:
+        raise HTTPException(status_code=422, detail="URL nguồn chỉ được dùng http hoặc https.")
+    return note[:10000]
+
+def _sanitize_editorial_topic(value: str) -> str:
+    """Keep article text while isolating common prompt-injection directives."""
+    blocked = ("ignore previous instructions", "system message:", "developer message:")
+    lines = [line for line in (value or "").splitlines() if not any(token in line.casefold() for token in blocked)]
+    return "\n".join(lines).strip()[:4000]
 
 
 def _project_or_404(project_id: str, db: Session):
@@ -30,17 +46,24 @@ def list_news_projects(db: Session = Depends(get_db)):
 
 @router.post("/projects", response_model=models.VideoProjectResponse)
 def create_news_project(data: models.VideoProjectCreate, db: Session = Depends(get_db)):
+    source_note = _sanitize_source_note(data.source_note)
+    safe_topic = _sanitize_editorial_topic(data.topic)
+    if not safe_topic:
+        raise HTTPException(status_code=422, detail="Cần nhập nội dung bài tin sau khi loại bỏ chỉ dẫn không liên quan.")
     payload = data.model_copy(update={
+        "topic": safe_topic,
         "language": "vi",
         "target_language": "vi",
-        "aspect_ratio": "9:16",
+        "aspect_ratio": data.aspect_ratio or "9:16",
         "phase": "phase2",
         "speech_source": data.speech_source or "voicebox_khong_context",
         "prompt_segment_duration_seconds": data.prompt_segment_duration_seconds or 8,
+        "prompt_segment_count": data.prompt_segment_count or 1,
+        "micro_scenes_per_prompt": data.micro_scenes_per_prompt or 1,
     })
     try:
         project = video_projects.create_project(payload, db)
-        db.add(DBNewsWorkflow(project_id=project.id, visual_format="9:16", source_note=data.source_note, default_speech_source=payload.speech_source))
+        db.add(DBNewsWorkflow(project_id=project.id, visual_format=payload.aspect_ratio, source_note=source_note, default_speech_source=payload.speech_source))
         db.commit()
         return project
     except ValueError as exc:
@@ -50,6 +73,33 @@ def create_news_project(data: models.VideoProjectCreate, db: Session = Depends(g
 @router.get("/projects/{project_id}", response_model=models.VideoProjectDetailResponse)
 def get_news_project(project_id: str, db: Session = Depends(get_db)):
     return _project_or_404(project_id, db)
+
+@router.get("/projects/{project_id}/workflow")
+def get_news_workflow(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    row = db.query(DBNewsWorkflow).filter(DBNewsWorkflow.project_id == project_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cấu hình workflow tin tức.")
+    return {"project_id": row.project_id, "visual_format": row.visual_format, "source_note": row.source_note, "default_speech_source": row.default_speech_source}
+
+@router.patch("/projects/{project_id}/workflow")
+def update_news_workflow(project_id: str, visual_format: str | None = None, source_note: str | None = None, default_speech_source: str | None = None, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    row = db.query(DBNewsWorkflow).filter(DBNewsWorkflow.project_id == project_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy cấu hình workflow tin tức.")
+    if visual_format is not None:
+        if visual_format not in {"9:16", "16:9", "1:1"}:
+            raise HTTPException(status_code=422, detail="visual_format không hợp lệ.")
+        row.visual_format = visual_format
+    if source_note is not None:
+        row.source_note = _sanitize_source_note(source_note)
+    if default_speech_source is not None:
+        if default_speech_source not in video_speech.NEWS_SPEECH_MODES:
+            raise HTTPException(status_code=422, detail="Nguồn lời không hợp lệ.")
+        row.default_speech_source = default_speech_source
+    db.commit(); db.refresh(row)
+    return {"project_id": row.project_id, "visual_format": row.visual_format, "source_note": row.source_note, "default_speech_source": row.default_speech_source}
 
 
 @router.patch("/projects/{project_id}", response_model=models.VideoProjectResponse)
@@ -220,6 +270,15 @@ def news_publishing_metadata(project_id: str, db: Session = Depends(get_db)):
     result = video_publishing_metadata.get_publishing_metadata(project_id, db)
     if result is None:
         raise HTTPException(status_code=404, detail="Chưa có dữ liệu xuất bản.")
+    return result
+
+@router.post("/projects/{project_id}/publishing-metadata", response_model=models.VideoPublishingMetadataResponse)
+async def generate_news_publishing_metadata(project_id: str, data: models.VideoPublishingMetadataGenerateRequest | None = None, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    try:
+        result = video_publishing_metadata.generate_publishing_metadata(project_id, data or models.VideoPublishingMetadataGenerateRequest(), db)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Không tạo được metadata xuất bản.") from exc
     return result
 
 @router.post("/projects/{project_id}/auto-runs", response_model=models.VideoAutoRunResponse)

@@ -109,6 +109,13 @@ const AI_VIDEO_TITLE_MAX_LENGTH = 160;
 const AI_VIDEO_TOPIC_MAX_LENGTH = 4000;
 const AI_VIDEO_SOURCE_BLOCK_MAX_LENGTH = 30000;
 const RESEARCH_FEATURE_ENABLED = import.meta.env.VITE_FEATURE_RESEARCH !== 'false';
+const SPEECH_MODE_OPTIONS = [
+  ['veo_narration', 'Veo narration'],
+  ['veo_dialogue', 'Veo dialogue'],
+  ['voicebox_co_context', 'Voicebox + ngữ cảnh'],
+  ['voicebox_khong_context', 'Voicebox hậu kỳ'],
+  ['none', 'Không lời'],
+] as const;
 
 interface SourceDraft {
   block_type: string;
@@ -3737,6 +3744,20 @@ export function AIVideoAssistant() {
                 <Copy className="h-4 w-4" />
                 <span className="truncate">Tạo bản dịch</span>
               </Button>
+            </div>
+            <div className="grid gap-1 rounded-md border border-border/60 bg-muted/30 px-2 py-2">
+              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Nguồn lời hiệu lực</span>
+              <select
+                value={project.speech_source ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  void apiClient.updateVideoProject(project.id, { speech_source: (value || null) as import('@/lib/api/types').NewsSpeechMode | null }).then(() => invalidateProject());
+                }}
+                className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-foreground/40"
+              >
+                <option value="">Theo ngôn ngữ (legacy)</option>
+                {SPEECH_MODE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
             </div>
             <Button
               size="sm"

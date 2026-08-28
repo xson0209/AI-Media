@@ -1057,6 +1057,14 @@ class ApiClient {
     return this.download(`/news-video/projects/${projectId}/prompt-pack`, `news-video-prompts-${projectId}.txt`);
   }
 
+  async getNewsPublishingMetadata(projectId: string): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(`/news-video/projects/${projectId}/publishing-metadata`);
+  }
+
+  async generateNewsPublishingMetadata(projectId: string, data: VideoPublishingMetadataGenerateRequest = {}): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(`/news-video/projects/${projectId}/publishing-metadata`, { method: 'POST', body: JSON.stringify(data) });
+  }
+
   async getVideoProjectCharacterFlow(projectId: string): Promise<VideoProjectCharacterFlowResponse> {
     return this.request<VideoProjectCharacterFlowResponse>(
       `/ai-video/projects/${projectId}/character-flow`,

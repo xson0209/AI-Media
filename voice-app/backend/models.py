@@ -725,6 +725,7 @@ class VideoRenderTimelineShot(BaseModel):
     clip_id: Optional[str] = None
     clip_duration_seconds: Optional[float] = None
     has_narration: bool = False
+    effective_speech_source: Optional[str] = None
     retention: Optional[dict[str, Any]] = None
     transition: Optional[dict[str, Any]] = None
     sound_design: Optional[dict[str, Any]] = None

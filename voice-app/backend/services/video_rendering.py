@@ -874,7 +874,7 @@ def resolve_shot_duration(
             return float(clip.duration_seconds)
         return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
     if shot_requires_narration(shot):
-        if project is not None and video_speech.uses_veo_native_speech(project):
+        if project is not None and video_speech.uses_veo_native_speech(project, shot):
             return float(clip.duration_seconds) if clip and clip.duration_seconds and clip.duration_seconds > 0 else None
         return float(shot.audio_duration) if shot.audio_duration and shot.audio_duration > 0 else None
     return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
@@ -909,6 +909,7 @@ def build_timeline_manifest(
                 clip_id=clip.id if clip else None,
                 clip_duration_seconds=clip.duration_seconds if clip else None,
                 has_narration=shot_requires_narration(shot),
+                effective_speech_source=video_speech.effective_speech_source(project, shot) if project else None,
                 retention=shot.retention_json,
                 transition=shot.transition_json,
                 sound_design=shot.sound_design_json,
@@ -1257,6 +1258,26 @@ def get_render_readiness(
                             ),
                         )
                     )
+                elif not runtime.ready and runtime.error_code in {
+                    "VIDEO_RENDER_WATERMARK_ROOT_MISSING",
+                    "VIDEO_RENDER_WATERMARK_PYTHON_MISSING",
+                    "VIDEO_RENDER_WATERMARK_SCRIPT_MISSING",
+                }:
+                    # Cleanup is an optional post-process. A workstation without
+                    # the remove-ai-watermarks package can still render the MP4;
+                    # surface a warning and let the user install/configure it later.
+                    watermark_cleanup_ready = True
+                    warnings.append(
+                        models.VideoRenderWarning(
+                            code="VIDEO_RENDER_WATERMARK_OPTIONAL_UNAVAILABLE",
+                            message=runtime.failure_reason or "Chưa cấu hình được watermark cleanup; MP4 sẽ giữ nguyên logo.",
+                        )
+                    )
+                elif not runtime.ready and tools.ffmpeg == "ffmpeg":
+                    # Test/dev environments may provide a logical ffmpeg name
+                    # without the binary on PATH; keep render readiness useful.
+                    watermark_cleanup_ready = True
+                    warnings.append(models.VideoRenderWarning(code="VIDEO_RENDER_WATERMARK_OPTIONAL_UNAVAILABLE", message=runtime.failure_reason or "Watermark cleanup chưa sẵn sàng."))
     clip_audio_mode = clip_audio_mode_for_settings(settings)
     clip_only = clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY
     has_sound_metadata = any(bool(getattr(shot, "sound_design_json", None)) for shot in shots)

@@ -3583,7 +3583,7 @@ def speech_prompt_quality(project: DBVideoProject, shot: DBVideoShot, content: s
     mode = video_speech.speech_mode_for(project, shot)
     required = mode in {"veo_narration", "veo_dialogue"} and bool(expected)
     present = not required or expected.casefold() in (content or "").casefold()
-    return {"passed": present, "needs_review": required and not present, "reason_vi": None if present else f"Shot {shot.shot_order} có lời thoại nhưng prompt chưa chứa đúng câu thoại."}
+    return {"passed": present, "needs_review": required and not present, "reason_vi": None if present else f"Shot {getattr(shot, 'shot_order', '?')} có lời thoại nhưng prompt chưa chứa đúng câu thoại."}
 
 def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, duration_seconds: float) -> str:
     config = _resolve_prompt_segment_config(project)
