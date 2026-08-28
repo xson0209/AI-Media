@@ -4207,6 +4207,39 @@ def _stored_prompt_download_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, p
     ])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
+
+def _provider_ready_prompt_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, project: DBVideoProject) -> str:
+    """Compose the same Veo-ready contract used by the copy endpoint.
+
+    Prompt downloads and prompt packs must not fall back to the legacy visual-only
+    artifact: doing so would make a downloaded file silently lose the character
+    dialogue selected in the News Video dropdown.
+    """
+    mode = video_speech.speech_mode_for(project, shot)
+    if not mode:
+        return _stored_prompt_download_text(prompt, shot, project)
+    visual = "\n".join(
+        part
+        for part in (
+            (prompt.prompt or "").strip(),
+            f"Video language: {video_language.video_language_english_name(project.target_language)}",
+            f"Aspect ratio: {prompt.aspect_ratio or project.aspect_ratio}",
+            f"Duration: {prompt.duration_seconds or shot.duration_seconds or ''} seconds",
+            f"Camera movement: {prompt.camera_motion or shot.camera_motion or ''}",
+            f"Subject motion: {prompt.subject_motion or shot.subject_motion or ''}",
+            f"Environment motion: {prompt.environment_motion or shot.environment_motion or ''}",
+        )
+        if part
+    )
+    contract = video_speech.build_provider_prompt(
+        visual,
+        mode,
+        video_speech.speech_cues_for_shot(shot, project),
+        prompt.negative_prompt,
+        prompt.continuity_notes,
+    )
+    return contract["provider_prompt"].strip() + "\n"
+
 def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> models.VideoPromptContentResponse | None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     shot = db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id, DBVideoShot.id == shot_id).first()
@@ -4214,11 +4247,7 @@ def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> mode
     if project is None or shot is None or prompt is None:
         return None
     scene = db.query(DBVideoScene).filter(DBVideoScene.id == shot.scene_id).first() if shot.scene_id else None
-    content = _stored_prompt_download_text(prompt, shot, project)
-    mode = video_speech.speech_mode_for(project, shot)
-    if mode:
-        contract = video_speech.build_provider_prompt(prompt.prompt or "", mode, video_speech.speech_cues_for_shot(shot, project), prompt.negative_prompt, prompt.continuity_notes)
-        content = contract["provider_prompt"] + "\n"
+    content = _provider_ready_prompt_text(prompt, shot, project)
     return models.VideoPromptContentResponse(
         project_id=project_id,
         scene_id=shot.scene_id,
@@ -4242,7 +4271,7 @@ def get_video_prompt_download(project_id: str, shot_id: str, db: Session) -> tup
     scene = db.query(DBVideoScene).filter(DBVideoScene.id == shot.scene_id).first() if shot.scene_id else None
     return (
         video_storage.video_prompt_filename(scene.scene_order if scene else None, shot.shot_order),
-        _stored_prompt_download_text(prompt, shot, project),
+        _provider_ready_prompt_text(prompt, shot, project),
     )
 
 def get_video_prompt_pack_download(project_id: str, db: Session) -> tuple[str, str] | None:
@@ -4254,7 +4283,7 @@ def get_video_prompt_pack_download(project_id: str, db: Session) -> tuple[str, s
         prompt = _latest_shot_prompt(project_id, shot.id, db)
         if prompt is None:
             continue
-        sections.append(f"# Shot {shot.shot_order:02d}\n\n{_stored_prompt_download_text(prompt, shot, project).strip()}")
+        sections.append(f"# Shot {shot.shot_order:02d}\n\n{_provider_ready_prompt_text(prompt, shot, project).strip()}")
     if not sections:
         return None
     return video_storage.video_prompt_pack_filename(project.title), "\n\n---\n\n".join(sections).strip() + "\n"
