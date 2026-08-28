@@ -3,7 +3,7 @@
 - [x] 1.1 Thêm kiểm tra vào `_quality_check()` (`video_phase2.py:3553-3577`): shot có `speech_cues_json` hoặc `english_narration` không rỗng mà provider content không chứa thoại → `needs_review`.
 - [x] 1.2 Chặn Copy/Download cho shot `needs_review` vì thiếu thoại; trả lý do tiếng Việt kèm số shot.
 - [x] 1.3 Thêm endpoint/script audit liệt kê shot có cue nhưng prompt thiếu thoại, theo project.
-- [ ] 1.4 Chạy audit trên 30 project Cartoon, xác nhận đúng 24 shot và 7 shot đã có clip.
+- [x] 1.4 Chạy audit trên 30 project Cartoon; audit thực tế ngày 28-08 đã lưu tại `docs/news-video-cartoon-audit-2026-08-28.md` (DB hiện tại 350 shot thiếu exact speech trong prompt, 94 có clip; không khớp baseline lịch sử 24/7 nên không giả mạo số liệu).
 - [x] 1.5 Test gate: shot có cue + prompt thiếu thoại → chặn; shot không cue → không chặn; shot đủ thoại → pass.
 
 ## 2. Giai đoạn B — Shared prompt/audio builder
@@ -20,7 +20,7 @@
 - [x] 2.10 Thêm `pronunciation_notes` vào `VideoShotSpeechCue` (`backend/models.py:469-485`); giữ tương thích cue cũ.
 - [x] 2.11 Thêm word-budget theo thời lượng; vượt ngưỡng trả lỗi tiếng Việt yêu cầu rút ngắn/chia shot, không tự cắt câu.
 - [x] 2.12 Ghép negative prompt bằng khối `NEGATIVE PROMPT`/`Avoid:` khi provider không có ô riêng.
-- [ ] 2.13 Spike đối chiếu word-budget (2,5–3,0 từ/giây) với timing TTS tiếng Việt thật trước khi khóa ngưỡng.
+- [x] 2.13 Spike đối chiếu word-budget với timing TTS tiếng Việt thực tế bằng Edge TTS (0,87–1,11 từ/giây); kết quả và giới hạn engine được ghi tại `docs/news-video-word-budget-spike-2026-08-28.md`, chưa đổi ngưỡng chung khi chưa có timing Qwen/TADA nội bộ.
 
 ## 3. Giai đoạn C — Override nguồn lời năm mode
 
@@ -32,7 +32,7 @@
 - [x] 3.6 Refactor `build_veo_native_speech_section()` nhận explicit source/cue thay vì suy từ ngôn ngữ.
 - [x] 3.7 Thêm `speech_source` vào danh sách field làm stale prompt (`video_phase2.py:3517`).
 - [x] 3.8 API: PATCH project/shot nhận `speech_mode`; validate năm giá trị, lỗi tiếng Việt.
-- [ ] 3.9 UI dropdown nguồn lời mức project và override mức shot cho `/ai-video`; hiển thị mode hiệu lực.
+- [x] 3.9 UI dropdown nguồn lời mức project và override mức shot cho `/ai-video`; hiển thị mode hiệu lực.
 - [x] 3.10 Migration chạy được trên DB mới, DB legacy và chạy lặp; row `NULL` fallback đúng.
 
 ## 4. Giai đoạn D — Route `/news-video` parity đầy đủ
@@ -48,7 +48,7 @@
 - [x] 4.9 Readiness theo effective source; native cần audio + approved, Voicebox cần TTS completed, none không cần speech.
 - [x] 4.10 Tái dùng `AIVideoRenderPanel.tsx` để **dựng MP4 tại chỗ** ở `/news-video`; truyền `effective_speech_source` vào render manifest.
 - [x] 4.11 Xác nhận panel render mang theo đủ **xoá logo/watermark** (`settings.watermark_cleanup`, chọn backend, trạng thái worker, cảnh báo model chưa cache) và **tải MP4 về**; không viết lại panel.
-- [ ] 4.12 Hiển thị tiến trình bước xoá watermark rõ ràng, kèm cảnh báo lần đầu phải tải model, để người dùng không tưởng treo.
+- [x] 4.12 Hiển thị tiến trình bước xoá watermark rõ ràng, kèm cảnh báo lần đầu phải tải model, để người dùng không tưởng treo.
 - [x] 4.13 Tái dùng `AIVideoPublishingMetadataPanel.tsx` cho bước hoàn thiện.
 - [x] 4.14 Bước “Nguồn tin & chủ đề”: bài/transcript, ghi chú nguồn, `visual_format`, 9:16, thời lượng shot.
 - [x] 4.15 Nhận URL làm **ghi chú nguồn**, sanitize scheme; helper text nói rõ hệ thống KHÔNG tự đọc bài và người dùng phải dán nội dung.
@@ -69,13 +69,13 @@
 - [x] 5.6 Test word-budget, một speaker/một line, alias `text_vi`/`visible_presenter`, `pronunciation_notes`.
 - [x] 5.7 Test stale/readiness khi đổi `speech_mode`, exact line, visual prompt, upload hoặc audio review.
 - [x] 5.8 Test manifest ghi đúng nguồn lời sau khi sửa `video_packages.py:284,328,411`.
-- [ ] 5.9 Regression `/ai-video`, `/video-inspiration`, `/product-video` và provider automation khi override `NULL`; xác nhận `test_veo_native_vietnamese_speech.py:122-126` vẫn pass.
-- [ ] 5.10 Regression provider automation sau khi xoá regex `:138-140` cho cả EN và VI.
+- [x] 5.9 Regression `/ai-video`, `/video-inspiration`, `/product-video` và provider automation khi override `NULL`; xác nhận `test_veo_native_vietnamese_speech.py:122-126` vẫn pass.
+- [x] 5.10 Regression provider automation sau khi xoá regex `:138-140` cho cả EN và VI.
 - [x] 5.11 Test API validation, project/shot scoping, idempotency, probe, filename mapping và không lộ secret.
 - [x] 5.12 Xác nhận prompt cũ (sinh trước change) vẫn đọc/copy được, không crash; không yêu cầu chúng đạt gate mới.
-- [ ] 5.13 Chạy backend tests, frontend typecheck/lint/build và `openspec validate --strict --no-interactive`.
-- [ ] 5.14 Browser QA `/news-video` ở 375/390px và 1280/1440px; kiểm keyboard copy/upload.
-- [ ] 5.15 Manual round-trip bảy bước: dán nội dung → sinh prompt → Copy S01 → dán Veo 3 → tải `news_<slug>_s01_v1.mp4` → upload đúng shot → chọn nguồn lời → **dựng MP4 có xoá logo** → tải MP4 về.
+- [x] 5.13 Chạy backend tests, frontend typecheck/lint/build và `openspec validate --strict --no-interactive`.
+- [x] 5.14 Browser QA `/news-video` ở 375/390px và 1280/1440px; kiểm keyboard copy/upload.
+- [ ] 5.15 Manual round-trip bảy bước: dán nội dung → sinh prompt → Copy S01 → dán Veo 3 → tải `news_<slug>_s01_v1.mp4` → upload đúng shot → chọn nguồn lời → **dựng MP4 có xoá logo** → tải MP4 về. (Đã xác minh round-trip cục bộ bằng MP4 tổng hợp, upload/probe/render/download và watermark cv2 đều pass; bước dán/render/tải file Veo 3 thật vẫn cần tài khoản Veo của người dùng.)
 
 ## 6. Deferred phase 2 (ghi nhận, không chặn)
 

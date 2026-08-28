@@ -11,10 +11,10 @@ import { apiClient } from '@/lib/api/client';
 import type { NewsSpeechMode, VideoLanguage, VideoProjectResponse, VideoPublishingGeneratePlatform } from '@/lib/api/types';
 
 const speechOptions: Array<{ value: NewsSpeechMode; label: string }> = [
+  { value: 'veo_dialogue', label: 'Presenter/nhân vật thoại trong Veo 3' },
   { value: 'voicebox_khong_context', label: 'TTS Voicebox hậu kỳ (Veo không nói)' },
   { value: 'voicebox_co_context', label: 'TTS Voicebox + ngữ cảnh nhịp hình' },
-  { value: 'veo_narration', label: 'Veo 3 tự đọc lời dẫn' },
-  { value: 'veo_dialogue', label: 'Presenter/nhân vật thoại trong Veo 3' },
+  { value: 'veo_narration', label: 'Veo 3 tự đọc lời dẫn ngoài khung hình' },
   { value: 'none', label: 'Không lời' },
 ];
 
@@ -23,7 +23,10 @@ export function NewsVideo() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
   const [sourceNote, setSourceNote] = useState('');
-  const [speechSource, setSpeechSource] = useState<NewsSpeechMode>('voicebox_khong_context');
+  // News Video is optimized for the manual Veo 3 handoff: keep character
+  // dialogue selected by default so the copied provider prompt explicitly
+  // asks Veo to render the visible speaker's exact line and lip-sync.
+  const [speechSource, setSpeechSource] = useState<NewsSpeechMode>('veo_dialogue');
   const [visualFormat, setVisualFormat] = useState<'9:16' | '16:9' | '1:1'>('9:16');
   const [notice, setNotice] = useState<string | null>(null);
   const projects = useQuery({ queryKey: ['news-video', 'projects'], queryFn: () => apiClient.listNewsVideoProjects() });
@@ -50,8 +53,17 @@ export function NewsVideo() {
         <Card><CardHeader><CardTitle>Dự án</CardTitle></CardHeader><CardContent className="space-y-3">
           <Textarea value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Chủ đề hoặc nội dung bài tin…" />
           <Textarea value={sourceNote} onChange={(e) => setSourceNote(e.target.value)} placeholder="Ghi chú nguồn/URL (hệ thống không tự đọc URL)" />
-          <label className="block text-xs text-muted-foreground">Nguồn lời mặc định</label><select className="w-full rounded-md border bg-background p-2 text-sm" value={speechSource} onChange={(e) => setSpeechSource(e.target.value as NewsSpeechMode)}>{speechOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-          <label className="block text-xs text-muted-foreground">Khung hình</label><select className="w-full rounded-md border bg-background p-2 text-sm" value={visualFormat} onChange={(e) => setVisualFormat(e.target.value as typeof visualFormat)}><option value="9:16">9:16 dọc</option><option value="16:9">16:9 ngang</option><option value="1:1">1:1 vuông</option></select>
+          <label htmlFor="news-speech-source" className="block text-xs text-muted-foreground">Nguồn lời mặc định</label><select id="news-speech-source" className="w-full rounded-md border bg-background p-2 text-sm" value={speechSource} onChange={(e) => setSpeechSource(e.target.value as NewsSpeechMode)}>{speechOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {speechSource === 'veo_dialogue'
+              ? 'Prompt sẽ yêu cầu nhân vật nhìn thấy phát đúng câu thoại trong Veo 3, giữ giọng/diện mạo và khớp khẩu hình.'
+              : speechSource.startsWith('voicebox')
+                ? 'Prompt chỉ dùng để canh nhịp; Voicebox sẽ tạo giọng đọc sau khi bạn tải clip Veo lên.'
+                : speechSource === 'veo_narration'
+                  ? 'Prompt sẽ yêu cầu Veo 3 đọc lời dẫn ngoài khung hình, không phải thoại nhân vật.'
+                  : 'Prompt không yêu cầu giọng nói; chỉ giữ ambience/SFX nếu policy cho phép.'}
+          </p>
+          <label htmlFor="news-visual-format" className="block text-xs text-muted-foreground">Khung hình</label><select id="news-visual-format" className="w-full rounded-md border bg-background p-2 text-sm" value={visualFormat} onChange={(e) => setVisualFormat(e.target.value as typeof visualFormat)}><option value="9:16">9:16 dọc</option><option value="16:9">16:9 ngang</option><option value="1:1">1:1 vuông</option></select>
           <Button className="w-full" disabled={!topic.trim() || create.isPending} onClick={() => create.mutate()}>{create.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}Tạo dự án</Button>
           <div className="space-y-1">{projects.data?.map((item: VideoProjectResponse) => <button type="button" key={item.id} className="block w-full rounded border p-2 text-left text-sm hover:bg-muted" onClick={() => setSelectedId(item.id)}>{item.title}<span className="ml-2 text-xs text-muted-foreground">{item.status}</span></button>)}</div>
         </CardContent></Card>
@@ -63,7 +75,14 @@ export function NewsVideo() {
             {notice && <p className="text-sm text-amber-600">{notice}</p>}
             <div className="space-y-2">{project.shots?.map((shot) => <div key={shot.id} className="rounded border p-3 text-sm"><div className="flex items-center justify-between"><span>Shot {String(shot.shot_order).padStart(2, '0')}</span><div className="flex items-center gap-2"><Badge variant="outline">{shot.prompt_status}</Badge><Button size="sm" variant="outline" onClick={() => void copyShotPrompt(shot.id)}><Copy className="mr-1 h-3 w-3" />Copy prompt</Button></div></div><p className="mt-1 text-muted-foreground">{shot.vietnamese_description || shot.english_narration || 'Chưa có mô tả'}</p></div>)}</div>
             <div className="space-y-2">{project.shots?.map((shot) => <div key={`${shot.id}-mode`} className="flex items-center gap-2 text-xs"><span className="w-16">Shot {shot.shot_order}</span><select className="rounded border bg-background p-1" value={shot.speech_source_override ?? ''} onChange={(e) => void apiClient.updateNewsVideoShot(selectedId!, shot.id, { speech_mode: (e.target.value || null) as NewsSpeechMode }).then(() => detail.refetch())}><option value="">Theo dự án</option>{speechOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>)}</div>
-            <AIVideoRenderPanel projectId={selectedId} shots={project.shots ?? []} targetLanguage={project.target_language as VideoLanguage} onNotice={setNotice} />
+            <AIVideoRenderPanel
+              projectId={selectedId}
+              shots={project.shots ?? []}
+              targetLanguage={project.target_language as VideoLanguage}
+              speechSource={project.speech_source}
+              apiPrefix="/news-video"
+              onNotice={setNotice}
+            />
             <AIVideoPublishingMetadataPanel metadata={metadata.data} isLoading={metadata.isLoading} isGenerating={generateMetadata.isPending} disabled={!selectedId} projectTitle={project.title} onGenerateAll={() => generateMetadata.mutate('all')} onGeneratePlatform={(platform) => generateMetadata.mutate(platform)} />
           </>}
         </CardContent></Card>

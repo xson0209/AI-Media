@@ -20,6 +20,27 @@ def test_native_modes_include_exact_line():
         assert "NEGATIVE PROMPT" in result["provider_prompt"]
 
 
+def test_veo_dialogue_prompt_explicitly_binds_visible_character_voice():
+    result = build_provider_prompt(
+        "A presenter in a newsroom",
+        "veo_dialogue",
+        [{
+            "speaker_name": "Lan",
+            "speaker_role": "visible_character",
+            "text": "Xin chào khán giả",
+            "voice_description": "nữ, rõ chữ, điềm tĩnh",
+            "delivery": "tự tin",
+            "emotion": "thân thiện",
+        }],
+    )
+    content = result["provider_prompt"]
+    assert "Visible speaker Lan" in content
+    assert "Xin chào khán giả" in content
+    assert "lip-sync required" in content
+    assert "voice: nữ, rõ chữ, điềm tĩnh" in content
+    assert "delivery: tự tin" in content
+
+
 def test_voicebox_context_forbids_spoken_audio():
     result = build_provider_prompt("A newsroom", "voicebox_co_context", [{"text": "Xin chào"}])
     assert "must be silent" in result["audio_contract"]

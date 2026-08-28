@@ -374,11 +374,37 @@ def build_provider_prompt(visual: str, speech_mode: str | None, cues: list[dict[
     mode = _text(speech_mode, max_length=80).lower() or "none"
     if mode not in NEWS_SPEECH_MODES:
         mode = "none"
-    cue_lines = [f'Speaker {c.get("speaker_name", "Narrator")}: "{_text(c.get("text"), max_length=20000)}"' for c in (cues or []) if _text(c.get("text"))]
+    cue_lines: list[str] = []
+    for cue in cues or []:
+        text = _text(cue.get("text"), max_length=20000)
+        if not text:
+            continue
+        speaker = _text(cue.get("speaker_name"), max_length=160) or "Narrator"
+        role = _text(cue.get("speaker_role"), max_length=80)
+        voice = _text(cue.get("voice_description"), max_length=1200)
+        delivery = _text(cue.get("delivery"), max_length=600)
+        emotion = _text(cue.get("emotion"), max_length=600)
+        context = _text(cue.get("context"), max_length=1200)
+        if mode == "veo_dialogue":
+            line = f'Visible speaker {speaker}'
+            if role:
+                line += f' ({role})'
+            line += f': "{text}" — lip-sync required; speak exactly this line once.'
+        elif mode == "veo_narration":
+            line = f'Off-screen narrator {speaker}: "{text}" — speak exactly this line once; no lip-sync.'
+        else:
+            line = f'Speaker {speaker}: "{text}"'
+        details = [
+            f'voice: {voice}' if voice else '',
+            f'delivery: {delivery}' if delivery else '',
+            f'emotion: {emotion}' if emotion else '',
+            f'context: {context}' if context else '',
+        ]
+        cue_lines.append(line + (" " + "; ".join(item for item in details if item) if any(details) else ""))
     if mode == "veo_narration":
-        audio = "AUDIO CONTRACT — VEO NATIVE NARRATION: Speak exact lines once as off-screen Vietnamese narration. No paraphrase, extra words, subtitles, or text overlays.\n" + "\n".join(cue_lines)
+        audio = "AUDIO CONTRACT — VEO NATIVE NARRATION: Tạo giọng đọc tiếng Việt ngoài khung hình. Đọc nguyên văn từng dòng đúng một lần; không diễn giải, dịch, thêm lời, phụ đề hoặc chữ trên hình.\n" + "\n".join(cue_lines)
     elif mode == "veo_dialogue":
-        audio = "AUDIO CONTRACT — VEO NATIVE DIALOGUE: Visible speaker, stable identity/wardrobe, exact Vietnamese lines with lip-sync; never swap speaker or paraphrase.\n" + "\n".join(cue_lines)
+        audio = "AUDIO CONTRACT — VEO NATIVE DIALOGUE: Nhân vật đang nhìn thấy phải phát âm thanh thoại tiếng Việt với khẩu hình khớp môi. Giữ nguyên danh tính, giọng và trang phục; không đổi người nói, không diễn giải, không thêm lời, phụ đề hay chữ trên hình.\n" + "\n".join(cue_lines)
     elif mode == "voicebox_co_context":
         audio = "AUDIO CONTRACT — VOICEBOX: Lines are timing context only. Veo must be silent: no spoken words, narration, dialogue, voiceover, or lip-sync. Voicebox adds TTS after upload.\n" + "\n".join(cue_lines)
     else:

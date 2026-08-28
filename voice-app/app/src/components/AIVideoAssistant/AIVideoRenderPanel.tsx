@@ -36,6 +36,10 @@ interface AIVideoRenderPanelProps {
   projectId: string | null | undefined;
   shots: VideoShotResponse[];
   targetLanguage?: VideoLanguage | null;
+  /** API namespace used by the shared panel (News Video uses /news-video). */
+  apiPrefix?: string;
+  /** Explicit project speech mode; legacy routes fall back to target language. */
+  speechSource?: string | null;
   onNotice: (message: string) => void;
 }
 
@@ -118,7 +122,7 @@ function RenderSkeleton() {
   );
 }
 
-export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice }: AIVideoRenderPanelProps) {
+export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix = '/ai-video', speechSource, onNotice }: AIVideoRenderPanelProps) {
   const platform = usePlatform();
   const queryClient = useQueryClient();
   // Settings are restored per project, so the panel always shows what is actually in
@@ -132,7 +136,9 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   const [batchPlan, setBatchPlan] = useState<ClipBatchPlan<File, VideoShotResponse> | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchResult, setBatchResult] = useState<VideoShotClipBatchResult | null>(null);
-  const usesVeoNativeVietnameseSpeech = targetLanguage === 'vi';
+  const usesVeoNativeVietnameseSpeech = speechSource
+    ? speechSource === 'veo_narration' || speechSource === 'veo_dialogue'
+    : targetLanguage === 'vi';
 
   // Switching project swaps in that project's saved settings during render, so the panel
   // never shows one project's choices while another is selected.
@@ -151,7 +157,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   const clipQueries = useQueries({
     queries: shots.map((shot) => ({
       queryKey: ['ai-video', 'shot-clip', projectId, shot.id],
-      queryFn: () => apiClient.getVideoShotClip(projectId!, shot.id),
+      queryFn: () => apiClient.getVideoShotClip(projectId!, shot.id, apiPrefix),
       enabled,
       retry: false,
     })),
@@ -159,13 +165,13 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
 
   const readinessQuery = useQuery({
     queryKey: [...renderQueryKey, 'readiness'],
-    queryFn: () => apiClient.getVideoRenderReadiness(projectId!, settings),
+    queryFn: () => apiClient.getVideoRenderReadiness(projectId!, settings, apiPrefix),
     enabled,
   });
 
   const latestJobQuery = useQuery({
     queryKey: ['ai-video', 'render-job-latest', projectId],
-    queryFn: () => apiClient.getLatestVideoRenderJob(projectId!),
+    queryFn: () => apiClient.getLatestVideoRenderJob(projectId!, apiPrefix),
     enabled: !!projectId,
     retry: false,
     refetchInterval: (query) => {
@@ -176,7 +182,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
 
   const sfxAssetsQuery = useQuery({
     queryKey: ['ai-video', 'render-sfx-assets', projectId],
-    queryFn: () => apiClient.listVideoRenderSfxAssets(projectId!),
+    queryFn: () => apiClient.listVideoRenderSfxAssets(projectId!, apiPrefix),
     enabled: !!projectId,
     retry: false,
   });
@@ -190,7 +196,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   };
 
   const uploadClip = useMutation({
-    mutationFn: ({ shot, file }: { shot: VideoShotResponse; file: File }) => apiClient.uploadVideoShotClip(shot.project_id, shot.id, file),
+    mutationFn: ({ shot, file }: { shot: VideoShotResponse; file: File }) => apiClient.uploadVideoShotClip(shot.project_id, shot.id, file, undefined, apiPrefix),
     onMutate: ({ shot }) => setUploadingShotId(shot.id),
     onSuccess: (_, { shot }) => {
       onNotice(`Đã tải clip video cho ${shotLabel(shot)}.`);
@@ -207,6 +213,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
         matched.map((entry) => ({ shotId: entry.shot.id, shotOrder: entry.shotOrder, file: entry.file })),
         {
           provider: BATCH_CLIP_PROVIDER,
+          routePrefix: apiPrefix,
           onProgress: (done, total) => setBatchProgress({ done, total }),
         },
       );
@@ -227,7 +234,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   });
 
   const deleteClip = useMutation({
-    mutationFn: (shot: VideoShotResponse) => apiClient.deleteVideoShotClip(shot.project_id, shot.id),
+    mutationFn: (shot: VideoShotResponse) => apiClient.deleteVideoShotClip(shot.project_id, shot.id, apiPrefix),
     onSuccess: (_, shot) => {
       onNotice(`Đã xóa clip video của ${shotLabel(shot)}.`);
       invalidateRender();
@@ -235,7 +242,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   });
 
   const uploadSfxAsset = useMutation({
-    mutationFn: (file: File) => apiClient.uploadVideoRenderSfxAsset(projectId!, file),
+    mutationFn: (file: File) => apiClient.uploadVideoRenderSfxAsset(projectId!, file, apiPrefix),
     onSuccess: (asset) => {
       onNotice(`Đã tải hiệu ứng/nhạc nền: ${asset.filename}.`);
       invalidateRender();
@@ -243,7 +250,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   });
 
   const deleteSfxAsset = useMutation({
-    mutationFn: (asset: VideoRenderSfxAssetResponse) => apiClient.deleteVideoRenderSfxAsset(projectId!, asset.asset_id),
+    mutationFn: (asset: VideoRenderSfxAssetResponse) => apiClient.deleteVideoRenderSfxAsset(projectId!, asset.asset_id, apiPrefix),
     onSuccess: () => {
       onNotice('Đã xóa hiệu ứng/nhạc nền.');
       invalidateRender();
@@ -251,7 +258,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
   });
 
   const createRender = useMutation({
-    mutationFn: () => apiClient.createVideoRenderJob(projectId!, settings),
+    mutationFn: () => apiClient.createVideoRenderJob(projectId!, settings, apiPrefix),
     onSuccess: () => {
       onNotice('Đã bắt đầu dựng MP4. Bạn có thể theo dõi tiến độ trong bảng này.');
       invalidateRender();
@@ -406,7 +413,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
                         className="aspect-video w-full bg-black object-contain"
                         controls
                         preload="metadata"
-                        src={apiClient.getVideoShotClipDownloadUrl(projectId, shot.id)}
+                        src={apiClient.getVideoShotClipDownloadUrl(projectId, shot.id, apiPrefix)}
                       />
                     </div>
                   ) : null}
@@ -428,7 +435,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
                         variant="outline"
                         className="min-h-10 w-full active:translate-y-[1px]"
                         disabled={!clip || clip.status !== 'ready'}
-                        onClick={() => saveDownload(apiClient.downloadVideoShotClip(projectId, shot.id, clip?.original_filename || 'clip.mp4'))}
+                        onClick={() => saveDownload(apiClient.downloadVideoShotClip(projectId, shot.id, clip?.original_filename || 'clip.mp4', apiPrefix))}
                       >
                         <Download className="h-4 w-4" />
                         Tải clip video
@@ -735,7 +742,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
             className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
             variant="outline"
             disabled={!latestJob || latestJob.status !== 'completed' || latestJob.stale}
-            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderJob(projectId, latestJob.id))}
+            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderJob(projectId, latestJob.id, apiPrefix))}
           >
             <Download className="h-4 w-4" />
             <span className="min-w-0">Tải MP4</span>
@@ -744,7 +751,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
             className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
             variant="outline"
             disabled={!latestJob || latestJob.status !== 'completed' || !reviewArtifact}
-            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, reviewArtifact?.kind || 'ai_review_report'))}
+            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, reviewArtifact?.kind || 'ai_review_report', apiPrefix))}
           >
             <FileText className="h-4 w-4" />
             <span className="min-w-0">Tải đánh giá AI</span>
@@ -753,7 +760,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, onNotice 
             className="min-h-11 min-w-0 whitespace-normal px-3 text-center leading-tight active:translate-y-[1px]"
             variant="outline"
             disabled={!latestJob || latestJob.status !== 'completed' || !manifestArtifact}
-            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, manifestArtifact?.kind || 'timeline_manifest'))}
+            onClick={() => latestJob && saveDownload(apiClient.downloadVideoRenderEnhancedArtifact(projectId, latestJob.id, manifestArtifact?.kind || 'timeline_manifest', apiPrefix))}
           >
             <Download className="h-4 w-4" />
             <span className="min-w-0">Tải bảng dòng thời gian</span>

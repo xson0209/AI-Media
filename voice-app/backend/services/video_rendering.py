@@ -504,7 +504,9 @@ def _mark_native_clip_audio_dependents_stale(
     shot: DBVideoShot,
     db: Session,
 ) -> None:
-    if not video_speech.uses_veo_native_speech(project):
+    # A News project may mix Voicebox and native-Veo shots; invalidate only
+    # dependants of the shot whose effective mode is native.
+    if not video_speech.uses_veo_native_speech(project, shot):
         return
     from . import video_state, video_subtitles
 

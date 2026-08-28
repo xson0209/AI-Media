@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+import mimetypes
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.responses import PlainTextResponse
 from urllib.parse import urlparse
 from sqlalchemy.orm import Session
@@ -11,6 +14,7 @@ from .. import models
 from ..services import video_errors
 from ..database import VideoProject as DBVideoProject, VideoShot as DBVideoShot, NewsVideoWorkflow as DBNewsWorkflow, get_db
 from ..services import video_phase2, video_projects, video_rendering, video_speech, video_voice, video_publishing_metadata, video_auto_runs
+from ..utils.http import safe_content_disposition
 
 router = APIRouter(prefix="/news-video", tags=["news-video"], route_class=video_errors.AIVideoRoute)
 
@@ -224,6 +228,16 @@ def get_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_
     _project_or_404(project_id, db)
     return video_rendering.get_active_clip(project_id, shot_id, db)
 
+
+@router.get("/projects/{project_id}/shots/{shot_id}/clip/download")
+def download_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_rendering.get_active_clip_download(project_id, shot_id, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Shot này chưa có video clip sẵn sàng để xem.")
+    filename, path, media_type = result
+    return FileResponse(path, media_type=media_type, headers={"Content-Disposition": safe_content_disposition("inline", filename)})
+
 @router.delete("/projects/{project_id}/shots/{shot_id}/clip")
 def delete_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get_db)):
     _project_or_404(project_id, db)
@@ -232,10 +246,64 @@ def delete_news_shot_clip(project_id: str, shot_id: str, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Không tìm thấy clip của shot.")
     return {"deleted": True}
 
-@router.get("/projects/{project_id}/render/readiness")
-def news_render_readiness(project_id: str, db: Session = Depends(get_db)):
+
+@router.get("/projects/{project_id}/render/sfx-assets", response_model=list[models.VideoRenderSfxAssetResponse])
+def list_news_render_sfx_assets(project_id: str, db: Session = Depends(get_db)):
     _project_or_404(project_id, db)
-    return video_rendering.get_render_readiness(project_id, db, video_rendering.render_settings_for_project(project_id, db))
+    assets = video_rendering.list_render_sfx_assets(project_id, db)
+    return assets or []
+
+
+@router.post("/projects/{project_id}/render/sfx-assets", response_model=models.VideoRenderSfxAssetResponse)
+async def upload_news_render_sfx_asset(project_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    try:
+        asset = video_rendering.upload_render_sfx_asset(project_id, filename=file.filename or "sfx.wav", content_type=file.content_type, data=await file.read(), db=db)
+    except video_rendering.VideoRenderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án Video tin tức.")
+    return asset
+
+
+@router.delete("/projects/{project_id}/render/sfx-assets/{asset_id}")
+def delete_news_render_sfx_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    deleted = video_rendering.delete_render_sfx_asset(project_id, asset_id, db)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án Video tin tức.")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Không tìm thấy asset SFX/BGM.")
+    return {"deleted": True}
+
+@router.get("/projects/{project_id}/render/readiness", response_model=models.VideoRenderReadinessResponse)
+def news_render_readiness(
+    project_id: str,
+    resolution: str = Query("auto", pattern="^(auto|720p|1080p)$"),
+    fps: int = Query(60, ge=12, le=60),
+    fit_mode: str = Query("crop", pattern="^(crop|pad)$"),
+    duration_mode: str = Query("freeze", pattern="^(freeze|trim_only)$"),
+    subtitle_mode: str = Query("none", pattern="^(burn_in|sidecar|none)$"),
+    mute_clip_audio: bool = Query(False),
+    clip_audio_mode: str | None = Query(None, pattern="^(drop|bed|clip_only)$"),
+    enhanced_render: bool = Query(False),
+    enhanced_audio: bool = Query(True),
+    ai_review: bool = Query(True),
+    max_fix_attempts: int = Query(0, ge=0, le=2),
+    watermark_cleanup: bool = Query(True),
+    watermark_backend: str = Query("cv2", pattern="^(cv2|migan)$"),
+    db: Session = Depends(get_db),
+):
+    _project_or_404(project_id, db)
+    settings = models.VideoRenderSettings(
+        resolution=resolution, fps=fps, fit_mode=fit_mode, duration_mode=duration_mode,
+        subtitle_mode=subtitle_mode, mute_clip_audio=mute_clip_audio,
+        clip_audio_mode=clip_audio_mode, enhanced_render=enhanced_render,
+        enhanced_audio=enhanced_audio, ai_review=ai_review,
+        max_fix_attempts=max_fix_attempts, watermark_cleanup=watermark_cleanup,
+        watermark_backend=watermark_backend,
+    )
+    return video_rendering.get_render_readiness(project_id, db, settings)
 
 @router.post("/projects/{project_id}/render/jobs", response_model=models.VideoRenderJobResponse)
 async def create_news_render_job(project_id: str, data: models.VideoRenderJobCreateRequest | None = None, db: Session = Depends(get_db)):
@@ -244,6 +312,47 @@ async def create_news_render_job(project_id: str, data: models.VideoRenderJobCre
         return await video_rendering.create_render_job(project_id, data or models.VideoRenderJobCreateRequest(), db)
     except video_rendering.VideoRenderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/render/jobs", response_model=list[models.VideoRenderJobResponse])
+def list_news_render_jobs(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    return video_rendering.list_render_jobs(project_id, db)
+
+
+@router.get("/projects/{project_id}/render/jobs/latest", response_model=models.VideoRenderJobResponse | None)
+def latest_news_render_job(project_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    return video_rendering.get_latest_render_job(project_id, db)
+
+
+@router.get("/projects/{project_id}/render/jobs/{job_id}", response_model=models.VideoRenderJobResponse)
+def get_news_render_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_rendering.get_render_job(project_id, job_id, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy render job.")
+    return result
+
+
+@router.get("/projects/{project_id}/render/jobs/{job_id}/download")
+def download_news_render_job(project_id: str, job_id: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_rendering.get_render_download(project_id, job_id, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="File MP4 render không còn tồn tại hoặc job chưa hoàn tất.")
+    filename, path = result
+    return FileResponse(path, media_type="video/mp4", headers={"Content-Disposition": safe_content_disposition("attachment", filename)})
+
+
+@router.get("/projects/{project_id}/render/jobs/{job_id}/enhanced-artifacts/{artifact_key:path}")
+def download_news_render_artifact(project_id: str, job_id: str, artifact_key: str, db: Session = Depends(get_db)):
+    _project_or_404(project_id, db)
+    result = video_rendering.get_enhanced_render_artifact_download(project_id, job_id, artifact_key, db)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Artifact render không còn tồn tại.")
+    filename, path = result
+    return FileResponse(path, media_type=mimetypes.guess_type(filename)[0] or "application/octet-stream", headers={"Content-Disposition": safe_content_disposition("attachment", filename)})
 
 @router.post("/projects/{project_id}/shots/{shot_id}/voice", response_model=models.VideoShotVoiceStatusResponse)
 async def create_news_shot_voice(project_id: str, shot_id: str, data: models.VideoSceneNarrationRequest, db: Session = Depends(get_db)):
