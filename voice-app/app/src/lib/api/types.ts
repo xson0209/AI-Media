@@ -1646,6 +1646,7 @@ export interface VideoShotResponse {
   scene_id?: string | null;
   shot_order: number;
   duration_seconds?: number | null;
+  speech_source_override?: NewsSpeechMode | null;
   vietnamese_description?: string | null;
   english_narration?: string | null;
   primary_action?: string | null;

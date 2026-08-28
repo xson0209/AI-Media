@@ -3577,6 +3577,14 @@ def _quality_check(item: VideoPromptPlan, *, duration_seconds: float | None = No
     ]
     return {"passed": not missing, "missing_fields": missing}
 
+def speech_prompt_quality(project: DBVideoProject, shot: DBVideoShot, content: str) -> dict[str, object]:
+    """Gate provider copy when an explicit speech cue is absent from content."""
+    expected = video_speech.spoken_text_for_shot(shot, project)
+    mode = video_speech.speech_mode_for(project, shot)
+    required = mode in {"veo_narration", "veo_dialogue"} and bool(expected)
+    present = not required or expected.casefold() in (content or "").casefold()
+    return {"passed": present, "needs_review": required and not present, "reason_vi": None if present else f"Shot {shot.shot_order} có lời thoại nhưng prompt chưa chứa đúng câu thoại."}
+
 def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, duration_seconds: float) -> str:
     config = _resolve_prompt_segment_config(project)
     if config.segment_count is None:

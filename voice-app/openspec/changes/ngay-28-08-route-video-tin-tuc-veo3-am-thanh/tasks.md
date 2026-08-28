@@ -1,10 +1,10 @@
 ## 1. Giai đoạn A — Gate thoại (chặn thiệt hại đang tiếp diễn)
 
-- [ ] 1.1 Thêm kiểm tra vào `_quality_check()` (`video_phase2.py:3553-3577`): shot có `speech_cues_json` hoặc `english_narration` không rỗng mà provider content không chứa thoại → `needs_review`.
-- [ ] 1.2 Chặn Copy/Download cho shot `needs_review` vì thiếu thoại; trả lý do tiếng Việt kèm số shot.
+- [x] 1.1 Thêm kiểm tra vào `_quality_check()` (`video_phase2.py:3553-3577`): shot có `speech_cues_json` hoặc `english_narration` không rỗng mà provider content không chứa thoại → `needs_review`.
+- [x] 1.2 Chặn Copy/Download cho shot `needs_review` vì thiếu thoại; trả lý do tiếng Việt kèm số shot.
 - [x] 1.3 Thêm endpoint/script audit liệt kê shot có cue nhưng prompt thiếu thoại, theo project.
 - [ ] 1.4 Chạy audit trên 30 project Cartoon, xác nhận đúng 24 shot và 7 shot đã có clip.
-- [ ] 1.5 Test gate: shot có cue + prompt thiếu thoại → chặn; shot không cue → không chặn; shot đủ thoại → pass.
+- [x] 1.5 Test gate: shot có cue + prompt thiếu thoại → chặn; shot không cue → không chặn; shot đủ thoại → pass.
 
 ## 2. Giai đoạn B — Shared prompt/audio builder
 
@@ -63,10 +63,10 @@
 
 - [ ] 5.1 Unit test resolver: default/override project/override shot/legacy fallback.
 - [ ] 5.2 Test derive `dialogue_mode` và `clip_audio_mode` từ năm mode; tổ hợp vô nghĩa không biểu diễn được.
-- [ ] 5.3 Contract snapshot test năm provider content: native có exact speech; `co_context` có lời nhưng cấm đọc; `khong_context`/`none` không có lời; negative prompt luôn có.
+- [x] 5.3 Contract snapshot test năm provider content: native có exact speech; `co_context` có lời nhưng cấm đọc; `khong_context`/`none` không có lời; negative prompt luôn có.
 - [ ] 5.4 Test gate thoại trên fixture: shot có cue mà prompt thiếu thoại → chặn; shot không cue → không chặn.
 - [ ] 5.5 Test không double voice: Voicebox mute clip, native không tạo TTS, none không yêu cầu audio.
-- [ ] 5.6 Test word-budget, một speaker/một line, alias `text_vi`/`visible_presenter`, `pronunciation_notes`.
+- [x] 5.6 Test word-budget, một speaker/một line, alias `text_vi`/`visible_presenter`, `pronunciation_notes`.
 - [ ] 5.7 Test stale/readiness khi đổi `speech_mode`, exact line, visual prompt, upload hoặc audio review.
 - [ ] 5.8 Test manifest ghi đúng nguồn lời sau khi sửa `video_packages.py:284,328,411`.
 - [ ] 5.9 Regression `/ai-video`, `/video-inspiration`, `/product-video` và provider automation khi override `NULL`; xác nhận `test_veo_native_vietnamese_speech.py:122-126` vẫn pass.

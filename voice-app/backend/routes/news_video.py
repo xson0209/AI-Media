@@ -102,6 +102,12 @@ def get_news_shot_prompt(project_id: str, shot_id: str, db: Session = Depends(ge
     content = video_phase2.get_video_prompt_content(project_id, shot_id, db)
     if content is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy prompt Veo 3 cho shot này.")
+    shot = db.query(DBVideoShot).filter(DBVideoShot.id == shot_id, DBVideoShot.project_id == project_id).first()
+    if shot is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy shot.")
+    gate = video_phase2.speech_prompt_quality(_project_or_404(project_id, db), shot, content.content)
+    if gate.get("needs_review"):
+        raise HTTPException(status_code=409, detail=gate.get("reason_vi") or "Prompt cần review thoại.")
     return content
 
 @router.get("/projects/{project_id}/shots/{shot_id}/speech-review")

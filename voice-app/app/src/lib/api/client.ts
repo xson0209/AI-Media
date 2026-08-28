@@ -203,6 +203,7 @@ import type {
   VideoProjectTargetTimelineResponse,
   VideoProjectUpdate,
   VideoShotUpdate,
+  NewsSpeechMode,
   VideoPromptContentResponse,
   VideoRenderJobResponse,
   VideoRenderReadinessResponse,
