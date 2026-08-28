@@ -11,6 +11,8 @@ def test_news_video_routes_are_registered():
     assert "/news-video/projects" in paths
     assert "/news-video/projects/{project_id}/speech-audit" in paths
     assert "/news-video/projects/{project_id}/render/jobs" in paths
+    assert "/news-video/projects/{project_id}/render/jobs/{job_id}/download" in paths
+    assert "/news-video/projects/{project_id}/shots/{shot_id}/clip/download" in paths
 
 
 def test_news_project_rejects_unsafe_source_scheme():
