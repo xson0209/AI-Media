@@ -387,6 +387,7 @@ def create_project(data: models.VideoProjectCreate, db: Session) -> models.Video
         topic=data.topic,
         language=data.language,
         target_language=purpose_settings["target_language"],
+        speech_source=data.speech_source,
         video_purpose=purpose_settings["video_purpose"],
         dialogue_mode=purpose_settings["dialogue_mode"],
         narration_density=purpose_settings["narration_density"],
@@ -1027,6 +1028,7 @@ def update_project(
         for key in {
             "topic",
             "target_language",
+            "speech_source",
             "target_duration_seconds",
             "visual_style",
             "default_shot_duration_seconds",

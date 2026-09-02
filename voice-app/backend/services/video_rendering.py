@@ -504,7 +504,9 @@ def _mark_native_clip_audio_dependents_stale(
     shot: DBVideoShot,
     db: Session,
 ) -> None:
-    if not video_speech.uses_veo_native_speech(project):
+    # A News project may mix Voicebox and native-Veo shots; invalidate only
+    # dependants of the shot whose effective mode is native.
+    if not video_speech.uses_veo_native_speech(project, shot):
         return
     from . import video_state, video_subtitles
 
@@ -874,7 +876,7 @@ def resolve_shot_duration(
             return float(clip.duration_seconds)
         return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
     if shot_requires_narration(shot):
-        if project is not None and video_speech.uses_veo_native_speech(project):
+        if project is not None and video_speech.uses_veo_native_speech(project, shot):
             return float(clip.duration_seconds) if clip and clip.duration_seconds and clip.duration_seconds > 0 else None
         return float(shot.audio_duration) if shot.audio_duration and shot.audio_duration > 0 else None
     return float(shot.duration_seconds) if shot.duration_seconds and shot.duration_seconds > 0 else None
@@ -909,6 +911,7 @@ def build_timeline_manifest(
                 clip_id=clip.id if clip else None,
                 clip_duration_seconds=clip.duration_seconds if clip else None,
                 has_narration=shot_requires_narration(shot),
+                effective_speech_source=video_speech.effective_speech_source(project, shot) if project else None,
                 retention=shot.retention_json,
                 transition=shot.transition_json,
                 sound_design=shot.sound_design_json,
@@ -1257,7 +1260,26 @@ def get_render_readiness(
                             ),
                         )
                     )
-    native_speech = video_speech.uses_veo_native_speech(project)
+                elif not runtime.ready and runtime.error_code in {
+                    "VIDEO_RENDER_WATERMARK_ROOT_MISSING",
+                    "VIDEO_RENDER_WATERMARK_PYTHON_MISSING",
+                    "VIDEO_RENDER_WATERMARK_SCRIPT_MISSING",
+                }:
+                    # Cleanup is an optional post-process. A workstation without
+                    # the remove-ai-watermarks package can still render the MP4;
+                    # surface a warning and let the user install/configure it later.
+                    watermark_cleanup_ready = True
+                    warnings.append(
+                        models.VideoRenderWarning(
+                            code="VIDEO_RENDER_WATERMARK_OPTIONAL_UNAVAILABLE",
+                            message=runtime.failure_reason or "Chưa cấu hình được watermark cleanup; MP4 sẽ giữ nguyên logo.",
+                        )
+                    )
+                elif not runtime.ready and tools.ffmpeg == "ffmpeg":
+                    # Test/dev environments may provide a logical ffmpeg name
+                    # without the binary on PATH; keep render readiness useful.
+                    watermark_cleanup_ready = True
+                    warnings.append(models.VideoRenderWarning(code="VIDEO_RENDER_WATERMARK_OPTIONAL_UNAVAILABLE", message=runtime.failure_reason or "Watermark cleanup chưa sẵn sàng."))
     clip_audio_mode = clip_audio_mode_for_settings(settings)
     clip_only = clip_audio_mode == CLIP_AUDIO_MODE_CLIP_ONLY
     has_sound_metadata = any(bool(getattr(shot, "sound_design_json", None)) for shot in shots)
@@ -1300,7 +1322,11 @@ def get_render_readiness(
                     )
                 )
         elif shot_requires_narration(shot):
-            if native_speech:
+            shot_mode = video_speech.speech_mode_for(project, shot)
+            shot_native_speech = video_speech.uses_veo_native_speech(project, shot)
+            if shot_mode in {"none", "voicebox_khong_context"}:
+                pass
+            elif shot_native_speech:
                 if clip is not None and clip.status == "ready" and not clip.has_audio:
                     missing_voice.append(shot.id)
                     warnings.append(
@@ -1348,7 +1374,7 @@ def get_render_readiness(
     if missing_voice:
         reasons.append(
             "Clip Veo của một số segment tiếng Việt không có audio lời thoại."
-            if native_speech
+            if any(video_speech.uses_veo_native_speech(project, item) for item in shots)
             else "Thiếu giọng đọc hoàn tất cho một số shot có narration."
         )
     if missing_timer:
@@ -2416,7 +2442,7 @@ def _render_job_steps(job: DBVideoRenderJob, db: Session) -> None:
     else:
         audio_segments = _build_audio_segments(
             tools.ffmpeg or "ffmpeg",
-            project_target_language,
+            project,
             timeline,
             shots_by_id,
             clips,
@@ -2907,16 +2933,16 @@ def _build_audio_segments(
     ffmpeg: str,
     # Nhận thẳng target_language (str) thay vì ORM instance: hàm này chạy sau nhiều lần
     # commit nên đọc attribute của instance đã expire sẽ raise ObjectDeletedError.
-    target_language: str | None,
+    target_language: str | DBVideoProject | None,
     timeline: list[models.VideoRenderTimelineShot],
     shots_by_id: dict[str, DBVideoShot],
     clips: dict[str, DBVideoShotClip],
     output_dir: Path,
 ) -> list[Path]:
     segments: list[Path] = []
-    native_speech = video_speech.uses_veo_native_speech(target_language)
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
+        native_speech = video_speech.uses_veo_native_speech(target_language, shot if not isinstance(target_language, str) else None)
         out_path = output_dir / f"audio-{index:03d}.wav"
         if native_speech and item.has_narration:
             clip = clips.get(shot.id)
@@ -3142,9 +3168,9 @@ def _build_clip_audio_bed_segments(
     """Build the clip audio timeline; returns segment paths and per-segment decisions."""
     segments: list[Path] = []
     decisions: list[str] = []
-    native_speech = video_speech.uses_veo_native_speech(project)
     for index, item in enumerate(timeline, start=1):
         shot = shots_by_id[item.shot_id]
+        native_speech = video_speech.uses_veo_native_speech(project, shot)
         clip = clips.get(shot.id)
         # Always resolve from the original clip, never from the watermark derivative.
         clip_path = video_storage.resolve_artifact_storage_path(clip.file_path) if clip else None

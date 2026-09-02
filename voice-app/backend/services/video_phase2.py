@@ -3496,11 +3496,12 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
         "sound_design_json",
         "micro_scenes",
         "speech_cues",
+        "speech_source_override",
         "retainability_quality_check",
     }
     if any(key in changed for key in prompt_affecting_fields):
         shot.prompt_status = "stale"
-        if any(key in changed for key in {"english_narration", "duration_seconds", "speech_cues"}):
+        if any(key in changed for key in {"english_narration", "duration_seconds", "speech_cues", "speech_source_override"}):
             shot.subtitle_status = "stale"
             from . import video_subtitles
 
@@ -3514,7 +3515,7 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
     shot.updated_at = datetime.utcnow()
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is not None:
-        if video_speech.uses_veo_native_speech(project) and any(
+        if video_speech.uses_veo_native_speech(project, shot) and any(
             key in changed for key in prompt_affecting_fields
         ):
             db.query(DBVideoShotClip).filter(
@@ -3575,6 +3576,14 @@ def _quality_check(item: VideoPromptPlan, *, duration_seconds: float | None = No
         if not (duration_seconds if field == "duration_seconds" else getattr(item, field, None))
     ]
     return {"passed": not missing, "missing_fields": missing}
+
+def speech_prompt_quality(project: DBVideoProject, shot: DBVideoShot, content: str) -> dict[str, object]:
+    """Gate provider copy when an explicit speech cue is absent from content."""
+    expected = video_speech.spoken_text_for_shot(shot, project)
+    mode = video_speech.speech_mode_for(project, shot)
+    required = mode in {"veo_narration", "veo_dialogue"} and bool(expected)
+    present = not required or expected.casefold() in (content or "").casefold()
+    return {"passed": present, "needs_review": required and not present, "reason_vi": None if present else f"Shot {getattr(shot, 'shot_order', '?')} có lời thoại nhưng prompt chưa chứa đúng câu thoại."}
 
 def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, duration_seconds: float) -> str:
     config = _resolve_prompt_segment_config(project)
@@ -3663,6 +3672,15 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
         parts.extend(["", "Negative prompt:", prompt.negative_prompt.strip()])
     if prompt.prompt_explanation_vi.strip():
         parts.extend(["", "Bản giải thích tiếng Việt:", prompt.prompt_explanation_vi.strip()])
+    # Compose the audio policy at read time so manual Veo copy/download and
+    # provider automation share one deterministic contract.
+    mode = video_speech.speech_mode_for(project, shot)
+    if mode:
+        contract = video_speech.build_provider_prompt(
+            "", mode, video_speech.speech_cues_for_shot(shot, project),
+            prompt.negative_prompt, prompt.continuity_notes,
+        )
+        parts.extend(["", contract["audio_contract"]])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
 
@@ -3794,7 +3812,7 @@ Yêu cầu bắt buộc:
 - Mỗi prompt phải mô tả animation cụ thể theo timeline: entry motion, hold beat, exit/transition motion, speed/rhythm, camera/object movement và điểm nhấn hình ảnh bám narration.
 - Không yêu cầu công cụ tạo video render phụ đề/chữ trực tiếp. Nếu workflow có voice + SRT/subtitle, prompt render phải ghi rõ không render subtitles, captions, karaoke lyrics, text overlays, letters, words hoặc UI text trong video; voice và phụ đề được tạo ở bước sau.
 - Prompt chính và các field riêng phải nói rõ: nhân vật trông như thế nào, trang phục và sandals/footwear cụ thể, subject motion căn theo duration_seconds thật của shot, bối cảnh + lighting, cảm xúc/mood chi tiết.
-- prompt là prompt gốc để copy sang công cụ tạo video; không trộn bản dịch hoặc giải thích tiếng Việt vào field prompt.
+- `prompt` chỉ mô tả hình ảnh, hành động, máy quay, ánh sáng và continuity; CẤM viết câu thoại/narration vào field này. Lời nói chính xác chỉ nằm trong `speech_cues` để shared provider builder ghép theo speech_mode.
 - prompt_explanation_vi bắt buộc viết bằng tiếng Việt tự nhiên để người dùng hiểu prompt đang yêu cầu gì: timeline, hình ảnh, hành động, camera, ánh sáng, mood, continuity và ngôn ngữ người xem nếu có.
 - prompt_explanation_vi cũng phải giải thích retention purpose, chuyển cảnh và cue âm thanh/SFX của segment.
 - Nếu prompt dùng tiếng Anh kỹ thuật cho camera/visual, vẫn phải chỉ dẫn rõ viewer-facing narration, speech, subtitle hoặc on-screen text dùng {video_language.video_language_label(project.target_language)}.
@@ -4189,6 +4207,39 @@ def _stored_prompt_download_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, p
     ])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
 
+
+def _provider_ready_prompt_text(prompt: DBVideoShotPrompt, shot: DBVideoShot, project: DBVideoProject) -> str:
+    """Compose the same Veo-ready contract used by the copy endpoint.
+
+    Prompt downloads and prompt packs must not fall back to the legacy visual-only
+    artifact: doing so would make a downloaded file silently lose the character
+    dialogue selected in the News Video dropdown.
+    """
+    mode = video_speech.speech_mode_for(project, shot)
+    if not mode:
+        return _stored_prompt_download_text(prompt, shot, project)
+    visual = "\n".join(
+        part
+        for part in (
+            (prompt.prompt or "").strip(),
+            f"Video language: {video_language.video_language_english_name(project.target_language)}",
+            f"Aspect ratio: {prompt.aspect_ratio or project.aspect_ratio}",
+            f"Duration: {prompt.duration_seconds or shot.duration_seconds or ''} seconds",
+            f"Camera movement: {prompt.camera_motion or shot.camera_motion or ''}",
+            f"Subject motion: {prompt.subject_motion or shot.subject_motion or ''}",
+            f"Environment motion: {prompt.environment_motion or shot.environment_motion or ''}",
+        )
+        if part
+    )
+    contract = video_speech.build_provider_prompt(
+        visual,
+        mode,
+        video_speech.speech_cues_for_shot(shot, project),
+        prompt.negative_prompt,
+        prompt.continuity_notes,
+    )
+    return contract["provider_prompt"].strip() + "\n"
+
 def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> models.VideoPromptContentResponse | None:
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     shot = db.query(DBVideoShot).filter(DBVideoShot.project_id == project_id, DBVideoShot.id == shot_id).first()
@@ -4196,13 +4247,14 @@ def get_video_prompt_content(project_id: str, shot_id: str, db: Session) -> mode
     if project is None or shot is None or prompt is None:
         return None
     scene = db.query(DBVideoScene).filter(DBVideoScene.id == shot.scene_id).first() if shot.scene_id else None
+    content = _provider_ready_prompt_text(prompt, shot, project)
     return models.VideoPromptContentResponse(
         project_id=project_id,
         scene_id=shot.scene_id,
         shot_id=shot_id,
         prompt_id=prompt.id,
         filename=video_storage.video_prompt_filename(scene.scene_order if scene else None, shot.shot_order),
-        content=prompt.prompt,
+        content=content,
         prompt_explanation_vi=prompt.prompt_explanation_vi,
         negative_prompt=prompt.negative_prompt,
         retention_notes=prompt.retention_notes,
@@ -4219,7 +4271,7 @@ def get_video_prompt_download(project_id: str, shot_id: str, db: Session) -> tup
     scene = db.query(DBVideoScene).filter(DBVideoScene.id == shot.scene_id).first() if shot.scene_id else None
     return (
         video_storage.video_prompt_filename(scene.scene_order if scene else None, shot.shot_order),
-        _stored_prompt_download_text(prompt, shot, project),
+        _provider_ready_prompt_text(prompt, shot, project),
     )
 
 def get_video_prompt_pack_download(project_id: str, db: Session) -> tuple[str, str] | None:
@@ -4231,7 +4283,7 @@ def get_video_prompt_pack_download(project_id: str, db: Session) -> tuple[str, s
         prompt = _latest_shot_prompt(project_id, shot.id, db)
         if prompt is None:
             continue
-        sections.append(f"# Shot {shot.shot_order:02d}\n\n{_stored_prompt_download_text(prompt, shot, project).strip()}")
+        sections.append(f"# Shot {shot.shot_order:02d}\n\n{_provider_ready_prompt_text(prompt, shot, project).strip()}")
     if not sections:
         return None
     return video_storage.video_prompt_pack_filename(project.title), "\n\n---\n\n".join(sections).strip() + "\n"

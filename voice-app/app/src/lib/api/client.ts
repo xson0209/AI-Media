@@ -202,6 +202,8 @@ import type {
   VideoProjectStatusResponse,
   VideoProjectTargetTimelineResponse,
   VideoProjectUpdate,
+  VideoShotUpdate,
+  NewsSpeechMode,
   VideoPromptContentResponse,
   VideoRenderJobResponse,
   VideoRenderReadinessResponse,
@@ -1014,6 +1016,53 @@ class ApiClient {
 
   async listVideoProjects(): Promise<VideoProjectResponse[]> {
     return this.request<VideoProjectResponse[]>('/ai-video/projects');
+  }
+
+  async listNewsVideoProjects(): Promise<VideoProjectResponse[]> {
+    return this.request<VideoProjectResponse[]>('/news-video/projects');
+  }
+
+  async createNewsVideoProject(data: VideoProjectCreate): Promise<VideoProjectResponse> {
+    return this.request<VideoProjectResponse>('/news-video/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getNewsVideoProject(projectId: string): Promise<VideoProjectDetailResponse> {
+    return this.request<VideoProjectDetailResponse>(`/news-video/projects/${projectId}`);
+  }
+
+  async updateNewsVideoProject(projectId: string, data: Partial<VideoProjectUpdate> & { speech_mode?: NewsSpeechMode }): Promise<VideoProjectResponse> {
+    return this.request<VideoProjectResponse>(`/news-video/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(data) });
+  }
+
+  async updateNewsVideoShot(projectId: string, shotId: string, data: Partial<VideoShotUpdate> & { speech_mode?: NewsSpeechMode }): Promise<VideoShotResponse> {
+    return this.request<VideoShotResponse>(`/news-video/projects/${projectId}/shots/${shotId}`, { method: 'PATCH', body: JSON.stringify(data) });
+  }
+
+  async planNewsVideoProject(projectId: string): Promise<VideoShotResponse[]> {
+    return this.request<VideoShotResponse[]>(`/news-video/projects/${projectId}/plan`, { method: 'POST' });
+  }
+
+  async generateNewsVideoPrompts(projectId: string): Promise<VideoShotPromptPackResponse> {
+    return this.request<VideoShotPromptPackResponse>(`/news-video/projects/${projectId}/prompts`, { method: 'POST' });
+  }
+
+  async getNewsVideoPrompt(projectId: string, shotId: string): Promise<VideoPromptContentResponse> {
+    return this.request<VideoPromptContentResponse>(`/news-video/projects/${projectId}/shots/${shotId}/prompt`);
+  }
+
+  async downloadNewsVideoPromptPack(projectId: string): Promise<DownloadedBlob> {
+    return this.download(`/news-video/projects/${projectId}/prompt-pack`, `news-video-prompts-${projectId}.txt`);
+  }
+
+  async getNewsPublishingMetadata(projectId: string): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(`/news-video/projects/${projectId}/publishing-metadata`);
+  }
+
+  async generateNewsPublishingMetadata(projectId: string, data: VideoPublishingMetadataGenerateRequest = {}): Promise<VideoPublishingMetadataResponse> {
+    return this.request<VideoPublishingMetadataResponse>(`/news-video/projects/${projectId}/publishing-metadata`, { method: 'POST', body: JSON.stringify(data) });
   }
 
   async getVideoProjectCharacterFlow(projectId: string): Promise<VideoProjectCharacterFlowResponse> {
@@ -2237,23 +2286,24 @@ class ApiClient {
     );
   }
 
-  async getVideoShotClip(projectId: string, shotId: string): Promise<VideoShotClipResponse | null> {
+  async getVideoShotClip(projectId: string, shotId: string, routePrefix = '/ai-video'): Promise<VideoShotClipResponse | null> {
     return this.request<VideoShotClipResponse | null>(
-      `/ai-video/projects/${projectId}/shots/${shotId}/clip`,
+      `${routePrefix}/projects/${projectId}/shots/${shotId}/clip`,
     );
   }
 
-  getVideoShotClipDownloadUrl(projectId: string, shotId: string): string {
-    return `${this.getBaseUrl()}/ai-video/projects/${projectId}/shots/${shotId}/clip/download`;
+  getVideoShotClipDownloadUrl(projectId: string, shotId: string, routePrefix = '/ai-video'): string {
+    return `${this.getBaseUrl()}${routePrefix}/projects/${projectId}/shots/${shotId}/clip/download`;
   }
 
   async downloadVideoShotClip(
     projectId: string,
     shotId: string,
     fallbackFilename = 'clip.mp4',
+    routePrefix = '/ai-video',
   ): Promise<DownloadedBlob> {
     return this.download(
-      `/ai-video/projects/${projectId}/shots/${shotId}/clip/download`,
+      `${routePrefix}/projects/${projectId}/shots/${shotId}/clip/download`,
       fallbackFilename,
     );
   }
@@ -2263,12 +2313,13 @@ class ApiClient {
     shotId: string,
     file: File,
     provider?: string,
+    routePrefix = '/ai-video',
   ): Promise<VideoShotClipResponse> {
     const formData = new FormData();
     formData.append('file', file);
     if (provider) formData.append('provider', provider);
     const response = await fetch(
-      `${this.getBaseUrl()}/ai-video/projects/${projectId}/shots/${shotId}/clip`,
+      `${this.getBaseUrl()}${routePrefix}/projects/${projectId}/shots/${shotId}/clip`,
       {
         method: 'POST',
         body: formData,
@@ -2293,18 +2344,19 @@ class ApiClient {
       provider?: string;
       concurrency?: number;
       onProgress?: (done: number, total: number) => void;
+      routePrefix?: string;
     },
   ): Promise<VideoShotClipBatchResult> {
     return runClipBatchUpload(
       entries,
-      (entry) => this.uploadVideoShotClip(projectId, entry.shotId, entry.file, options?.provider),
+      (entry) => this.uploadVideoShotClip(projectId, entry.shotId, entry.file, options?.provider, options?.routePrefix),
       { concurrency: options?.concurrency, onProgress: options?.onProgress },
     );
   }
 
-  async deleteVideoShotClip(projectId: string, shotId: string): Promise<{ message: string }> {
+  async deleteVideoShotClip(projectId: string, shotId: string, routePrefix = '/ai-video'): Promise<{ message: string }> {
     return this.request<{ message: string }>(
-      `/ai-video/projects/${projectId}/shots/${shotId}/clip`,
+      `${routePrefix}/projects/${projectId}/shots/${shotId}/clip`,
       {
         method: 'DELETE',
       },
@@ -2420,6 +2472,7 @@ class ApiClient {
   async getVideoRenderReadiness(
     projectId: string,
     settings: VideoRenderSettings,
+    routePrefix = '/ai-video',
   ): Promise<VideoRenderReadinessResponse> {
     const params = new URLSearchParams({
       resolution: settings.resolution,
@@ -2437,24 +2490,25 @@ class ApiClient {
       watermark_backend: settings.watermark_backend ?? 'cv2',
     });
     return this.request<VideoRenderReadinessResponse>(
-      `/ai-video/projects/${projectId}/render/readiness?${params.toString()}`,
+      `${routePrefix}/projects/${projectId}/render/readiness?${params.toString()}`,
     );
   }
 
-  async listVideoRenderSfxAssets(projectId: string): Promise<VideoRenderSfxAssetResponse[]> {
+  async listVideoRenderSfxAssets(projectId: string, routePrefix = '/ai-video'): Promise<VideoRenderSfxAssetResponse[]> {
     return this.request<VideoRenderSfxAssetResponse[]>(
-      `/ai-video/projects/${projectId}/render/sfx-assets`,
+      `${routePrefix}/projects/${projectId}/render/sfx-assets`,
     );
   }
 
   async uploadVideoRenderSfxAsset(
     projectId: string,
     file: File,
+    routePrefix = '/ai-video',
   ): Promise<VideoRenderSfxAssetResponse> {
     const formData = new FormData();
     formData.append('file', file);
     const response = await fetch(
-      `${this.getBaseUrl()}/ai-video/projects/${projectId}/render/sfx-assets`,
+      `${this.getBaseUrl()}${routePrefix}/projects/${projectId}/render/sfx-assets`,
       {
         method: 'POST',
         body: formData,
@@ -2467,57 +2521,59 @@ class ApiClient {
     return response.json();
   }
 
-  async deleteVideoRenderSfxAsset(projectId: string, assetId: string): Promise<{ deleted: boolean }> {
+  async deleteVideoRenderSfxAsset(projectId: string, assetId: string, routePrefix = '/ai-video'): Promise<{ deleted: boolean }> {
     return this.request<{ deleted: boolean }>(
-      `/ai-video/projects/${projectId}/render/sfx-assets/${assetId}`,
+      `${routePrefix}/projects/${projectId}/render/sfx-assets/${assetId}`,
       { method: 'DELETE' },
     );
   }
 
-  async listVideoRenderJobs(projectId: string): Promise<VideoRenderJobResponse[]> {
-    return this.request<VideoRenderJobResponse[]>(`/ai-video/projects/${projectId}/render/jobs`);
+  async listVideoRenderJobs(projectId: string, routePrefix = '/ai-video'): Promise<VideoRenderJobResponse[]> {
+    return this.request<VideoRenderJobResponse[]>(`${routePrefix}/projects/${projectId}/render/jobs`);
   }
 
-  async getLatestVideoRenderJob(projectId: string): Promise<VideoRenderJobResponse | null> {
+  async getLatestVideoRenderJob(projectId: string, routePrefix = '/ai-video'): Promise<VideoRenderJobResponse | null> {
     return this.request<VideoRenderJobResponse | null>(
-      `/ai-video/projects/${projectId}/render/jobs/latest`,
+      `${routePrefix}/projects/${projectId}/render/jobs/latest`,
     );
   }
 
-  async getVideoRenderJob(projectId: string, jobId: string): Promise<VideoRenderJobResponse> {
+  async getVideoRenderJob(projectId: string, jobId: string, routePrefix = '/ai-video'): Promise<VideoRenderJobResponse> {
     return this.request<VideoRenderJobResponse>(
-      `/ai-video/projects/${projectId}/render/jobs/${jobId}`,
+      `${routePrefix}/projects/${projectId}/render/jobs/${jobId}`,
     );
   }
 
   async createVideoRenderJob(
     projectId: string,
     settings: VideoRenderSettings,
+    routePrefix = '/ai-video',
   ): Promise<VideoRenderJobResponse> {
-    return this.request<VideoRenderJobResponse>(`/ai-video/projects/${projectId}/render/jobs`, {
+    return this.request<VideoRenderJobResponse>(`${routePrefix}/projects/${projectId}/render/jobs`, {
       method: 'POST',
       body: JSON.stringify({ settings }),
     });
   }
 
-  async downloadVideoRenderJob(projectId: string, jobId: string): Promise<DownloadedBlob> {
+  async downloadVideoRenderJob(projectId: string, jobId: string, routePrefix = '/ai-video'): Promise<DownloadedBlob> {
     return this.download(
-      `/ai-video/projects/${projectId}/render/jobs/${jobId}/download`,
+      `${routePrefix}/projects/${projectId}/render/jobs/${jobId}/download`,
       'Video hoàn chỉnh.mp4',
     );
   }
 
-  getVideoRenderJobDownloadUrl(projectId: string, jobId: string): string {
-    return `${this.getBaseUrl()}/ai-video/projects/${projectId}/render/jobs/${jobId}/download`;
+  getVideoRenderJobDownloadUrl(projectId: string, jobId: string, routePrefix = '/ai-video'): string {
+    return `${this.getBaseUrl()}${routePrefix}/projects/${projectId}/render/jobs/${jobId}/download`;
   }
 
   async downloadVideoRenderEnhancedArtifact(
     projectId: string,
     jobId: string,
     artifactKey: string,
+    routePrefix = '/ai-video',
   ): Promise<DownloadedBlob> {
     return this.download(
-      `/ai-video/projects/${projectId}/render/jobs/${jobId}/enhanced-artifacts/${encodeURIComponent(artifactKey)}`,
+      `${routePrefix}/projects/${projectId}/render/jobs/${jobId}/enhanced-artifacts/${encodeURIComponent(artifactKey)}`,
       'Báo cáo enhanced render.md',
     );
   }

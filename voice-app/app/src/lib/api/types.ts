@@ -11,6 +11,12 @@ export type VideoPurpose =
   | 'sales_ad'
   | 'localized_variant';
 export type DialogueMode = 'voiceover' | 'character_lines' | 'mixed';
+export type NewsSpeechMode =
+  | 'veo_narration'
+  | 'veo_dialogue'
+  | 'voicebox_co_context'
+  | 'voicebox_khong_context'
+  | 'none';
 export type NarrationDensity = 'light' | 'balanced' | 'dense';
 export type CallToActionStyle = 'none' | 'soft' | 'direct' | 'urgent';
 
@@ -670,6 +676,7 @@ export interface AIPlanningProviderCheckResponse {
 
 export interface VideoProjectCreate {
   topic: string;
+  source_note?: string | null;
   title?: string | null;
   series_id?: string | null;
   story_episode_id?: string | null;
@@ -677,6 +684,7 @@ export interface VideoProjectCreate {
   episode_title?: string | null;
   language?: string;
   target_language?: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
@@ -693,6 +701,15 @@ export interface VideoProjectCreate {
   source_blocks?: VideoSourceBlockDraft[];
 }
 
+export interface VideoShotUpdate {
+  duration_seconds?: number | null;
+  speech_source_override?: NewsSpeechMode | null;
+  speech_mode?: NewsSpeechMode | null;
+  vietnamese_description?: string | null;
+  english_narration?: string | null;
+  speech_cues?: VideoShotSpeechCue[];
+}
+
 export interface VideoProjectUpdate {
   title?: string;
   topic?: string;
@@ -702,6 +719,7 @@ export interface VideoProjectUpdate {
   episode_title?: string | null;
   language?: string;
   target_language?: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
@@ -1529,6 +1547,7 @@ export interface VideoProjectResponse {
   topic: string;
   language: string;
   target_language: VideoLanguage;
+  speech_source?: NewsSpeechMode | null;
   video_purpose: VideoPurpose;
   dialogue_mode: DialogueMode;
   narration_density: NarrationDensity;
@@ -1627,6 +1646,7 @@ export interface VideoShotResponse {
   scene_id?: string | null;
   shot_order: number;
   duration_seconds?: number | null;
+  speech_source_override?: NewsSpeechMode | null;
   vietnamese_description?: string | null;
   english_narration?: string | null;
   primary_action?: string | null;

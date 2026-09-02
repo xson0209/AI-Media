@@ -480,6 +480,7 @@ class VideoShotSpeechCue(BaseModel):
     delivery: Optional[str] = Field(default=None, max_length=4000)
     emotion: Optional[str] = Field(default=None, max_length=2000)
     context: Optional[str] = Field(default=None, max_length=6000)
+    pronunciation_notes: Optional[str] = Field(default=None, max_length=4000)
     start_seconds: Optional[float] = Field(default=None, ge=0, le=7200)
     end_seconds: Optional[float] = Field(default=None, ge=0, le=7200)
     lip_sync_required: bool = False
@@ -506,6 +507,11 @@ class VideoShotDraft(BaseModel):
 
 class VideoShotUpdate(BaseModel):
     duration_seconds: Optional[float] = Field(default=None, ge=0.5, le=30)
+    speech_source_override: Optional[str] = Field(
+        default=None,
+        pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
+    )
+    speech_mode: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     vietnamese_description: Optional[str] = Field(default=None, max_length=12000)
     english_narration: Optional[str] = Field(default=None, max_length=20000)
     primary_action: Optional[str] = Field(default=None, max_length=4000)
@@ -537,6 +543,7 @@ class VideoShotResponse(BaseModel):
     scene_id: Optional[str] = None
     shot_order: int
     duration_seconds: Optional[float] = None
+    speech_source_override: Optional[str] = None
     vietnamese_description: Optional[str] = None
     english_narration: Optional[str] = None
     primary_action: Optional[str] = None
@@ -718,6 +725,7 @@ class VideoRenderTimelineShot(BaseModel):
     clip_id: Optional[str] = None
     clip_duration_seconds: Optional[float] = None
     has_narration: bool = False
+    effective_speech_source: Optional[str] = None
     retention: Optional[dict[str, Any]] = None
     transition: Optional[dict[str, Any]] = None
     sound_design: Optional[dict[str, Any]] = None
@@ -1799,6 +1807,10 @@ class VideoEpisodeCreate(_VisualStyleLimitedModel):
     title: Optional[str] = Field(default=None, max_length=160)
     language: str = Field(default="en", max_length=20)
     target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
+    speech_source: Optional[str] = Field(
+        default=None,
+        pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
+    )
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
@@ -1827,6 +1839,7 @@ class VideoProjectCreate(_VisualStyleLimitedModel):
     """Request model for creating an AI Video Assistant project."""
 
     topic: str = Field(..., min_length=1, max_length=4000)
+    source_note: Optional[str] = Field(default=None, max_length=10000)
     title: Optional[str] = Field(default=None, max_length=160)
     series_id: Optional[str] = None
     story_episode_id: Optional[str] = None
@@ -1834,6 +1847,10 @@ class VideoProjectCreate(_VisualStyleLimitedModel):
     episode_title: Optional[str] = Field(default=None, max_length=160)
     language: str = Field(default="en", max_length=20)
     target_language: str = Field(default="en", pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
+    speech_source: Optional[str] = Field(
+        default=None,
+        pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
+    )
     video_purpose: str = Field(default=video_purpose_service.VIDEO_PURPOSE_CUSTOM, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
@@ -1860,6 +1877,8 @@ class VideoProjectUpdate(_VisualStyleLimitedModel):
     episode_title: Optional[str] = Field(default=None, max_length=160)
     language: Optional[str] = Field(default=None, max_length=20)
     target_language: Optional[str] = Field(default=None, pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
+    speech_source: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
+    speech_mode: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
@@ -1887,6 +1906,7 @@ class VideoProjectResponse(BaseModel):
     topic: str
     language: str
     target_language: str = "en"
+    speech_source: Optional[str] = None
     video_purpose: str = video_purpose_service.VIDEO_PURPOSE_CUSTOM
     dialogue_mode: str = "voiceover"
     narration_density: str = "balanced"

@@ -512,8 +512,15 @@ def cancel_auto_run(project_id: str, run_id: str, db: Session) -> models.VideoAu
     return auto_run_response(row, db)
 
 def sync_stale_running_runs(db: Session) -> int:
+    """Mark interrupted in-flight runs after a process restart.
+
+    Queued runs are intentionally excluded here.  A queued run has not started
+    any work yet and can be safely handed back to the dispatcher below.  The
+    previous implementation marked queued rows as failed, leaving no task to
+    execute them after a restart.
+    """
     now = datetime.utcnow()
-    result = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.status.in_(["queued", "waiting_workflow", "running", "waiting_planning", "waiting_voice", "waiting_clips", "waiting_render"])).update(
+    result = db.query(DBVideoAutoRun).filter(DBVideoAutoRun.status.in_(["waiting_workflow", "running", "waiting_planning", "waiting_voice", "waiting_clips", "waiting_render"])).update(
         {
             "status": "failed",
             "failure_reason": "Auto-run bị gián đoạn khi ứng dụng đóng.",
@@ -526,6 +533,25 @@ def sync_stale_running_runs(db: Session) -> int:
     if result:
         db.commit()
     return int(result or 0)
+
+
+def resume_queued_auto_runs(db: Session) -> int:
+    """Re-dispatch queued runs left behind by a backend restart.
+
+    The workflow pool is in-memory, so queued rows outlive their original
+    background task.  Recreating the task from the durable row makes startup
+    recovery idempotent; ``_workflow_acquired`` re-checks the row before any
+    step is executed and terminal rows are ignored.
+    """
+    rows = (
+        db.query(DBVideoAutoRun)
+        .filter(DBVideoAutoRun.status.in_(["queued", "waiting_workflow"]))
+        .order_by(DBVideoAutoRun.created_at.asc())
+        .all()
+    )
+    for row in rows:
+        create_background_task(_run_auto_run(row.id))
+    return len(rows)
 
 def resume_interrupted_auto_run_after_clip_job(job_id: str, db: Session) -> str | None:
     job = db.query(DBVideoClipGenerationJob).filter(DBVideoClipGenerationJob.id == job_id).first()
