@@ -108,6 +108,10 @@ async def run_startup(application: FastAPI) -> None:
         if stale_auto_run_count > 0:
             logger.info("Marked %d stale AI Video auto-run(s) as failed", stale_auto_run_count)
 
+        resumed_auto_run_count = video_auto_runs.resume_queued_auto_runs(db)
+        if resumed_auto_run_count > 0:
+            logger.info("Re-dispatched %d queued AI Video auto-run(s) after startup", resumed_auto_run_count)
+
         stale_clip_generation_count = video_clip_generation.sync_stale_running_jobs(db)
         if stale_clip_generation_count > 0:
             logger.info("Marked %d stale AI Video clip generation job(s) as failed", stale_clip_generation_count)

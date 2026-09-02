@@ -11,10 +11,12 @@ import {
   Download,
   FileText,
   Film,
+  FolderOpen,
   Gauge,
   Image as ImageIcon,
   Loader2,
   Lock,
+  ListVideo,
   Maximize2,
   type LucideIcon,
   MemoryStick,
@@ -198,15 +200,15 @@ const SOURCE_TEMPLATES: SourceDraft[] = [
 
 const initialForm: DraftForm = {
   title: '',
-  targetLanguage: 'en',
-  videoPurpose: 'global_short',
-  dialogueMode: 'voiceover',
+  targetLanguage: 'vi',
+  videoPurpose: 'vietnam_market',
+  dialogueMode: 'character_lines',
   narrationDensity: 'dense',
   callToActionStyle: 'soft',
   promptSegmentCount: 7,
   promptSegmentDuration: 8,
   microScenesPerPrompt: 4,
-  aspectRatio: '9:16',
+  aspectRatio: '16:9',
   visualStyle:
     'cinematic realistic video, natural light, consistent character details, fast editorial pacing',
   voiceProfileId: '',
@@ -231,8 +233,8 @@ const VIDEO_PURPOSE_OPTIONS: VideoPurposeOption[] = [
     label: 'Thị trường Việt Nam',
     description: 'Tối ưu cho audience Việt Nam, lời kể tự nhiên và dễ nghe.',
     recommendedTargetLanguage: 'vi',
-    dialogueMode: 'voiceover',
-    narrationDensity: 'balanced',
+    dialogueMode: 'character_lines',
+    narrationDensity: 'dense',
     subtitle: 'Phụ đề tiếng Việt khớp giọng đọc.',
     tone: 'Đời thường, rõ ý, tránh cảm giác dịch máy.',
     cta: 'soft',
@@ -645,6 +647,16 @@ function isFreshVideoPrompt(
   );
 }
 
+/** Remove the instructional heading from clipboard output while preserving
+ * the prompt body exactly as generated. The heading remains visible in the
+ * prompt preview, but it is noise when pasted into a video tool.
+ */
+function cleanCopiedVideoPrompt(value: string): string {
+  return value
+    .replace(/^\s*#\s*Prompt gốc để copy sang công cụ tạo video\s*\r?\n?/i, '')
+    .trim();
+}
+
 function allVideoPromptsText(
   shots: VideoShotResponse[],
   promptByShotId: Record<string, VideoPromptContentResponse | undefined>,
@@ -654,7 +666,9 @@ function allVideoPromptsText(
       const prompt = promptByShotId[shot.id];
       // Copy only the generation prompt. Review notes and the negative prompt
       // stay visible in the UI but must not be mixed into clipboard content.
-      return isFreshVideoPrompt(shot, prompt) ? prompt?.content?.trim() ?? '' : '';
+      return isFreshVideoPrompt(shot, prompt)
+        ? cleanCopiedVideoPrompt(prompt?.content?.trim() ?? '')
+        : '';
     })
     .filter(Boolean)
     .join('\n\n---\n\n');
@@ -2163,10 +2177,11 @@ export function AIVideoAssistant() {
   const [form, setForm] = useState<DraftForm>(initialForm);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [shortcutToast, setShortcutToast] = useState<string | null>(null);
   const [creationMode, setCreationMode] = useState<ProjectCreationMode>('quick');
   const [autoMode, setAutoMode] = useState<VideoAutoRunMode>('full_auto');
   const [autoMaterialTarget, setAutoMaterialTarget] =
-    useState<VideoAutoRunMaterialTarget>('prompts_only');
+    useState<VideoAutoRunMaterialTarget>('publishing_kit');
   const [seriesDraft, setSeriesDraft] = useState<SeriesDraft>(emptySeriesDraft);
   const [episodeDraft, setEpisodeDraft] = useState<EpisodeDraft>(emptyEpisodeDraft);
   const [episodeDialogOpen, setEpisodeDialogOpen] = useState(false);
@@ -2190,6 +2205,7 @@ export function AIVideoAssistant() {
   const [qualityOverrideReason, setQualityOverrideReason] = useState('');
   const voicePreviewRef = useRef<HTMLAudioElement | null>(null);
   const appliedDraftRef = useRef<string | null>(null);
+  const shortcutToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestedProjectId = useMemo(() => {
     return routeSearchValue(routerState.location.search, 'projectId');
   }, [routerState.location.search]);
@@ -3497,6 +3513,104 @@ export function AIVideoAssistant() {
     }
   };
 
+  const copyProjectTitle = async () => {
+    const title = selectedProject?.title?.trim();
+    if (!title) {
+      setNotice('Chưa chọn dự án để sao chép tên.');
+      return;
+    }
+    try {
+      await writeClipboardText(title);
+      setNotice(`Đã sao chép tên dự án: ${title}`);
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+    }
+  };
+
+  const showShortcutToast = (message: string) => {
+    if (shortcutToastTimerRef.current) {
+      clearTimeout(shortcutToastTimerRef.current);
+    }
+    setShortcutToast(message);
+    shortcutToastTimerRef.current = setTimeout(() => {
+      setShortcutToast(null);
+      shortcutToastTimerRef.current = null;
+    }, 3000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (shortcutToastTimerRef.current) clearTimeout(shortcutToastTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const copyTitleShortcut = key === 'n' && event.altKey && !event.shiftKey;
+      if (!(event.ctrlKey || event.metaKey) || (!event.shiftKey && !copyTitleShortcut)) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
+        return;
+      }
+
+      if (key === 'o') {
+        event.preventDefault();
+        setProjectPickerOpen(true);
+        showShortcutToast('Đã mở bảng đổi dự án.');
+      } else if (key === 'p') {
+        event.preventDefault();
+        if (!videoPromptAvailableCount) {
+          showShortcutToast('Dự án chưa có prompt để mở.');
+          return;
+        }
+        setVideoPromptLibraryOpen(true);
+        showShortcutToast('Đã mở popup câu lệnh.');
+      } else if (key === 'v') {
+        event.preventDefault();
+        if (!activeProjectId || !shots.length) {
+          showShortcutToast('Chưa có dự án hoặc phân đoạn clip.');
+          return;
+        }
+        document.getElementById('ai-video-veo-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showShortcutToast('Đã chuyển tới khu vực clip video.');
+      } else if (key === 'c') {
+        event.preventDefault();
+        if (!videoPromptText.trim()) {
+          showShortcutToast('Chưa có prompt để sao chép.');
+          return;
+        }
+        void copyVideoPromptText(
+          'all-video-prompts-shortcut',
+          videoPromptText,
+          `Đã sao chép ${videoPromptReadyCount}/${shots.length} prompt đủ điều kiện.`,
+        );
+        showShortcutToast('Đã sao chép toàn bộ prompt.');
+      } else if (key === 'n' && copyTitleShortcut) {
+        event.preventDefault();
+        if (!selectedProject?.title?.trim()) {
+          showShortcutToast('Chưa chọn dự án để sao chép tên.');
+          return;
+        }
+        void copyProjectTitle();
+        showShortcutToast('Đã sao chép tên dự án.');
+      }
+    };
+
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [
+    activeProjectId,
+    copyVideoPromptText,
+    copyProjectTitle,
+    showShortcutToast,
+    selectedProject?.title,
+    shots.length,
+    videoPromptAvailableCount,
+    videoPromptReadyCount,
+    videoPromptText,
+  ]);
+
   const copyShotPrompt = async (shot: VideoShotResponse) => {
     if (shot.prompt_status === 'missing') {
       throw new Error('Câu lệnh video cần được tạo lại theo ngôn ngữ tiếng Anh trước khi copy sang Veo 3.');
@@ -3507,7 +3621,7 @@ export function AIVideoAssistant() {
     }
     await copyVideoPromptText(
       `shot-${shot.id}`,
-      prompt.content,
+      cleanCopiedVideoPrompt(prompt.content),
       shot.prompt_status === 'stale'
         ? `Đã sao chép prompt cũ của ${shotLabel(shot)}. Hãy tạo lại trước khi render.`
         : `Đã sao chép prompt của ${shotLabel(shot)}.`,
@@ -3817,6 +3931,49 @@ export function AIVideoAssistant() {
           ) : null}
         </div>
       </div>
+      <div className="mt-3 flex flex-wrap gap-2 border-t border-border/60 pt-3">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs"
+          title="Phím tắt: Ctrl+Shift+O"
+          aria-keyshortcuts="Control+Shift+O"
+          onClick={() => setProjectPickerOpen(true)}
+        >
+          <FolderOpen className="h-3.5 w-3.5" />
+          Đổi dự án
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs"
+          title="Phím tắt: Ctrl+Shift+P"
+          aria-keyshortcuts="Control+Shift+P"
+          disabled={!videoPromptAvailableCount}
+          onClick={() => setVideoPromptLibraryOpen(true)}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          Mở popup câu lệnh
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs"
+          title="Phím tắt: Ctrl+Shift+V"
+          aria-keyshortcuts="Control+Shift+V"
+          disabled={!activeProjectId || !shots.length}
+          onClick={() => document.getElementById('ai-video-veo-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+        >
+          <ListVideo className="h-3.5 w-3.5" />
+          Chọn nhiều clip video
+        </Button>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        Phím tắt: Ctrl+Shift+O đổi dự án · Ctrl+Shift+P mở prompt · Ctrl+Shift+V tới clip · Ctrl+Shift+C copy prompt · Ctrl+Alt+N copy tên dự án
+      </p>
       {currentVoiceQueueSummary ? (
         <div
           className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-violet-500/20 bg-violet-500/10 px-3 py-2 text-xs"
@@ -4559,6 +4716,15 @@ export function AIVideoAssistant() {
               {notice}
             </div>
           )}
+          {shortcutToast ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none fixed inset-x-4 bottom-5 z-50 mx-auto flex max-w-md items-center justify-center rounded-full border border-foreground/15 bg-foreground px-4 py-2.5 text-center text-sm font-medium text-background shadow-xl"
+            >
+              {shortcutToast}
+            </div>
+          ) : null}
 
           {selectedProject ? (
             <section
@@ -4615,6 +4781,17 @@ export function AIVideoAssistant() {
                     >
                       <SlidersHorizontal className="h-4 w-4" />
                       Đổi dự án
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!selectedProject.title.trim()}
+                      onClick={() => void copyProjectTitle()}
+                      title="Sao chép tên dự án · Phím tắt: Ctrl+Alt+N"
+                      aria-keyshortcuts="Control+Alt+N"
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copy tên dự án
                     </Button>
                     <Button
                       size="sm"
@@ -6262,11 +6439,13 @@ export function AIVideoAssistant() {
                 </div>
               </section>
 
-              <AIVideoVeoChromePanel
-                projectId={activeProjectId}
-                shots={shots}
-                onNotice={setNotice}
-              />
+              <div id="ai-video-veo-panel" className="scroll-mt-4">
+                <AIVideoVeoChromePanel
+                  projectId={activeProjectId}
+                  shots={shots}
+                  onNotice={setNotice}
+                />
+              </div>
 
               <AIVideoRenderPanel
                 projectId={activeProjectId}
@@ -6834,7 +7013,7 @@ function VideoPromptLibraryDialog({
 
   const focusedShot = promptShots.find((shot) => shot.id === selectedPromptShotId) ?? promptShots[0];
   const focusedPrompt = focusedShot ? promptByShotId[focusedShot.id] : undefined;
-  const focusedCopyValue = focusedPrompt?.content?.trim() ?? '';
+  const focusedCopyValue = cleanCopiedVideoPrompt(focusedPrompt?.content?.trim() ?? '');
   const focusedCopyKey = focusedShot ? `modal-video-shot-${focusedShot.id}` : '';
 
   return (
@@ -7001,7 +7180,7 @@ function VideoPromptLibraryDialog({
                 const prompt = promptByShotId[shot.id];
                 const block = videoPromptBlock(shot, prompt);
                 const copyKey = `modal-video-shot-${shot.id}`;
-                const copyValue = prompt?.content?.trim() ?? '';
+                const copyValue = cleanCopiedVideoPrompt(prompt?.content?.trim() ?? '');
                 const canCopy = Boolean(copyValue);
                 const copyNotice =
                   shot.prompt_status === 'stale'
