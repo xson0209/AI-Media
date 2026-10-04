@@ -1,5 +1,5 @@
 import { Link, useMatchRoute } from '@tanstack/react-router';
-import { AudioLines, BookImage, BookOpenCheck, BookOpenText, Box, Captions, Clapperboard, FileVideo, type LucideIcon, Mic, Package, Settings, Volume2, Wand2 } from 'lucide-react';
+import { AudioLines, BookImage, BookOpenCheck, BookOpenText, Box, Captions, Clapperboard, FileVideo, type LucideIcon, Mic, Package, Settings, Sparkles, Volume2, Wand2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import voiceboxLogo from '@/assets/voicebox-logo.png';
@@ -32,6 +32,7 @@ const tabs: Array<{
   { id: 'ai-video', path: '/ai-video', icon: Clapperboard, label: 'Dự án prompt video' },
   { id: 'news-video', path: '/news-video', icon: Clapperboard, label: 'Video tin tức' },
   { id: 'product-video', path: '/product-video', icon: Package, label: 'Prompt video sản phẩm' },
+  { id: 'content-tools', path: '/content-tools', icon: Sparkles, label: 'Tạo nội dung thành video' },
   { id: 'comic-series-analysis', path: '/comic-series-analysis', icon: BookImage, label: 'Phân tích truyện tranh' },
   { id: 'story-studio', path: '/story-studio', icon: BookOpenText, label: 'Story Studio' },
   { id: 'models', path: '/models', icon: Box, labelKey: 'nav.models' },

@@ -3,13 +3,14 @@ Pydantic models for request/response validation.
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Literal
 from datetime import datetime
 
 from .utils.capture_chords import (
     default_push_to_talk_chord,
     default_toggle_to_talk_chord,
 )
+from .services import content_profile as content_profile_service
 from .services import video_language, video_purpose as video_purpose_service
 
 _VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000
@@ -361,6 +362,8 @@ class AIPlanningSettingsResponse(BaseModel):
     codex_path: Optional[str] = None
     model: Optional[str] = None
     model_reasoning_effort: Optional[str] = None
+    content_provider: str = "codex"
+    content_model: Optional[str] = None
     timeout_seconds: int = Field(default=600, ge=5, le=600)
     output_schema_path: Optional[str] = None
 
@@ -377,6 +380,11 @@ class AIPlanningSettingsUpdate(BaseModel):
         default=None,
         pattern="^(low|medium|high|xhigh|max|ultra)$",
     )
+    content_provider: Optional[str] = Field(
+        default=None,
+        pattern="^(codex|claude)$",
+    )
+    content_model: Optional[str] = Field(default=None, max_length=160)
     timeout_seconds: Optional[int] = Field(default=None, ge=5, le=600)
     output_schema_path: Optional[str] = Field(default=None, max_length=1000)
 
@@ -401,7 +409,7 @@ class AIPlanningProviderCheckResponse(BaseModel):
     fallback_error_code: Optional[str] = None
 
 class AIPlanningTestResponse(BaseModel):
-    """Live Codex test result for the configured AI planning provider."""
+    """Live test result for the configured content provider."""
 
     ready: bool
     provider: str
@@ -419,6 +427,65 @@ class AIPlanningTestResponse(BaseModel):
     fallback_used: bool = False
     fallback_reason: Optional[str] = None
     fallback_error_code: Optional[str] = None
+
+
+# Content Tools -------------------------------------------------------------
+# These contracts deliberately stay independent from the persisted AI Video
+# project models.  The route produces a reviewable brief and prompt pack; a
+# later handoff can map the approved output into an AI Video project.
+ContentToolMode = Literal["podcast_short", "multi_angle", "lesson_story"]
+ContentToolAngle = Literal["how_to", "story", "comparison", "counterpoint", "q_and_a"]
+
+
+class ContentToolsGenerateRequest(BaseModel):
+    mode: ContentToolMode
+    source_text: Optional[str] = Field(default=None, max_length=120000)
+    source_url: Optional[str] = Field(default=None, max_length=4000)
+    title: Optional[str] = Field(default=None, max_length=200)
+    language: str = Field(default="vi", max_length=20)
+    target_duration_seconds: int = Field(default=60, ge=15, le=600)
+    angles: List[ContentToolAngle] = Field(default_factory=list, max_length=5)
+    audience: Optional[str] = Field(default=None, max_length=500)
+    age_band: Optional[str] = Field(default=None, max_length=100)
+    visual_style: Optional[str] = Field(default=None, max_length=1000)
+    lesson_outcome: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_source(self):
+        if not (self.source_text and self.source_text.strip()) and not (self.source_url and self.source_url.strip()):
+            raise ValueError("Cần nhập nội dung, transcript hoặc URL nguồn trước khi tạo.")
+        return self
+
+
+class ContentToolScene(BaseModel):
+    order: int = Field(ge=1, le=30)
+    title: str = Field(min_length=1, max_length=200)
+    narration: str = Field(min_length=1, max_length=3000)
+    visual_description: str = Field(min_length=1, max_length=3000)
+    video_prompt: str = Field(min_length=1, max_length=5000)
+    negative_prompt: str = Field(default="", max_length=2000)
+    duration_seconds: int = Field(default=5, ge=1, le=60)
+
+
+class ContentToolAngleResult(BaseModel):
+    angle: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=120)
+    hook: str = Field(min_length=1, max_length=1000)
+    promise: str = Field(min_length=1, max_length=1000)
+    script: str = Field(min_length=1, max_length=12000)
+    scenes: List[ContentToolScene] = Field(min_length=1, max_length=30)
+
+
+class ContentToolsGenerateResponse(BaseModel):
+    request_id: str
+    mode: ContentToolMode
+    title: str
+    source_summary: str
+    selected_excerpt: Optional[str] = None
+    angles: List[ContentToolAngleResult] = Field(min_length=1, max_length=8)
+    next_steps: List[str] = Field(default_factory=list, max_length=12)
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 class VideoSourceBlockDraft(BaseModel):
     """Structured source content block for AI Video phase 2."""
@@ -454,6 +521,14 @@ class VideoStoryDevelopRequest(BaseModel):
 
 class VideoStoryApprovalRequest(BaseModel):
     approved: bool = True
+
+class VideoLongformApprovalRequest(BaseModel):
+    approved: bool
+    expected_revision: Optional[int] = Field(default=None, ge=1)
+
+class VideoLongformOutlineRequest(BaseModel):
+    outline: dict
+    expected_revision: Optional[int] = Field(default=None, ge=1)
 
 class VideoShotMicroScene(BaseModel):
     order: int = Field(..., ge=1, le=20)
@@ -622,6 +697,17 @@ class VideoShotPromptResponse(BaseModel):
 class VideoShotPromptPackResponse(BaseModel):
     project_id: str
     prompts: List[VideoShotPromptResponse] = Field(default_factory=list)
+
+class VideoSourceVisualSelection(BaseModel):
+    asset_id: str = Field(..., min_length=1, max_length=200)
+    region_id: Optional[str] = Field(default=None, max_length=200)
+    motion: str = Field(default="hold", pattern="^(hold|zoom)$")
+    highlight: bool = False
+
+
+class VideoScreenshotClipCreate(VideoSourceVisualSelection):
+    resolution: str = Field(default="720p", pattern="^(720p|1080p)$")
+
 
 class VideoShotClipResponse(BaseModel):
     """Video clip attached to one AI Video phase-2 shot."""
@@ -1539,6 +1625,7 @@ class StoryVideoHandoffSettings(BaseModel):
     dialogue_mode: str = Field(default="character_lines", pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: str = Field(default="dense", pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default="direct", pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: Optional[str] = Field(default="none", pattern=video_purpose_service.CTA_ACTION_PATTERN)
     target_duration_seconds: Optional[int] = Field(default=None, ge=5, le=7200)
     default_shot_duration_seconds: Optional[int] = Field(default=None, ge=1, le=5)
     prompt_segment_count: Optional[int] = Field(default=DEFAULT_STORY_VIDEO_PROMPT_SEGMENT_COUNT, ge=1, le=100)
@@ -1812,9 +1899,20 @@ class VideoEpisodeCreate(_VisualStyleLimitedModel):
         pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
     )
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    content_profile_version: Optional[int] = Field(default=None, ge=1, le=100)
+    content_objective: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_OBJECTIVE_PATTERN)
+    content_genre: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_GENRE_PATTERN)
+    audience_age_band: Optional[str] = Field(default=None, pattern=content_profile_service.AUDIENCE_AGE_BAND_PATTERN)
+    format_profile: Optional[str] = Field(default=None, pattern=content_profile_service.FORMAT_PROFILE_PATTERN)
+    distribution_platform: Optional[str] = Field(default=None, pattern=content_profile_service.DISTRIBUTION_PLATFORM_PATTERN)
+    interaction_mode: Optional[str] = Field(default=None, pattern=content_profile_service.INTERACTION_MODE_PATTERN)
+    safety_policy: Optional[str] = Field(default=None, pattern=content_profile_service.SAFETY_POLICY_PATTERN)
+    made_for_kids: Optional[bool] = None
+    learning_objective: Optional[str] = Field(default=None, max_length=2000)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     target_duration_seconds: Optional[int] = Field(default=None, ge=5, le=7200)
     aspect_ratio: Optional[str] = Field(default=None, pattern="^(9:16|16:9|1:1)$")
     visual_style: Optional[str] = Field(default=None, max_length=2000)
@@ -1852,9 +1950,20 @@ class VideoProjectCreate(_VisualStyleLimitedModel):
         pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$",
     )
     video_purpose: str = Field(default=video_purpose_service.VIDEO_PURPOSE_CUSTOM, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    content_profile_version: Optional[int] = Field(default=None, ge=1, le=100)
+    content_objective: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_OBJECTIVE_PATTERN)
+    content_genre: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_GENRE_PATTERN)
+    audience_age_band: Optional[str] = Field(default=None, pattern=content_profile_service.AUDIENCE_AGE_BAND_PATTERN)
+    format_profile: Optional[str] = Field(default=None, pattern=content_profile_service.FORMAT_PROFILE_PATTERN)
+    distribution_platform: Optional[str] = Field(default=None, pattern=content_profile_service.DISTRIBUTION_PLATFORM_PATTERN)
+    interaction_mode: Optional[str] = Field(default=None, pattern=content_profile_service.INTERACTION_MODE_PATTERN)
+    safety_policy: Optional[str] = Field(default=None, pattern=content_profile_service.SAFETY_POLICY_PATTERN)
+    made_for_kids: Optional[bool] = None
+    learning_objective: Optional[str] = Field(default=None, max_length=2000)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: Optional[str] = Field(default="none", pattern=video_purpose_service.CTA_ACTION_PATTERN)
     target_duration_seconds: Optional[int] = Field(default=None, ge=5, le=7200)
     aspect_ratio: str = Field(default="9:16", pattern="^(9:16|16:9|1:1)$")
     visual_style: Optional[str] = Field(default=None, max_length=2000)
@@ -1870,6 +1979,7 @@ class VideoProjectUpdate(_VisualStyleLimitedModel):
     """Partial update for an AI Video Assistant project."""
 
     title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    archived: Optional[bool] = None
     topic: Optional[str] = Field(default=None, min_length=1, max_length=4000)
     series_id: Optional[str] = None
     story_episode_id: Optional[str] = None
@@ -1880,9 +1990,20 @@ class VideoProjectUpdate(_VisualStyleLimitedModel):
     speech_source: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     speech_mode: Optional[str] = Field(default=None, pattern="^(veo_narration|veo_dialogue|voicebox_co_context|voicebox_khong_context|none)$")
     video_purpose: Optional[str] = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    content_profile_version: Optional[int] = Field(default=None, ge=1, le=100)
+    content_objective: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_OBJECTIVE_PATTERN)
+    content_genre: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_GENRE_PATTERN)
+    audience_age_band: Optional[str] = Field(default=None, pattern=content_profile_service.AUDIENCE_AGE_BAND_PATTERN)
+    format_profile: Optional[str] = Field(default=None, pattern=content_profile_service.FORMAT_PROFILE_PATTERN)
+    distribution_platform: Optional[str] = Field(default=None, pattern=content_profile_service.DISTRIBUTION_PLATFORM_PATTERN)
+    interaction_mode: Optional[str] = Field(default=None, pattern=content_profile_service.INTERACTION_MODE_PATTERN)
+    safety_policy: Optional[str] = Field(default=None, pattern=content_profile_service.SAFETY_POLICY_PATTERN)
+    made_for_kids: Optional[bool] = None
+    learning_objective: Optional[str] = Field(default=None, max_length=2000)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     target_duration_seconds: Optional[int] = Field(default=None, ge=5, le=7200)
     aspect_ratio: Optional[str] = Field(default=None, pattern="^(9:16|16:9|1:1)$")
     visual_style: Optional[str] = Field(default=None, max_length=2000)
@@ -1908,14 +2029,27 @@ class VideoProjectResponse(BaseModel):
     target_language: str = "en"
     speech_source: Optional[str] = None
     video_purpose: str = video_purpose_service.VIDEO_PURPOSE_CUSTOM
+    content_profile_version: int = content_profile_service.CONTENT_PROFILE_VERSION
+    content_objective: str = "entertain"
+    content_genre: str = "general"
+    audience_age_band: str = "all_ages"
+    format_profile: str = "short_60s"
+    distribution_platform: str = "multi_platform"
+    interaction_mode: str = "none"
+    safety_policy: str = "standard"
+    made_for_kids: bool = False
+    learning_objective: Optional[str] = None
     dialogue_mode: str = "voiceover"
     narration_density: str = "balanced"
     call_to_action_style: Optional[str] = None
+    cta_action: Optional[str] = None
     target_duration_seconds: Optional[int] = None
     aspect_ratio: str
     visual_style: Optional[str] = None
     voice_profile_id: Optional[str] = None
     status: str
+    archived: bool = False
+    archived_at: Optional[datetime] = None
     script_approved: bool
     story_approved: bool = False
     phase: str = "phase1"
@@ -1944,9 +2078,20 @@ class VideoProjectLocalizeRequest(BaseModel):
 
     target_language: str = Field(..., pattern=video_language.VIDEO_TARGET_LANGUAGE_PATTERN)
     video_purpose: str = Field(default="localized_variant", pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
+    content_profile_version: Optional[int] = Field(default=None, ge=1, le=100)
+    content_objective: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_OBJECTIVE_PATTERN)
+    content_genre: Optional[str] = Field(default=None, pattern=content_profile_service.CONTENT_GENRE_PATTERN)
+    audience_age_band: Optional[str] = Field(default=None, pattern=content_profile_service.AUDIENCE_AGE_BAND_PATTERN)
+    format_profile: Optional[str] = Field(default=None, pattern=content_profile_service.FORMAT_PROFILE_PATTERN)
+    distribution_platform: Optional[str] = Field(default=None, pattern=content_profile_service.DISTRIBUTION_PLATFORM_PATTERN)
+    interaction_mode: Optional[str] = Field(default=None, pattern=content_profile_service.INTERACTION_MODE_PATTERN)
+    safety_policy: Optional[str] = Field(default=None, pattern=content_profile_service.SAFETY_POLICY_PATTERN)
+    made_for_kids: Optional[bool] = None
+    learning_objective: Optional[str] = Field(default=None, max_length=2000)
     dialogue_mode: Optional[str] = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: Optional[str] = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: Optional[str] = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     title: Optional[str] = Field(default=None, max_length=160)
     voice_profile_id: Optional[str] = None
 
@@ -1992,6 +2137,9 @@ class VideoProjectDetailResponse(VideoProjectResponse):
     source_blocks: List[VideoSourceBlockResponse] = Field(default_factory=list)
     scenes: List[VideoSceneResponse] = Field(default_factory=list)
     shots: List[VideoShotResponse] = Field(default_factory=list)
+    longform_outline_json: Optional[dict[str, Any]] = None
+    longform_chapters_json: Optional[List[dict[str, Any]]] = None
+    longform_outline_approved: bool = False
 
 class VideoSceneUpdate(BaseModel):
     """Partial update for one scene."""
@@ -2264,6 +2412,7 @@ class VideoPackageManifestResponse(BaseModel):
     dialogue_mode: str = "voiceover"
     narration_density: str = "balanced"
     call_to_action_style: Optional[str] = None
+    cta_action: Optional[str] = None
     aspect_ratio: str
     subtitle_filename: Optional[str] = None
     scenes: List[VideoPackageManifestScene] = Field(default_factory=list)
@@ -3533,10 +3682,11 @@ class ResearchSourceResponse(BaseModel):
 
 
 class ResearchSourceTextCreate(BaseModel):
-    source_type: str = Field(..., pattern="^(text|docs_url|video_url|story_url)$")
+    source_type: str = Field(..., pattern="^(text|docs_url|video_url|story_url|github_repo)$")
     title: Optional[str] = Field(None, max_length=200)
     content: Optional[str] = Field(None, max_length=100000)
     input_url: Optional[str] = Field(None, max_length=4000)
+    repository_ref: Optional[str] = Field(None, max_length=200)
 
 
 class ResearchSeriesMemorySourceCreate(BaseModel):
@@ -3785,6 +3935,7 @@ class ResearchHandoffCreate(BaseModel):
     target_duration_seconds: Optional[int] = Field(None, ge=1, le=3600)
     aspect_ratio: str = Field(default="9:16", pattern="^(9:16|16:9|1:1)$")
     idempotency_key: Optional[str] = Field(None, max_length=200)
+    content_genre: Optional[str] = Field(None, pattern=content_profile_service.CONTENT_GENRE_PATTERN)
 
 
 class ResearchHandoffResponse(BaseModel):

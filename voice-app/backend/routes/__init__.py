@@ -32,6 +32,7 @@ def register_routers(app: FastAPI) -> None:
     from .research import router as research_router
     from .automation_hub import router as automation_hub_router
     from .news_video import router as news_video_router
+    from .content_tools import router as content_tools_router
 
     app.include_router(health_router)
     app.include_router(profiles_router)
@@ -60,3 +61,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(research_router)
     app.include_router(automation_hub_router)
     app.include_router(news_video_router)
+    app.include_router(content_tools_router)

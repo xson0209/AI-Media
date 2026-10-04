@@ -28,6 +28,7 @@ import { StoriesTab } from '@/components/StoriesTab/StoriesTab';
 import { StoryStudio } from '@/components/StoryStudio/StoryStudio';
 import { Toaster } from '@/components/ui/toaster';
 import { ComicSeriesAnalysis } from '@/components/ComicSeriesAnalysis/ComicSeriesAnalysis';
+import { ContentTools } from '@/components/ContentTools/ContentTools';
 import { VideoInspiration } from '@/components/VideoInspiration/VideoInspiration';
 import { NewsVideo } from '@/components/NewsVideo/NewsVideo';
 import { VoicesTab } from '@/components/VoicesTab/VoicesTab';
@@ -35,6 +36,7 @@ import { useGenerationProgress } from '@/lib/hooks/useGenerationProgress';
 import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
 import { MODEL_DISPLAY_NAMES, useRestoreActiveTasks } from '@/lib/hooks/useRestoreActiveTasks';
 import { cn } from '@/lib/utils/cn';
+import { parseAIVideoProjectSearch } from '@/lib/hooks/useAIVideoProjectSession';
 
 const researchFeatureEnabled = import.meta.env.VITE_FEATURE_RESEARCH !== 'false';
 const ResearchWorkspace = lazy(async () => {
@@ -87,6 +89,7 @@ function RootLayout() {
     routerState.location.pathname === '/story-studio' ||
     routerState.location.pathname === '/video-inspiration' ||
     routerState.location.pathname === '/news-video' ||
+    routerState.location.pathname === '/content-tools' ||
     routerState.location.pathname === '/research' ||
     routerState.location.pathname.startsWith('/comic-series-analysis');
 
@@ -203,6 +206,7 @@ const aiVideoRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/ai-video',
   component: AIVideoAssistant,
+  validateSearch: parseAIVideoProjectSearch,
 });
 
 const productVideoRoute = createRoute({
@@ -245,6 +249,17 @@ const newsVideoRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/news-video',
   component: NewsVideo,
+});
+
+const contentToolsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/content-tools',
+  component: ContentTools,
+  validateSearch: (search: Record<string, unknown>): { kind?: 'podcast_short' | 'multi_angle' | 'lesson_story' } => ({
+    kind: search.kind === 'podcast_short' || search.kind === 'multi_angle' || search.kind === 'lesson_story'
+      ? search.kind
+      : undefined,
+  }),
 });
 
 // Models route
@@ -346,6 +361,7 @@ const routeTree = rootRoute.addChildren([
   effectsRoute,
   videoInspirationRoute,
   newsVideoRoute,
+  contentToolsRoute,
   researchRoute,
   comicSeriesAnalysisRoute,
   comicSeriesAnalysisDetailRoute,

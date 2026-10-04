@@ -10,6 +10,26 @@ export type VideoPurpose =
   | 'educational_explainer'
   | 'sales_ad'
   | 'localized_variant';
+export type ContentObjective = 'entertain' | 'educate' | 'inform' | 'convert' | 'inspire';
+export type ContentGenre =
+  | 'general'
+  | 'educational_explainer'
+  | 'kids_educational'
+  | 'kids_rescue'
+  | 'kids_stem'
+  | 'kids_song'
+  | 'health_explainer'
+  | 'relationship_soft_drama'
+  | 'product_ad'
+  | 'product_ugc'
+  | 'news'
+  | 'documentary'
+  | 'developer_explainer';
+export type AudienceAgeBand = 'all_ages' | 'preschool_3_5' | 'kids_6_9' | 'tweens_10_12' | 'teens_13_17' | 'adults';
+export type FormatProfile = 'short_15s' | 'short_30s' | 'short_60s' | 'explainer_90s' | 'kids_2m' | 'narrative_3m' | 'long_form';
+export type DistributionPlatform = 'youtube' | 'youtube_kids' | 'tiktok' | 'facebook' | 'multi_platform';
+export type InteractionMode = 'none' | 'pause_and_choose' | 'q_and_a' | 'count_and_repeat';
+export type SafetyPolicy = 'standard' | 'kids_strict' | 'health_cautious' | 'editorial' | 'adult';
 export type DialogueMode = 'voiceover' | 'character_lines' | 'mixed';
 export type NewsSpeechMode =
   | 'veo_narration'
@@ -19,9 +39,91 @@ export type NewsSpeechMode =
   | 'none';
 export type NarrationDensity = 'light' | 'balanced' | 'dense';
 export type CallToActionStyle = 'none' | 'soft' | 'direct' | 'urgent';
+export type CtaAction = 'none' | 'comment' | 'like' | 'share' | 'follow' | 'save' | 'subscribe';
+
+export interface ContentProfileOption {
+  value: string;
+  label: string;
+}
+
+export interface ContentGenreTemplateOption {
+  key: ContentGenre;
+  label: string;
+  description: string;
+  defaults: {
+    content_objective?: ContentObjective;
+    audience_age_band?: AudienceAgeBand;
+    format_profile?: FormatProfile;
+    distribution_platform?: DistributionPlatform;
+    interaction_mode?: InteractionMode;
+    safety_policy?: SafetyPolicy;
+    made_for_kids?: boolean;
+  };
+  generation_guidance: string[];
+  review_checks: string[];
+}
+
+export interface ContentProfileOptionsResponse {
+  version: number;
+  objectives: ContentProfileOption[];
+  genres: ContentGenreTemplateOption[];
+  audience_age_bands: ContentProfileOption[];
+  format_profiles: ContentProfileOption[];
+  distribution_platforms: ContentProfileOption[];
+  interaction_modes: ContentProfileOption[];
+  safety_policies: ContentProfileOption[];
+}
+
+export type ContentToolMode = 'podcast_short' | 'multi_angle' | 'lesson_story';
+export type ContentToolAngle = 'how_to' | 'story' | 'comparison' | 'counterpoint' | 'q_and_a';
+
+export interface ContentToolsGenerateRequest {
+  mode: ContentToolMode;
+  source_text?: string;
+  source_url?: string;
+  title?: string;
+  language?: string;
+  target_duration_seconds?: number;
+  angles?: ContentToolAngle[];
+  audience?: string;
+  age_band?: string;
+  visual_style?: string;
+  lesson_outcome?: string;
+}
+
+export interface ContentToolScene {
+  order: number;
+  title: string;
+  narration: string;
+  visual_description: string;
+  video_prompt: string;
+  negative_prompt: string;
+  duration_seconds: number;
+}
+
+export interface ContentToolAngleResult {
+  angle: string;
+  label: string;
+  hook: string;
+  promise: string;
+  script: string;
+  scenes: ContentToolScene[];
+}
+
+export interface ContentToolsGenerateResponse {
+  request_id: string;
+  mode: ContentToolMode;
+  title: string;
+  source_summary: string;
+  selected_excerpt?: string | null;
+  angles: ContentToolAngleResult[];
+  next_steps: string[];
+  provider?: string | null;
+  model?: string | null;
+}
 
 export type ResearchRunMode = 'research' | 'creative' | 'both';
-export type ResearchSourceType = 'video_url' | 'video_upload' | 'story_url' | 'image_upload' | 'text' | 'docs_url' | 'series_memory';
+export type ResearchSourceType = 'video_url' | 'video_upload' | 'story_url' | 'image_upload' | 'screenshot_upload' | 'github_repo' | 'text' | 'docs_url' | 'series_memory';
 export type ResearchChatAction = 'develop' | 'variant' | 'next_episode' | 'increase_drama' | 'fix_logic' | 'develop_character' | 'script_seed';
 
 export interface ResearchProjectResponse {
@@ -91,6 +193,13 @@ export interface ResearchRunResponse {
   error_message?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ResearchStudyFact {
+  id: string;
+  statement: string;
+  verification: 'documented' | 'source_reviewed' | 'observed';
+  evidence: Array<Record<string, unknown>>;
 }
 
 export interface ResearchIdeaResponse {
@@ -630,6 +739,8 @@ export interface AIPlanningSettings {
   codex_path?: string | null;
   model?: string | null;
   model_reasoning_effort?: string | null;
+  content_provider: 'codex' | 'claude';
+  content_model?: string | null;
   timeout_seconds: number;
   output_schema_path?: string | null;
 }
@@ -686,9 +797,20 @@ export interface VideoProjectCreate {
   target_language?: VideoLanguage;
   speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose;
+  content_profile_version?: number | null;
+  content_objective?: ContentObjective | null;
+  content_genre?: ContentGenre | null;
+  audience_age_band?: AudienceAgeBand | null;
+  format_profile?: FormatProfile | null;
+  distribution_platform?: DistributionPlatform | null;
+  interaction_mode?: InteractionMode | null;
+  safety_policy?: SafetyPolicy | null;
+  made_for_kids?: boolean | null;
+  learning_objective?: string | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   target_duration_seconds?: number | null;
   aspect_ratio?: '9:16' | '16:9' | '1:1';
   visual_style?: string | null;
@@ -712,6 +834,7 @@ export interface VideoShotUpdate {
 
 export interface VideoProjectUpdate {
   title?: string;
+  archived?: boolean;
   topic?: string;
   series_id?: string | null;
   story_episode_id?: string | null;
@@ -721,9 +844,20 @@ export interface VideoProjectUpdate {
   target_language?: VideoLanguage;
   speech_source?: NewsSpeechMode | null;
   video_purpose?: VideoPurpose | null;
+  content_profile_version?: number | null;
+  content_objective?: ContentObjective | null;
+  content_genre?: ContentGenre | null;
+  audience_age_band?: AudienceAgeBand | null;
+  format_profile?: FormatProfile | null;
+  distribution_platform?: DistributionPlatform | null;
+  interaction_mode?: InteractionMode | null;
+  safety_policy?: SafetyPolicy | null;
+  made_for_kids?: boolean | null;
+  learning_objective?: string | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   target_duration_seconds?: number | null;
   aspect_ratio?: '9:16' | '16:9' | '1:1';
   visual_style?: string | null;
@@ -1303,9 +1437,20 @@ export interface VideoEpisodeCreate {
   language?: string;
   target_language?: VideoLanguage | null;
   video_purpose?: VideoPurpose | null;
+  content_profile_version?: number | null;
+  content_objective?: ContentObjective | null;
+  content_genre?: ContentGenre | null;
+  audience_age_band?: AudienceAgeBand | null;
+  format_profile?: FormatProfile | null;
+  distribution_platform?: DistributionPlatform | null;
+  interaction_mode?: InteractionMode | null;
+  safety_policy?: SafetyPolicy | null;
+  made_for_kids?: boolean | null;
+  learning_objective?: string | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   target_duration_seconds?: number | null;
   aspect_ratio?: '9:16' | '16:9' | '1:1' | null;
   visual_style?: string | null;
@@ -1380,6 +1525,7 @@ export interface StoryVideoHandoffSettings {
   dialogue_mode: DialogueMode;
   narration_density: NarrationDensity;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   target_duration_seconds?: number | null;
   default_shot_duration_seconds?: number | null;
   prompt_segment_count?: number | null;
@@ -1529,9 +1675,20 @@ export interface VideoGeneratedDataResetResponse {
 export interface VideoProjectLocalizeRequest {
   target_language: VideoLanguage;
   video_purpose?: VideoPurpose;
+  content_profile_version?: number | null;
+  content_objective?: ContentObjective | null;
+  content_genre?: ContentGenre | null;
+  audience_age_band?: AudienceAgeBand | null;
+  format_profile?: FormatProfile | null;
+  distribution_platform?: DistributionPlatform | null;
+  interaction_mode?: InteractionMode | null;
+  safety_policy?: SafetyPolicy | null;
+  made_for_kids?: boolean | null;
+  learning_objective?: string | null;
   dialogue_mode?: DialogueMode | null;
   narration_density?: NarrationDensity | null;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   title?: string | null;
   voice_profile_id?: string | null;
 }
@@ -1549,14 +1706,27 @@ export interface VideoProjectResponse {
   target_language: VideoLanguage;
   speech_source?: NewsSpeechMode | null;
   video_purpose: VideoPurpose;
+  content_profile_version: number;
+  content_objective: ContentObjective;
+  content_genre: ContentGenre;
+  audience_age_band: AudienceAgeBand;
+  format_profile: FormatProfile;
+  distribution_platform: DistributionPlatform;
+  interaction_mode: InteractionMode;
+  safety_policy: SafetyPolicy;
+  made_for_kids: boolean;
+  learning_objective?: string | null;
   dialogue_mode: DialogueMode;
   narration_density: NarrationDensity;
   call_to_action_style?: CallToActionStyle | null;
+  cta_action?: CtaAction | null;
   target_duration_seconds?: number | null;
   aspect_ratio: string;
   visual_style?: string | null;
   voice_profile_id?: string | null;
   status: string;
+  archived?: boolean;
+  archived_at?: string | null;
   script_approved: boolean;
   story_approved: boolean;
   phase: 'phase1' | 'phase2';
@@ -1600,7 +1770,29 @@ export interface VideoSceneResponse {
   updated_at: string;
 }
 
+export interface VideoLongFormChapter {
+  order: number;
+  title: string;
+  goal: string;
+  duration_seconds: number;
+  state_in: string;
+  state_out: string;
+  bridge: string;
+  narration?: string;
+}
+
+export interface VideoLongFormOutline {
+  central_question: string;
+  central_promise: string;
+  payoff: string;
+  duration_seconds: number;
+  chapters: VideoLongFormChapter[];
+}
+
 export interface VideoProjectDetailResponse extends VideoProjectResponse {
+  longform_outline_json?: VideoLongFormOutline | null;
+  longform_chapters_json?: VideoLongFormChapter[] | null;
+  longform_outline_approved?: boolean;
   creative_brief?: string | null;
   script_text?: string | null;
   style_bible?: string | null;
@@ -1898,6 +2090,16 @@ export interface VideoShotClipResponse {
   provider_metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface VideoSourceVisualAsset {
+  id: string;
+  source_id?: string;
+  sha256: string;
+  width: number;
+  height: number;
+  regions: Array<{ id: string; label?: string; box?: number[] }>;
+  visual_direction?: string;
 }
 
 /** One file already matched to a shot, ready to upload as part of a batch. */
@@ -2266,6 +2468,7 @@ export type VideoAutoRunStep =
   | 'waiting_planning'
   | 'review_character_proposals'
   | 'review_story'
+  | 'quality_gate'
   | 'generate_shots'
   | 'generate_prompts'
   | 'generate_publishing_metadata'
@@ -2278,7 +2481,7 @@ export type VideoAutoRunStep =
   | 'generate_render'
   | 'waiting_render'
   | 'completed';
-export type VideoAutoRunReviewStage = 'story' | 'prompts' | 'character_proposals';
+export type VideoAutoRunReviewStage = 'story' | 'prompts' | 'character_proposals' | 'longform_outline' | 'quality';
 
 export interface VideoAutoRunStartRequest {
   mode?: VideoAutoRunMode;
