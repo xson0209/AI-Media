@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
 import re
 import uuid
 from datetime import datetime
@@ -619,7 +621,7 @@ def _evaluate_story(project: DBVideoProject, beats: list[DBVideoProjectTargetTim
     warnings: list[Any] = []
     blocking: list[Any] = []
     score = 45.0
-    if _text(project.detailed_script) or _text(project.script_text) or _text(project.topic):
+    if _text(project.detailed_script) or _text(project.script_text):
         score += 20
     else:
         blocking.append("Thiếu nội dung story/script.")
@@ -645,6 +647,55 @@ def _evaluate_story(project: DBVideoProject, beats: list[DBVideoProjectTargetTim
         warnings=warnings,
         recommended_actions=["Duyệt story/script và làm rõ payoff trước khi coi project sẵn sàng."],
     )
+
+def _evaluate_scene_progression(scenes: list[DBVideoScene]) -> dict[str, Any]:
+    """Identify repeat passages without claiming to assess meaning or intent."""
+    blocking: list[Any] = []
+    warnings: list[Any] = []
+    seen: dict[str, int] = {}
+    for index, scene in enumerate(scenes):
+        # Compare the entire passage; repeated characters, motifs or short
+        # catchphrases alone are not enough evidence to reject a story.
+        passage = " ".join(re.findall(r"\w+", _text(scene.dialogue).casefold()))
+        if len(passage.split()) < 12:
+            continue
+        previous = seen.get(passage)
+        if previous is not None:
+            finding = {
+                "code": "repeated_scene_narration",
+                "scene_id": scene.id,
+                "scene_order": scene.scene_order,
+                "repeats_scene_order": scenes[previous].scene_order,
+                "excerpt": _text(scene.dialogue)[:240],
+                "message_vi": "Cảnh này lặp nguyên đoạn lời kể đã có; hãy bổ sung diễn biến mới hoặc xác nhận dụng ý lặp lại.",
+            }
+            (blocking if previous == index - 1 else warnings).append(finding)
+        seen[passage] = index
+    score = max(0, 95 - len(blocking) * 30 - len(warnings) * 10)
+    return _section(
+        _score_status(score, warnings=warnings, blocking=blocking),
+        score,
+        "Đã đối chiếu các đoạn lời kể để phát hiện cảnh lặp nguyên văn; chưa đánh giá độ tương đồng ngữ nghĩa.",
+        evidence=[{"scene_count": len(scenes), "repeat_count": len(blocking) + len(warnings)}],
+        blocking_errors=blocking,
+        warnings=warnings,
+        recommended_actions=["Viết lại lời kể ở cảnh được nêu để có diễn biến hoặc thông tin mới."] if blocking or warnings else [],
+    )
+
+def content_quality_fingerprint(project: DBVideoProject, db: Session) -> str:
+    """Fingerprint only editorial inputs so downstream production does not rerun the gate."""
+    handoff = _latest_handoff_for_project(project.id, db)
+    payload = {
+        "script": [project.detailed_script, project.script_text, project.retention_plan_json],
+        "approval": [project.story_approved, project.script_approved],
+        "language": project.target_language,
+        "continuity": [project.series_id, project.continuity_bible, project.character_bible],
+        "scenes": [[row.id, row.scene_order, row.dialogue, row.visual_description] for row in _scenes(project.id, db)],
+        "beats": [[row.id, row.role, row.content, row.new_information, row.micro_payoff, row.viewer_question] for row in _target_beats(project.id, db)],
+        "memory": [[row.id, row.revision, row.status] for row in _memory_cards(project.id, db)],
+        "handoff": [handoff.id, handoff.revision, handoff.status, handoff.payload_json] if handoff else None,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
 
 def _evaluate_shots(shots: list[DBVideoShot], beats: list[DBVideoProjectTargetTimelineBeat]) -> dict[str, Any]:
     if not shots:
@@ -1141,6 +1192,54 @@ def run_project_quality_report(
         project_id=project.id,
         job_id=dependencies.get("analysis_package", {}).get("job_id"),
         scope="project",
+        rubric=rubric,
+        sections=sections,
+        dependencies=dependencies,
+    )
+
+def run_project_content_quality_report(
+    project_id: str,
+    db: Session,
+) -> models.VideoQualityReportResponse | None:
+    """Check editorial inputs before expensive shot, voice and clip generation.
+
+    This deliberately does not require an Inspiration handoff, Project Memory,
+    prompts, voice or subtitles: those are optional for direct AI Video
+    projects and are checked by the final report instead.
+    """
+    project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
+    if project is None:
+        return None
+    handoff = _latest_handoff_for_project(project.id, db)
+    job = _job_for_handoff(handoff, db)
+    cards = _memory_cards(project.id, db)
+    beats = _target_beats(project.id, db)
+    scenes = _scenes(project.id, db)
+    sections: dict[str, dict[str, Any]] = {
+        "story_quality": _evaluate_story(project, beats),
+        "scene_progression_quality": _evaluate_scene_progression(scenes),
+    }
+    if beats:
+        sections["content_retention_quality"] = _evaluate_content_retention(beats, None)
+    if handoff is not None:
+        # Source-specific checks are meaningful only when this project was
+        # actually created from a source handoff.
+        sections["handoff_quality"] = _evaluate_handoff(handoff)
+        sections["originality_quality"] = _evaluate_originality(project, handoff, job, [], scenes)
+    sections["cross_stage_consistency"] = _evaluate_cross_stage(sections, project, handoff, None)
+    rubric = dict(DEFAULT_RUBRIC)
+    rubric["stage"] = "preproduction_content"
+    rubric["content_fingerprint"] = content_quality_fingerprint(project, db)
+    dependencies = _project_dependencies(
+        project, db, handoff=handoff, job=job, cards=cards, beats=beats,
+        scenes=scenes, shots=[], shot_prompts={}, subtitle=None, dataset=None,
+    )
+    dependencies["content_fingerprint"] = rubric["content_fingerprint"]
+    return _persist_report(
+        db,
+        project_id=project.id,
+        job_id=job.id if job else None,
+        scope="project_content",
         rubric=rubric,
         sections=sections,
         dependencies=dependencies,

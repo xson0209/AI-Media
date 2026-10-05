@@ -22,13 +22,7 @@ from ..database import (
     SeriesReferenceAsset as DBSeriesReferenceAsset,
     SeriesVersionRecord as DBSeriesVersionRecord,
     StoryAdaptation as DBStoryAdaptation,
-    VideoPackageExport as DBVideoPackageExport,
-    VideoRenderJob as DBVideoRenderJob,
-    VideoScene as DBVideoScene,
     VideoSeries as DBVideoSeries,
-    VideoShot as DBVideoShot,
-    VideoShotPrompt as DBVideoShotPrompt,
-    VideoSubtitle as DBVideoSubtitle,
 )
 from . import video_storage
 
@@ -706,66 +700,13 @@ def _apply_story_panel_stale(snapshot: DBArtifactDependencySnapshot, reason_vi: 
         row.updated_at = datetime.utcnow()
 
 def _apply_artifact_stale(snapshot: DBArtifactDependencySnapshot, reason_vi: str, db: Session) -> None:
-    artifact_type = snapshot.artifact_type
-    if artifact_type == "story_panel":
+    if snapshot.artifact_type == "story_panel":
         _apply_story_panel_stale(snapshot, reason_vi, db)
         return
-    if artifact_type == "video_prompt":
-        prompt = db.query(DBVideoShotPrompt).filter(DBVideoShotPrompt.id == snapshot.artifact_id).first()
-        if prompt is not None:
-            prompt.quality_status = "stale"
-            shot = db.query(DBVideoShot).filter(DBVideoShot.id == prompt.shot_id).first()
-            if shot is not None:
-                shot.prompt_status = "stale"
-                shot.revision = int(shot.revision or 1) + 1
-                shot.updated_at = datetime.utcnow()
-            if prompt.scene_id:
-                scene = db.query(DBVideoScene).filter(DBVideoScene.id == prompt.scene_id).first()
-                if scene is not None:
-                    scene.prompt_status = "stale"
-                    scene.revision = int(scene.revision or 1) + 1
-                    scene.updated_at = datetime.utcnow()
-        return
-    if artifact_type in {"scene_voice", "scene_subtitle"}:
-        scene = db.query(DBVideoScene).filter(DBVideoScene.id == snapshot.artifact_id).first()
-        if scene is not None:
-            if artifact_type == "scene_voice":
-                scene.voice_status = "stale"
-            scene.subtitle_status = "stale"
-            scene.revision = int(scene.revision or 1) + 1
-            scene.updated_at = datetime.utcnow()
-        return
-    if artifact_type in {"shot_voice", "shot_subtitle", "video_shot"}:
-        shot = db.query(DBVideoShot).filter(DBVideoShot.id == snapshot.artifact_id).first()
-        if shot is not None:
-            if artifact_type == "shot_voice":
-                shot.voice_status = "stale"
-            if artifact_type == "video_shot":
-                shot.status = "stale"
-                shot.prompt_status = "stale"
-            shot.subtitle_status = "stale"
-            shot.revision = int(shot.revision or 1) + 1
-            shot.updated_at = datetime.utcnow()
-        return
-    if artifact_type == "subtitle":
-        subtitle = db.query(DBVideoSubtitle).filter(DBVideoSubtitle.id == snapshot.artifact_id).first()
-        if subtitle is not None:
-            subtitle.status = "stale"
-            subtitle.revision = int(subtitle.revision or 1) + 1
-            subtitle.updated_at = datetime.utcnow()
-        return
-    if artifact_type == "package":
-        package = db.query(DBVideoPackageExport).filter(DBVideoPackageExport.id == snapshot.artifact_id).first()
-        if package is not None:
-            package.stale = True
-            package.revision = int(package.revision or 1) + 1
-            package.updated_at = datetime.utcnow()
-        return
-    if artifact_type == "render":
-        render = db.query(DBVideoRenderJob).filter(DBVideoRenderJob.id == snapshot.artifact_id).first()
-        if render is not None:
-            render.stale = True
-            render.updated_at = datetime.utcnow()
+    from ..features.ai_video import artifact_state
+
+    artifact_state.apply_dependency_stale(snapshot, reason_vi, db)
+
 
 def mark_dependency_stale(
     series_id: str,
@@ -809,6 +750,9 @@ def mark_dependency_stale(
             .first()
         )
         if duplicate is not None:
+            from ..features.ai_video import artifact_state
+
+            artifact_state.apply_dependency_stale(snapshot, reason, db, replay=True)
             continue
         event = DBArtifactStaleEvent(
             id=str(uuid.uuid4()),

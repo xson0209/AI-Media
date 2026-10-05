@@ -43,6 +43,7 @@ def run_migrations(engine) -> None:
     _migrate_generation_versions(engine, inspector, tables)
     _migrate_capture_settings(engine, inspector, tables)
     _migrate_ai_video_assistant(engine)
+    _migrate_content_profile(engine)
     _migrate_video_inspiration(engine)
     _migrate_comic_series_analysis(engine)
     _migrate_research_scoring(engine)
@@ -261,6 +262,8 @@ def _migrate_ai_video_assistant(engine) -> None:
                 codex_path VARCHAR,
                 model VARCHAR,
                 model_reasoning_effort VARCHAR,
+                content_provider VARCHAR NOT NULL DEFAULT 'codex',
+                content_model VARCHAR,
                 timeout_seconds INTEGER NOT NULL DEFAULT 600,
                 output_schema_path VARCHAR,
                 updated_at DATETIME
@@ -408,6 +411,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 visual_style TEXT,
                 voice_profile_id VARCHAR,
                 status VARCHAR NOT NULL DEFAULT 'draft',
+                archived_at DATETIME,
                 creative_brief TEXT,
                 script_text TEXT,
                 style_bible TEXT,
@@ -419,6 +423,7 @@ def _migrate_ai_video_assistant(engine) -> None:
                 dialogue_mode VARCHAR NOT NULL DEFAULT 'voiceover',
                 narration_density VARCHAR NOT NULL DEFAULT 'balanced',
                 call_to_action_style VARCHAR,
+                cta_action VARCHAR,
                 default_shot_duration_seconds INTEGER,
                 prompt_segment_count INTEGER,
                 prompt_segment_duration_seconds INTEGER,
@@ -1063,6 +1068,10 @@ def _migrate_ai_video_assistant(engine) -> None:
         ai_planning_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(ai_planning_settings)")).fetchall()}
         if "model_reasoning_effort" not in ai_planning_columns:
             conn.execute(text("ALTER TABLE ai_planning_settings ADD COLUMN model_reasoning_effort VARCHAR"))
+        if "content_provider" not in ai_planning_columns:
+            conn.execute(text("ALTER TABLE ai_planning_settings ADD COLUMN content_provider VARCHAR NOT NULL DEFAULT 'codex'"))
+        if "content_model" not in ai_planning_columns:
+            conn.execute(text("ALTER TABLE ai_planning_settings ADD COLUMN content_model VARCHAR"))
         story_candidate_columns = {row[1] for row in conn.execute(text("PRAGMA table_info(story_scenario_candidates)")).fetchall()}
         story_candidate_column_defaults = {
             "context_snapshot_id": "VARCHAR",
@@ -1110,6 +1119,7 @@ def _migrate_ai_video_assistant(engine) -> None:
             "dialogue_mode": "VARCHAR NOT NULL DEFAULT 'voiceover'",
             "narration_density": "VARCHAR NOT NULL DEFAULT 'balanced'",
             "call_to_action_style": "VARCHAR",
+            "cta_action": "VARCHAR",
             "default_shot_duration_seconds": "INTEGER",
             "prompt_segment_count": "INTEGER",
             "prompt_segment_duration_seconds": "INTEGER",
@@ -1242,6 +1252,30 @@ def _migrate_ai_video_assistant(engine) -> None:
         if "revision" not in package_export_columns:
             conn.execute(text("ALTER TABLE video_package_exports ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"))
         conn.commit()
+
+
+def _migrate_content_profile(engine) -> None:
+    """Add nullable Content Profile columns to existing AI Video databases."""
+    inspector = inspect(engine)
+    if "video_projects" not in set(inspector.get_table_names()):
+        return
+    columns = _get_columns(inspector, "video_projects")
+    additions = (
+        ("content_profile_version", "INTEGER DEFAULT 1"),
+        ("content_objective", "VARCHAR"),
+        ("content_genre", "VARCHAR"),
+        ("audience_age_band", "VARCHAR"),
+        ("format_profile", "VARCHAR"),
+        ("distribution_platform", "VARCHAR"),
+        ("interaction_mode", "VARCHAR"),
+        ("safety_policy", "VARCHAR"),
+        ("made_for_kids", "BOOLEAN"),
+        ("learning_objective", "TEXT"),
+        ("archived_at", "DATETIME"),
+    )
+    for name, sql_type in additions:
+        if name not in columns:
+            _add_column(engine, "video_projects", f"{name} {sql_type}", name)
 
 
 def _migrate_video_inspiration(engine) -> None:

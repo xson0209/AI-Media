@@ -487,6 +487,38 @@ def _run_command(
     cwd: str | Path | None = None,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    # ``subprocess.Popen`` cannot execute Windows command shims (``.cmd`` /
+    # ``.bat``) directly.  npm-installed CLIs commonly persist one of these
+    # shim paths in settings, so invoke it through ``cmd.exe`` while keeping
+    # the original arguments and stdin contract intact.
+    if os.name == "nt" and command and command[0].lower().endswith((".cmd", ".bat")):
+        # npm's Codex shim points at a JavaScript entrypoint.  Calling that
+        # entrypoint with node avoids cmd.exe's lossy quote parsing for schema
+        # and temporary paths that contain spaces.
+        shim_path = Path(command[0])
+        node_script = shim_path.parent / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"
+        node_path = shim_path.parent / "node.exe"
+        if not node_path.is_file():
+            node_path = Path(shutil.which("node") or "node")
+        if node_script.is_file():
+            command = [str(node_path), str(node_script), *command[1:]]
+        else:
+            command = [
+                os.environ.get("ComSpec", "cmd.exe"),
+                "/d",
+                "/c",
+                subprocess.list2cmdline(command),
+            ]
+    elif os.name == "nt" and command and command[0].lower().endswith(".ps1"):
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            command[0],
+            *command[1:],
+        ]
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     process = subprocess.Popen(
         command,
@@ -527,6 +559,18 @@ def check_provider(
     cwd: str | Path | None = None,
 ) -> models.AIPlanningProviderCheckResponse:
     """Check whether the configured planning provider is ready."""
+    if str(getattr(settings, "content_provider", "codex") or "codex").strip().lower() == "claude":
+        from . import research_ai
+
+        content_model = str(getattr(settings, "content_model", "") or "").strip() or "sonnet"
+        payload = research_ai.check_provider(
+            check_exec=check_exec,
+            timeout_seconds=int(getattr(settings, "timeout_seconds", DEFAULT_CODEX_TIMEOUT_SECONDS) or DEFAULT_CODEX_TIMEOUT_SECONDS),
+            model=content_model,
+        )
+        payload.setdefault("request_id", _request_id())
+        return models.AIPlanningProviderCheckResponse(**payload)
+
     request_id = _request_id()
     provider = settings.provider or CODEX_PROVIDER
     policy = resolve_codex_model_policy(settings)
@@ -686,9 +730,13 @@ def test_provider_prompt(
     prompt: str = "xin chào",
     cwd: str | Path | None = None,
 ) -> models.AIPlanningTestResponse:
-    """Run a small live Codex prompt to prove the saved model config works."""
+    """Run a small live prompt against the configured content provider."""
 
-    provider = settings.provider or CODEX_PROVIDER
+    content_provider = str(getattr(settings, "content_provider", "codex") or "codex").strip().lower()
+    is_claude = content_provider == "claude"
+    provider = "claude-cli" if is_claude else settings.provider or CODEX_PROVIDER
+    provider_label = "Claude" if is_claude else "Codex"
+    empty_output_error = "CLAUDE_EMPTY_OUTPUT" if is_claude else "CODEX_EMPTY_OUTPUT"
     policy = resolve_codex_model_policy(settings)
     planned_metadata = _metadata_response_kwargs(_profile_metadata(policy))
     timeout = max(5, min(settings.timeout_seconds or DEFAULT_CODEX_TIMEOUT_SECONDS, DEFAULT_CODEX_TIMEOUT_SECONDS))
@@ -706,7 +754,7 @@ def test_provider_prompt(
             ready=False,
             provider=provider,
             prompt=prompt,
-            message=str(exc) or "Codex chưa phản hồi được với cấu hình hiện tại.",
+            message=str(exc) or f"{provider_label} chưa phản hồi được với cấu hình hiện tại.",
             request_id=(exc.metadata or {}).get("request_id"),
             error_code=exc.error_code,
             **metadata,
@@ -727,12 +775,12 @@ def test_provider_prompt(
         prompt=prompt,
         output_text=output_text or None,
         message=(
-            "Codex đã phản hồi text với cấu hình vừa lưu."
+            f"{provider_label} đã phản hồi text với cấu hình vừa lưu."
             if output_text
-            else "Codex chạy xong nhưng không trả về text."
+            else f"{provider_label} chạy xong nhưng không trả về text."
         ),
         request_id=request_id,
-        error_code=None if output_text else "CODEX_EMPTY_OUTPUT",
+        error_code=None if output_text else empty_output_error,
         **metadata,
     )
 
@@ -750,6 +798,57 @@ def run_codex_exec(
     provider = settings.provider or CODEX_PROVIDER
     request_id = video_errors.current_request_id()
     policy = resolve_codex_model_policy(settings)
+
+    # The shared content setting is intentionally honored at this boundary so
+    # every existing content flow (Story Studio, AI Video, inspiration,
+    # research, product video and chat) gets the same provider/model choice
+    # without each caller having to grow its own dispatch logic. Claude is
+    # still executed in the read-only research CLI adapter; Codex's legacy
+    # planning provider remains the default and is unchanged.
+    content_provider = str(getattr(settings, "content_provider", "codex") or "codex").strip().lower()
+    if content_provider == "claude":
+        from . import research_ai
+
+        content_model = str(getattr(settings, "content_model", "") or "").strip() or "sonnet"
+        claude_prompt = prompt
+        if output_schema:
+            claude_prompt = (
+                f"{prompt}\n\nTrả về duy nhất JSON hợp lệ theo schema sau (không markdown):\n"
+                f"{json.dumps(output_schema, ensure_ascii=False)}"
+            )
+        try:
+            result = research_ai.run_research(
+                claude_prompt,
+                timeout_seconds=timeout_seconds or getattr(settings, "timeout_seconds", DEFAULT_CODEX_TIMEOUT_SECONDS),
+                tools="WebSearch,WebFetch",
+                model=content_model,
+            )
+        except research_ai.ResearchCLIError as exc:
+            raise AIPlanningError(
+                str(exc),
+                error_code=exc.error_code,
+                metadata={
+                    "requested_model": content_model,
+                    "effective_model": content_model,
+                    "model_source": "content_settings",
+                    "request_id": request_id,
+                },
+            ) from exc
+        metadata = {
+            **dict(result.metadata or {}),
+            "provider": "claude",
+            "requested_model": content_model,
+            "requested_reasoning_effort": None,
+            "effective_model": result.metadata.get("model") or content_model,
+            "effective_reasoning_effort": None,
+            "model_source": "content_settings",
+            "model_verified": True,
+            "fallback_used": False,
+            "request_id": request_id,
+        }
+        wrapped = CodexExecResult(output=result.output, metadata=metadata)
+        return wrapped if return_metadata else wrapped.output
+
     if provider != CODEX_PROVIDER:
         raise AIPlanningError(
             "Provider AI planning này chưa được hỗ trợ.",

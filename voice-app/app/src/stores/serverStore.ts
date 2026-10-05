@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { queryClient } from '@/lib/queryClient';
+import { resetServerQueries } from '@/lib/queryClient';
 
 export const DEFAULT_BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '17493';
 export const DEFAULT_BACKEND_URL = `http://127.0.0.1:${DEFAULT_BACKEND_PORT}`;
@@ -20,14 +20,6 @@ interface ServerStore {
 
   customModelsDir: string | null;
   setCustomModelsDir: (dir: string | null) => void;
-}
-
-/**
- * Invalidate all React Query caches so stale data from the previous
- * server is not shown. Called when the server URL changes.
- */
-function invalidateAllServerData() {
-  queryClient.invalidateQueries();
 }
 
 function configuredServerUrl(): string | null {
@@ -88,7 +80,7 @@ export const useServerStore = create<ServerStore>()(
         const prev = get().serverUrl;
         set({ serverUrl: url });
         if (url !== prev) {
-          invalidateAllServerData();
+          resetServerQueries();
         }
       },
 

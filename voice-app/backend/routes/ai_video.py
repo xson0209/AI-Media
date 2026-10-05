@@ -20,6 +20,7 @@ from ..features.ai_video import (
 )
 from ..services import (
     ai_planning,
+    content_profile,
     series_references,
     series_brain,
     settings as settings_service,
@@ -29,6 +30,7 @@ from ..services import (
     video_errors,
     video_packages,
     video_phase2,
+    video_longform_workflow,
     video_planning,
     video_planning_pool,
     video_publishing_metadata,
@@ -38,11 +40,18 @@ from ..services import (
     video_quality,
     video_series_characters,
     video_series_memory,
+    video_source_visuals,
     video_voice,
 )
 from ..utils.http import safe_content_disposition
 
 router = APIRouter(prefix="/ai-video", tags=["ai-video"], route_class=video_errors.AIVideoRoute)
+
+
+@router.get("/content-profile/options")
+async def get_content_profile_options():
+    """Return the backend Content Profile/genre registry for the editor."""
+    return content_profile.options_payload()
 
 
 async def _run_with_worker_db(callback, *args, **kwargs):
@@ -1227,6 +1236,28 @@ async def approve_video_story(project_id: str, data: models.VideoStoryApprovalRe
     return project
 
 
+@router.post("/projects/{project_id}/longform/outline", response_model=models.VideoProjectDetailResponse)
+async def update_longform_outline(project_id: str, data: models.VideoLongformOutlineRequest, db: Session = Depends(get_db)):
+    try:
+        project = video_longform_workflow.update_outline(project_id, data.outline, db, expected_revision=data.expected_revision)
+    except video_planning.VideoPlanningValidationError as exc:
+        raise _error(422, str(exc), "AI_VIDEO_LONGFORM_OUTLINE_INVALID") from exc
+    if project is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return project
+
+
+@router.post("/projects/{project_id}/longform/outline/approval", response_model=models.VideoProjectDetailResponse)
+async def approve_longform_outline(project_id: str, data: models.VideoLongformApprovalRequest, db: Session = Depends(get_db)):
+    try:
+        project = video_longform_workflow.approve_outline(project_id, data.approved, db, expected_revision=data.expected_revision)
+    except video_planning.VideoPlanningValidationError as exc:
+        raise _error(409, str(exc), "AI_VIDEO_LONGFORM_OUTLINE_CONFLICT") from exc
+    if project is None:
+        raise _error(404, "Không tìm thấy dự án video.", "VIDEO_PROJECT_NOT_FOUND")
+    return project
+
+
 @router.post("/projects/{project_id}/shots", response_model=list[models.VideoShotResponse])
 async def generate_video_shots(project_id: str, db: Session = Depends(get_db)):
     del db
@@ -1452,6 +1483,30 @@ async def get_shot_clip(project_id: str, shot_id: str, db: Session = Depends(get
         raise _error(404, "Không tìm thấy shot video.", "VIDEO_SHOT_NOT_FOUND")
     clip = video_rendering.get_active_clip(project_id, shot_id, db)
     return clip
+
+
+@router.get("/projects/{project_id}/source-visuals")
+async def list_source_visuals(project_id: str, db: Session = Depends(get_db)):
+    if db.query(DBVideoProject.id).filter(DBVideoProject.id == project_id).first() is None:
+        raise _error(404, "Không tìm thấy project video.", "VIDEO_PROJECT_NOT_FOUND")
+    return [{key: value for key, value in asset.items() if key != "file_path"} for asset in video_source_visuals.list_assets(project_id, db)]
+
+
+@router.get("/projects/{project_id}/source-visuals/{asset_id}/image")
+async def get_source_visual(project_id: str, asset_id: str, db: Session = Depends(get_db)):
+    try:
+        _, path = video_source_visuals.resolve_asset(project_id, asset_id, db)
+    except video_source_visuals.SourceVisualError as exc:
+        raise _error(404, str(exc), exc.error_code) from exc
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "image/png")
+
+
+@router.post("/projects/{project_id}/shots/{shot_id}/screenshot-clip", response_model=models.VideoShotClipResponse)
+async def create_screenshot_clip(project_id: str, shot_id: str, data: models.VideoScreenshotClipCreate, db: Session = Depends(get_db)):
+    try:
+        return await _run_with_worker_db(video_source_visuals.create_clip, project_id, shot_id, data)
+    except (video_source_visuals.SourceVisualError, video_rendering.VideoRenderError) as exc:
+        raise _error(404 if exc.error_code == "VIDEO_SHOT_NOT_FOUND" else 400, str(exc), exc.error_code, project_id=project_id, shot_id=shot_id) from exc
 
 
 @router.get("/projects/{project_id}/shots/{shot_id}/clip/download")

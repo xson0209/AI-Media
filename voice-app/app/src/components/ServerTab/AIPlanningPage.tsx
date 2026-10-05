@@ -1,6 +1,6 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Check, Loader2, Play, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/lib/api/client';
 import type { AIPlanningTestResponse } from '@/lib/api/types';
@@ -16,7 +16,60 @@ type AIPlanningPreset = {
   helper: string;
 };
 
+type ContentProvider = 'codex' | 'claude';
+
+/**
+ * Content work (research, creative variants, chat and scoring) deliberately
+ * has its own model setting.  The planning model above remains independent so
+ * changing a content provider cannot silently change the AI Video planner.
+ */
+const CONTENT_MODELS: Record<ContentProvider, readonly string[]> = {
+  codex: [
+    'gpt-6-astra',
+    'gpt-6.1-sol',
+    'gpt-6-sol',
+    'gpt-6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+  ],
+  claude: ['sonnet', 'opus', 'haiku'],
+};
+
+function contentProvider(value: string | null | undefined): ContentProvider {
+  return value === 'claude' ? 'claude' : 'codex';
+}
+
 const AI_PLANNING_PRESETS: AIPlanningPreset[] = [
+  {
+    key: 'gpt-6-astra-xhigh',
+    model: 'gpt-6-astra',
+    reasoningEffort: 'xhigh',
+    label: 'gpt-6-astra · xhigh',
+    helper: 'Model frontier cho các bài toán planning và nội dung cần suy luận sâu.',
+  },
+  {
+    key: 'gpt-6.1-sol-xhigh',
+    model: 'gpt-6.1-sol',
+    reasoningEffort: 'xhigh',
+    label: 'gpt-6.1-sol · xhigh',
+    helper: 'Cân bằng chất lượng và tốc độ cho script, story và prompt dài.',
+  },
+  {
+    key: 'gpt-6-sol-xhigh',
+    model: 'gpt-6-sol',
+    reasoningEffort: 'xhigh',
+    label: 'gpt-6-sol · xhigh',
+    helper: 'Preset đa dụng cho các tác vụ nội dung và lập kế hoạch hàng ngày.',
+  },
+  {
+    key: 'gpt-6-luna-xhigh',
+    model: 'gpt-6-luna',
+    reasoningEffort: 'xhigh',
+    label: 'gpt-6-luna · xhigh',
+    helper: 'Ưu tiên tốc độ và chi phí thấp hơn cho các lần thử nhanh.',
+  },
   {
     key: 'gpt-5.5-xhigh',
     model: 'gpt-5.5',
@@ -66,16 +119,13 @@ function presetKey(model: string | null | undefined, effort: string | null | und
   const normalizedEffort = (effort || 'ultra').trim().toLowerCase();
   return (
     AI_PLANNING_PRESETS.find(
-      (preset) =>
-        preset.model === normalizedModel && preset.reasoningEffort === normalizedEffort,
+      (preset) => preset.model === normalizedModel && preset.reasoningEffort === normalizedEffort,
     )?.key ?? 'custom'
   );
 }
 
 function configLabel(model: string | null | undefined, effort: string | null | undefined): string {
-  return [(model || 'gpt-5.6-sol').trim(), (effort || 'ultra').trim()]
-    .filter(Boolean)
-    .join(' · ');
+  return [(model || 'gpt-5.6-sol').trim(), (effort || 'ultra').trim()].filter(Boolean).join(' · ');
 }
 
 function metadataLabel(result: AIPlanningTestResponse | null): string {
@@ -94,6 +144,13 @@ export function AIPlanningPage() {
   const aiPlanning = useAIPlanningSettings();
   const [selectedPresetKey, setSelectedPresetKey] = useState('gpt-5.6-sol-ultra');
   const [testResult, setTestResult] = useState<AIPlanningTestResponse | null>(null);
+  const selectedContentProvider = contentProvider(aiPlanning.settings?.content_provider);
+  const selectedContentProviderLabel = selectedContentProvider === 'claude' ? 'Claude' : 'Codex';
+  const contentModels = CONTENT_MODELS[selectedContentProvider];
+  const configuredContentModel = aiPlanning.settings?.content_model?.trim() || contentModels[0];
+  const contentModelOptions = contentModels.includes(configuredContentModel)
+    ? contentModels
+    : [configuredContentModel, ...contentModels];
   const currentPresetKey = presetKey(
     aiPlanning.settings?.model,
     aiPlanning.settings?.model_reasoning_effort,
@@ -145,11 +202,11 @@ export function AIPlanningPage() {
       <div className="min-w-0 flex-1 space-y-8">
         <SettingSection
           title="AI planning / Codex"
-          description="Cấu hình model dùng chung cho AI Video, Story Studio, tạo truyện, tạo kịch bản và các bước AI planning khác."
+          description="Cấu hình Codex mặc định và fallback. Khi Provider nội dung bên dưới là Claude, các bước phát triển nội dung sẽ dùng model Claude đã chọn."
         >
           <SettingRow
             title="Preset model"
-            description="Chọn cấu hình trước khi chạy. Bấm “Lưu và test Codex” để lưu cấu hình rồi gửi prompt “xin chào” tới Codex."
+            description={`Chọn cấu hình Codex. Bấm “Lưu preset và test ${selectedContentProviderLabel}” để lưu preset rồi test provider nội dung hiện tại.`}
             action={
               <span className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground">
                 Đang lưu: {currentLabel}
@@ -194,7 +251,7 @@ export function AIPlanningPage() {
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  Lưu và test Codex
+                  Lưu preset và test {selectedContentProviderLabel}
                 </Button>
                 <Button
                   type="button"
@@ -216,7 +273,7 @@ export function AIPlanningPage() {
 
           <SettingRow
             title="Thông tin kết nối"
-            description="Đường dẫn Codex và timeout backend đang dùng cho bài test."
+            description="Đường dẫn Codex fallback và timeout backend đang dùng cho bài test. Claude CLI được tự động phát hiện từ máy người dùng."
           >
             <dl className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm sm:grid-cols-2">
               <div className="min-w-0">
@@ -231,6 +288,67 @@ export function AIPlanningPage() {
               </div>
             </dl>
           </SettingRow>
+        </SettingSection>
+
+        <SettingSection
+          title="Nghiên cứu & phát triển nội dung"
+          description="Chọn provider và model dùng chung cho nghiên cứu, sáng tạo, chat, chấm điểm và các bước tạo nội dung có cấu trúc."
+        >
+          <SettingRow
+            title="Provider nội dung"
+            description="Codex dùng phiên đăng nhập Codex CLI; Claude dùng Claude CLI trong sandbox chỉ đọc, chỉ bật WebSearch/WebFetch khi bước đó cần nghiên cứu."
+            action={
+              <select
+                aria-label="Provider nội dung"
+                value={selectedContentProvider}
+                disabled={aiPlanning.isLoading || aiPlanning.isUpdating}
+                onChange={(event) => {
+                  const nextProvider = contentProvider(event.target.value);
+                  aiPlanning.update({
+                    content_provider: nextProvider,
+                    content_model: CONTENT_MODELS[nextProvider][0],
+                  });
+                }}
+                className="h-10 min-w-40 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+            }
+          />
+
+          <SettingRow
+            title="Model nội dung"
+            description="Model được gửi tới provider cho tất cả các bước nghiên cứu và phát triển nội dung."
+            action={
+              <select
+                aria-label="Model nội dung"
+                value={configuredContentModel}
+                disabled={aiPlanning.isLoading || aiPlanning.isUpdating}
+                onChange={(event) => {
+                  aiPlanning.update({ content_model: event.target.value });
+                }}
+                className="h-10 min-w-56 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {contentModelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model === configuredContentModel && !contentModels.includes(model)
+                      ? `Tùy chỉnh hiện tại: ${model}`
+                      : model}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+
+          <div className="mt-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            Đang dùng:{' '}
+            <span className="font-medium text-foreground">{selectedContentProvider}</span>
+            {' · '}
+            <span className="font-medium text-foreground">{configuredContentModel}</span>
+            {' · '}
+            lựa chọn này được áp dụng nhất quán cho nghiên cứu, sáng tạo, chat và scoring.
+          </div>
         </SettingSection>
 
         <section
@@ -255,8 +373,8 @@ export function AIPlanningPage() {
             <div className="min-w-0 flex-1">
               <p className="font-medium">
                 {testMutation.isPending
-                  ? 'Đang gửi “xin chào” tới Codex…'
-                  : testResult?.message ?? 'Chưa test cấu hình hiện tại.'}
+                  ? `Đang gửi “xin chào” tới ${selectedContentProviderLabel}…`
+                  : (testResult?.message ?? 'Chưa test cấu hình hiện tại.')}
               </p>
               {testResult ? (
                 <div className="mt-2 space-y-1 text-sm text-muted-foreground">
@@ -264,9 +382,7 @@ export function AIPlanningPage() {
                   <p className="break-words">
                     Model thực chạy: {metadataLabel(testResult) || 'chưa xác định'}
                   </p>
-                  <p className="break-words">
-                    Request ID: {testResult.request_id || 'chưa có'}
-                  </p>
+                  <p className="break-words">Request ID: {testResult.request_id || 'chưa có'}</p>
                   {testResult.fallback_used ? (
                     <p className="break-words">
                       Fallback: {testResult.fallback_reason || 'có dùng fallback'}
@@ -278,9 +394,7 @@ export function AIPlanningPage() {
                     </pre>
                   ) : null}
                   {testResult.error_code ? (
-                    <p className="break-words text-destructive">
-                      Mã lỗi: {testResult.error_code}
-                    </p>
+                    <p className="break-words text-destructive">Mã lỗi: {testResult.error_code}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -291,7 +405,7 @@ export function AIPlanningPage() {
               ) : null}
               {testError ? (
                 <p className="mt-2 text-sm text-destructive">
-                  Không test được Codex: {testError}
+                  Không test được {selectedContentProviderLabel}: {testError}
                 </p>
               ) : null}
             </div>
@@ -304,18 +418,18 @@ export function AIPlanningPage() {
           <h3 className="text-sm font-semibold">Cách dùng</h3>
           <ol className="mt-3 list-decimal space-y-2 pl-4 text-sm leading-relaxed text-muted-foreground">
             <li>Chọn preset model phù hợp.</li>
-            <li>Bấm “Lưu và test Codex”.</li>
+            <li>Chọn provider và model nội dung.</li>
+            <li>Bấm “Test lại” để kiểm tra provider đã chọn.</li>
             <li>
-              Nếu Codex trả về text, cấu hình được xem là dùng được cho AI Video và Story
-              Studio.
+              Nếu provider trả về text, cấu hình được xem là dùng được cho AI Video và Story Studio.
             </li>
           </ol>
         </div>
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200">
           <p className="font-medium">Lưu ý hiệu năng</p>
           <p className="mt-2 leading-relaxed">
-            <code>ultra</code> có thể chậm khi provider đang tải cao. Nếu test lâu hoặc
-            fail, thử <code>xhigh</code> trước.
+            <code>ultra</code> có thể chậm khi provider đang tải cao. Nếu test lâu hoặc fail, thử{' '}
+            <code>xhigh</code> trước.
           </p>
         </div>
       </aside>

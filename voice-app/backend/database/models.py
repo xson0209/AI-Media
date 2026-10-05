@@ -244,6 +244,11 @@ class AIPlanningSettings(Base):
     codex_path = Column(String, nullable=True)
     model = Column(String, nullable=True)
     model_reasoning_effort = Column(String, nullable=True)
+    # Shared provider/model for every content-research and content-development flow.
+    # Kept separate from the legacy AI-planning provider fields so existing
+    # Codex planning settings remain backwards compatible.
+    content_provider = Column(String, nullable=False, default="codex")
+    content_model = Column(String, nullable=True)
     timeout_seconds = Column(Integer, nullable=False, default=600)
     output_schema_path = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -554,6 +559,9 @@ class VideoProject(Base):
     visual_style = Column(Text, nullable=True)
     voice_profile_id = Column(String, ForeignKey("profiles.id"), nullable=True)
     status = Column(String, nullable=False, default="draft")
+    # Lifecycle management is separate from production status. Archived
+    # projects remain recoverable and keep their generated artifacts.
+    archived_at = Column(DateTime, nullable=True)
     creative_brief = Column(Text, nullable=True)
     script_text = Column(Text, nullable=True)
     style_bible = Column(Text, nullable=True)
@@ -564,9 +572,23 @@ class VideoProject(Base):
     # Explicit News Video speech mode; NULL preserves legacy language fallback.
     speech_source = Column(String, nullable=True)
     video_purpose = Column(String, nullable=False, default="custom")
+    # Structured Content Profile (v1). Nullable on disk so older SQLite files
+    # can be upgraded without rewriting historical projects; API responses
+    # resolve null legacy values from video_purpose at read time.
+    content_profile_version = Column(Integer, nullable=True, default=1)
+    content_objective = Column(String, nullable=True)
+    content_genre = Column(String, nullable=True)
+    audience_age_band = Column(String, nullable=True)
+    format_profile = Column(String, nullable=True)
+    distribution_platform = Column(String, nullable=True)
+    interaction_mode = Column(String, nullable=True)
+    safety_policy = Column(String, nullable=True)
+    made_for_kids = Column(Boolean, nullable=True)
+    learning_objective = Column(Text, nullable=True)
     dialogue_mode = Column(String, nullable=False, default="voiceover")
     narration_density = Column(String, nullable=False, default="balanced")
     call_to_action_style = Column(String, nullable=True)
+    cta_action = Column(String, nullable=True)
     default_shot_duration_seconds = Column(Integer, nullable=True)
     prompt_segment_count = Column(Integer, nullable=True)
     prompt_segment_duration_seconds = Column(Integer, nullable=True)

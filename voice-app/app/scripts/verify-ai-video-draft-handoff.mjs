@@ -13,6 +13,7 @@ assert.deepEqual(vietnameseConfig, {
   dialogueMode: 'voiceover',
   narrationDensity: 'balanced',
   callToActionStyle: 'none',
+  ctaAction: 'none',
 });
 
 assert.deepEqual(

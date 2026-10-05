@@ -26,7 +26,7 @@ from ..database.models import (
     ResearchSource as DBResearchSource,
     VideoInspirationJob as DBVideoInspirationJob,
 )
-from . import task_queue, video_inspiration, video_inspiration_runs
+from . import research_repository, research_screenshots, task_queue, video_inspiration, video_inspiration_runs
 from .comic_series_analysis import analysis as comic_analysis
 from .comic_series_analysis import fetcher as comic_fetcher
 from .comic_series_analysis import html_extractor
@@ -341,6 +341,67 @@ def _attach_document(source: DBResearchSource, db: Session, *, raw_url: str | No
     _persist(source, db, result=result)
 
 
+def _attach_repository(source: DBResearchSource, db: Session, raw_url: str | None) -> None:
+    result = research_repository.collect_repository(raw_url or source.input_url or "", ref=(source.provenance_json or {}).get("repository_ref"))
+    source.revision = int(source.revision or 0) + 1
+    result.update({"schema_version": "research_source_package.v1", "source_id": source.id, "source_type": source.source_type, "revision": source.revision, "progress": 1.0})
+    result["fingerprint"] = _sync_key(result)
+    source.source_hash = result["fingerprint"]
+    source.status = "ready_for_review"
+    _persist(source, db, result=result)
+
+
+def _analyze_screenshot(source_id: str, revision: int) -> None:
+    db = database_session.SessionLocal()
+    source = None
+    try:
+        source = db.query(DBResearchSource).filter(DBResearchSource.id == source_id).first()
+        if source is None or source.revision != revision:
+            return
+        path = _source_path(source)
+        if path is None or not path.is_file():
+            raise research_repository.RepositoryResearchError("Không còn ảnh màn hình gốc.", "RESEARCH_SOURCE_FILE_MISSING")
+        result = research_screenshots.collect_screenshot(source.id, path, db, repository_url=source.input_url, repository_ref=(source.provenance_json or {}).get("repository_ref"))
+        db.refresh(source)
+        if source.revision != revision:
+            return
+        result.update({"schema_version": "research_source_package.v1", "source_id": source.id, "source_type": source.source_type, "revision": revision, "progress": 1.0})
+        result["fingerprint"] = _sync_key(result)
+        source.source_hash = result["fingerprint"]
+        source.status = "ready_for_review" if result["coverage"].get("vision_complete") else "partial"
+        source.error_code = None
+        source.updated_at = datetime.utcnow()
+        _persist(source, db, result=result)
+    except (research_repository.RepositoryResearchError, ComicAnalysisError, OSError) as exc:
+        if source is not None:
+            db.refresh(source)
+            if source.revision != revision:
+                return
+            source.status = "needs_review"
+            source.error_code = getattr(exc, "error_code", "RESEARCH_SCREEN_ANALYSIS_FAILED")
+            result = dict(source.result_json or {})
+            result["limitations"] = [str(exc)]
+            _persist(source, db, result=result)
+    finally:
+        db.close()
+
+
+async def _watch_screenshot(source_id: str, revision: int) -> None:
+    await asyncio.to_thread(_analyze_screenshot, source_id, revision)
+
+
+def _attach_screenshot(source: DBResearchSource, db: Session) -> None:
+    source.revision = int(source.revision or 0) + 1
+    source.status = "analyzing"
+    source.error_code = None
+    _persist(source, db)
+    if _has_running_loop():
+        task_queue.create_background_task(_watch_screenshot(source.id, source.revision))
+    else:
+        _analyze_screenshot(source.id, source.revision)
+        db.refresh(source)
+
+
 def attach_source(
     source: DBResearchSource,
     db: Session,
@@ -356,19 +417,23 @@ def attach_source(
     """
 
     try:
+        source.error_code = None
         if source.source_type in {"video_url", "video_upload"}:
             _attach_video(source, db, raw_url=raw_url)
         elif source.source_type in {"story_url", "image_upload"}:
             _attach_comic(source, db, raw_url=raw_url)
         elif source.source_type == "docs_url":
             _attach_document(source, db, raw_url=raw_url)
+        elif source.source_type == "github_repo":
+            _attach_repository(source, db, raw_url)
+        elif source.source_type == "screenshot_upload":
+            _attach_screenshot(source, db)
         else:
             return source
-        source.error_code = None
         source.updated_at = datetime.utcnow()
         _persist(source, db)
         return source
-    except (video_inspiration.VideoInspirationError, ComicAnalysisError) as exc:
+    except (video_inspiration.VideoInspirationError, ComicAnalysisError, research_repository.RepositoryResearchError) as exc:
         source.status = "needs_review"
         source.error_code = getattr(exc, "error_code", "RESEARCH_ADAPTER_FAILED")
         result = dict(source.result_json or {})

@@ -8,6 +8,8 @@
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify:ai-video-draft-handoff": "node scripts/verify-ai-video-draft-handoff.mjs",
+    "verify:ai-video-project-session": "node scripts/verify-ai-video-project-session.mjs",
+    "verify:server-news-workflow": "node scripts/verify-server-switch-and-news-download.mjs",
     "verify:ai-video-veo": "node scripts/verify-ai-video-veo-panel.mjs",
     "verify:clip-batch-match": "node scripts/verify-clip-batch-match.mjs",
     "verify:render-settings": "node scripts/verify-render-settings-persistence.mjs",

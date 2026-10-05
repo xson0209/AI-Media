@@ -20,6 +20,7 @@ VIDEO_PROJECT_SUBDIRS = (
     "sfx_assets",
     "review_reports",
     "preview_images",
+    "source_visuals",
     "subtitles",
     "manifests",
     "exports",

@@ -6,7 +6,7 @@ import {
   redirect,
   useRouterState,
 } from '@tanstack/react-router';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { AppFrame } from '@/components/AppFrame/AppFrame';
 import { AIVideoAssistant } from '@/components/AIVideoAssistant/AIVideoAssistant';
 import { CapturesTab } from '@/components/CapturesTab/CapturesTab';
@@ -83,6 +83,7 @@ const isMacOS = () => navigator.platform.toLowerCase().includes('mac');
 // Root layout component
 function RootLayout() {
   const routerState = useRouterState();
+  const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const isWideWorkspace =
     routerState.location.pathname === '/ai-video' ||
     routerState.location.pathname === '/product-video' ||
@@ -102,9 +103,19 @@ function RootLayout() {
   return (
     <AppFrame>
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <Sidebar isMacOS={isMacOS()} />
+        <Sidebar
+          isMacOS={isMacOS()}
+          expanded={sidebarExpanded}
+          onExpandedChange={setSidebarExpanded}
+        />
 
-        <main className="flex-1 ml-20 overflow-hidden flex flex-col">
+        <main
+          className={cn(
+            'min-w-0 flex-1 overflow-hidden flex flex-col transition-[margin-left] duration-200 ease-out',
+            sidebarExpanded ? 'ml-[260px]' : 'ml-20',
+          )}
+          id="main-content"
+        >
           <div
             className={cn(
               'h-full overflow-hidden flex flex-col',

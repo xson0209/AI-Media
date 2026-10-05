@@ -1,7 +1,9 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useRouterState } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import {
   AlertCircle,
+  Archive,
+  ArchiveRestore,
   BookOpen,
   Bug,
   Check,
@@ -50,14 +52,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  AI_VIDEO_DRAFT_STORAGE_KEY,
   type AIVideoFormDraft,
   aiVideoDraftFormConfig,
 } from '@/lib/aiVideoDraft';
 import { apiClient } from '@/lib/api/client';
 import type {
   AIPlanningProviderCheckResponse,
+  AudienceAgeBand,
   CallToActionStyle,
+  CtaAction,
+  ContentGenre,
+  ContentObjective,
+  ContentProfileOptionsResponse,
+  DistributionPlatform,
   DialogueMode,
   DownloadedBlob,
   NarrationDensity,
@@ -85,9 +92,17 @@ import type {
   VideoSeriesResponse,
   VideoShotResponse,
   VideoSourceBlockResponse,
+  FormatProfile,
+  InteractionMode,
+  SafetyPolicy,
 } from '@/lib/api/types';
-import { ALL_LANGUAGES, LANGUAGE_OPTIONS, getLanguageOptionsForEngine } from '@/lib/constants/languages';
+import {
+  ALL_LANGUAGES,
+  LANGUAGE_OPTIONS,
+  getLanguageOptionsForEngine,
+} from '@/lib/constants/languages';
 import { useProfiles } from '@/lib/hooks/useProfiles';
+import { useAIVideoProjectSession } from '@/lib/hooks/useAIVideoProjectSession';
 import { cn } from '@/lib/utils/cn';
 import { usePlatform } from '@/platform/PlatformContext';
 import {
@@ -104,7 +119,28 @@ import { AIVideoVeoChromePanel } from './AIVideoVeoChromePanel';
 
 type AspectRatio = '9:16' | '16:9' | '1:1';
 type ProjectCreationMode = 'quick' | 'manual';
-type ProjectPickerFilter = 'all' | 'standalone' | 'series' | 'running' | 'failed';
+type ProjectPickerFilter = 'all' | 'standalone' | 'series' | 'running' | 'failed' | 'archived';
+type ProjectPickerDateFilter =
+  | 'all'
+  | 'today'
+  | 'yesterday'
+  | 'last7'
+  | 'last30'
+  | 'older'
+  | 'specific';
+
+const PROJECT_PICKER_DATE_FILTERS: Array<{
+  value: ProjectPickerDateFilter;
+  label: string;
+}> = [
+  { value: 'all', label: 'Mọi thời gian' },
+  { value: 'today', label: 'Hôm nay' },
+  { value: 'yesterday', label: 'Hôm qua' },
+  { value: 'last7', label: '7 ngày qua' },
+  { value: 'last30', label: '30 ngày qua' },
+  { value: 'older', label: 'Cũ hơn 30 ngày' },
+  { value: 'specific', label: 'Ngày cụ thể' },
+];
 
 const AI_VIDEO_VISUAL_STYLE_MAX_LENGTH = 2000;
 const AI_VIDEO_TITLE_MAX_LENGTH = 160;
@@ -130,9 +166,20 @@ interface DraftForm {
   title: string;
   targetLanguage: VideoLanguage;
   videoPurpose: VideoPurpose;
+  contentObjective: ContentObjective;
+  contentGenre: ContentGenre;
+  audienceAgeBand: AudienceAgeBand;
+  formatProfile: FormatProfile;
+  targetDurationSeconds: number;
+  distributionPlatform: DistributionPlatform;
+  interactionMode: InteractionMode;
+  safetyPolicy: SafetyPolicy;
+  madeForKids: boolean;
+  learningObjective: string;
   dialogueMode: DialogueMode;
   narrationDensity: NarrationDensity;
   callToActionStyle: CallToActionStyle;
+  ctaAction: CtaAction;
   promptSegmentCount: number;
   promptSegmentDuration: number;
   microScenesPerPrompt: number;
@@ -198,13 +245,30 @@ const SOURCE_TEMPLATES: SourceDraft[] = [
   },
 ];
 
+const STRICT_STICK_FIGURE_VISUAL_STYLE = `Hoạt hình người que 3D cinematic đúng nghĩa (strict non-anatomical stick figure).
+Đầu tròn đơn giản; thân là một nét hoặc ống rất mảnh; tay và chân là các thanh que mảnh, đồng đều, nối bằng khớp hình học đơn giản.
+Tuyệt đối không có bàn tay, bàn chân, ngón tay, ngón chân, cơ bắp, da thịt, vai, hông, ngực, xương chậu, khuôn mặt chi tiết hoặc tỷ lệ cơ thể người.
+3D chỉ dùng cho chiều sâu, vật liệu, ánh sáng volumetric, parallax và chuyển động camera; không được biến người que thành nhân vật humanoid có giải phẫu người.
+Giữ nguyên silhouette, độ dày tay chân, kích thước đầu và tỷ lệ nhân vật trong mọi cảnh.`;
+
 const initialForm: DraftForm = {
   title: '',
   targetLanguage: 'vi',
   videoPurpose: 'vietnam_market',
+  contentObjective: 'entertain',
+  contentGenre: 'general',
+  audienceAgeBand: 'all_ages',
+  formatProfile: 'short_60s',
+  targetDurationSeconds: 56,
+  distributionPlatform: 'multi_platform',
+  interactionMode: 'none',
+  safetyPolicy: 'standard',
+  madeForKids: false,
+  learningObjective: '',
   dialogueMode: 'character_lines',
   narrationDensity: 'dense',
   callToActionStyle: 'soft',
+  ctaAction: 'none',
   promptSegmentCount: 7,
   promptSegmentDuration: 8,
   microScenesPerPrompt: 4,
@@ -296,8 +360,84 @@ const VIDEO_PURPOSE_OPTIONS: VideoPurposeOption[] = [
   },
 ];
 
+const FALLBACK_CONTENT_PROFILE_OPTIONS: ContentProfileOptionsResponse = {
+  version: 1,
+  objectives: [
+    { value: 'entertain', label: 'Giải trí' },
+    { value: 'educate', label: 'Giáo dục' },
+    { value: 'inform', label: 'Thông tin' },
+    { value: 'convert', label: 'Chuyển đổi / bán hàng' },
+    { value: 'inspire', label: 'Truyền cảm hứng' },
+  ],
+  genres: [
+    { key: 'general', label: 'Nội dung tổng quát', description: 'Template linh hoạt.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'educational_explainer', label: 'Giải thích / explainer', description: 'Một khái niệm, ví dụ cụ thể.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'kids_educational', label: 'Kids · bài học ngắn', description: 'Bài học có câu hỏi và takeaway.', defaults: { content_objective: 'educate', audience_age_band: 'kids_6_9', format_profile: 'kids_2m', distribution_platform: 'youtube_kids', interaction_mode: 'pause_and_choose', safety_policy: 'kids_strict', made_for_kids: true }, generation_guidance: [], review_checks: [] },
+    { key: 'kids_rescue', label: 'Kids · cứu hộ & giải quyết vấn đề', description: 'Nhiệm vụ cứu hộ an toàn.', defaults: { content_objective: 'entertain', audience_age_band: 'kids_6_9', format_profile: 'kids_2m', distribution_platform: 'youtube_kids', interaction_mode: 'pause_and_choose', safety_policy: 'kids_strict', made_for_kids: true }, generation_guidance: [], review_checks: [] },
+    { key: 'kids_stem', label: 'Kids · STEM / garage', description: 'Quan sát và thử nghiệm an toàn.', defaults: { content_objective: 'educate', audience_age_band: 'kids_6_9', format_profile: 'kids_2m', distribution_platform: 'youtube_kids', interaction_mode: 'count_and_repeat', safety_policy: 'kids_strict', made_for_kids: true }, generation_guidance: [], review_checks: [] },
+    { key: 'kids_song', label: 'Kids · bài hát & vận động', description: 'Điệp khúc và động tác dễ nhớ.', defaults: { content_objective: 'entertain', audience_age_band: 'preschool_3_5', format_profile: 'kids_2m', distribution_platform: 'youtube_kids', interaction_mode: 'count_and_repeat', safety_policy: 'kids_strict', made_for_kids: true }, generation_guidance: [], review_checks: [] },
+    { key: 'health_explainer', label: 'Sức khỏe · giải thích thận trọng', description: 'Không chẩn đoán hoặc hứa hẹn điều trị.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'relationship_soft_drama', label: 'Tình cảm · tâm lý nhẹ', description: 'Đồng cảm và ranh giới lành mạnh.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'product_ad', label: 'Quảng cáo sản phẩm', description: 'Hook, lợi ích, bằng chứng, CTA.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'product_ugc', label: 'Product UGC / beauty', description: 'UGC tự nhiên với reference asset.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'news', label: 'Tin tức', description: '5W1H và tách fact/quote/opinion.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'documentary', label: 'Phóng sự / documentary', description: 'Bối cảnh, trích dẫn và quan sát.', defaults: {}, generation_guidance: [], review_checks: [] },
+    { key: 'developer_explainer', label: 'Developer / GitHub explainer', description: 'Giải thích repo/code có cấu trúc.', defaults: {}, generation_guidance: [], review_checks: [] },
+  ],
+  audience_age_bands: [
+    { value: 'all_ages', label: 'Mọi lứa tuổi' },
+    { value: 'preschool_3_5', label: 'Mầm non · 3–5' },
+    { value: 'kids_6_9', label: 'Trẻ em · 6–9' },
+    { value: 'tweens_10_12', label: 'Thiếu nhi · 10–12' },
+    { value: 'teens_13_17', label: 'Thiếu niên · 13–17' },
+    { value: 'adults', label: 'Người lớn' },
+  ],
+  format_profiles: [
+    { value: 'short_15s', label: 'Short · 15 giây' },
+    { value: 'short_30s', label: 'Short · 30 giây' },
+    { value: 'short_60s', label: 'Short · 60 giây' },
+    { value: 'explainer_90s', label: 'Explainer · 90 giây' },
+    { value: 'kids_2m', label: 'Kids · 2 phút' },
+    { value: 'narrative_3m', label: 'Narrative · 3 phút' },
+    { value: 'long_form', label: 'Long-form' },
+  ],
+  distribution_platforms: [
+    { value: 'youtube', label: 'YouTube' },
+    { value: 'youtube_kids', label: 'YouTube Kids' },
+    { value: 'tiktok', label: 'TikTok' },
+    { value: 'facebook', label: 'Facebook' },
+    { value: 'multi_platform', label: 'Đa nền tảng' },
+  ],
+  interaction_modes: [
+    { value: 'none', label: 'Không tương tác' },
+    { value: 'pause_and_choose', label: 'Dừng & chọn đáp án' },
+    { value: 'q_and_a', label: 'Hỏi – đáp' },
+    { value: 'count_and_repeat', label: 'Đếm & lặp lại' },
+  ],
+  safety_policies: [
+    { value: 'standard', label: 'Tiêu chuẩn' },
+    { value: 'kids_strict', label: 'Kids · nghiêm ngặt' },
+    { value: 'health_cautious', label: 'Sức khỏe · thận trọng' },
+    { value: 'editorial', label: 'Biên tập / kiểm chứng' },
+    { value: 'adult', label: 'Người lớn' },
+  ],
+};
+
 function purposeOption(value: VideoPurpose): VideoPurposeOption {
   return VIDEO_PURPOSE_OPTIONS.find((item) => item.value === value) ?? VIDEO_PURPOSE_OPTIONS[0];
+}
+
+function contentProfileDefaultsForPurpose(value: VideoPurpose): Partial<DraftForm> {
+  if (value === 'educational_explainer') {
+    return { contentObjective: 'educate', contentGenre: 'educational_explainer' };
+  }
+  if (value === 'sales_ad') {
+    return { contentObjective: 'convert', contentGenre: 'product_ad' };
+  }
+  if (value === 'localized_variant') {
+    return { contentObjective: 'inform', contentGenre: 'general' };
+  }
+  return { contentObjective: 'entertain', contentGenre: 'general' };
 }
 
 function usesQwenVietnameseBypass(
@@ -566,6 +706,16 @@ function callToActionStyleLabel(style: CallToActionStyle | null | undefined): st
   return 'không';
 }
 
+function ctaActionLabel(action: CtaAction | null | undefined): string {
+  if (action === 'comment') return 'bình luận';
+  if (action === 'like') return 'nhấn thích';
+  if (action === 'share') return 'chia sẻ';
+  if (action === 'follow') return 'theo dõi';
+  if (action === 'save') return 'lưu video';
+  if (action === 'subscribe') return 'đăng ký';
+  return 'không';
+}
+
 function voiceProfileLanguageLabel(language: string | null | undefined): string {
   if (!language) return 'không rõ';
   return ALL_LANGUAGES[language as keyof typeof ALL_LANGUAGES] ?? language;
@@ -579,6 +729,61 @@ function episodeDisplay(
     ? `Tập ${String(project.episode_number).padStart(2, '0')}`
     : 'Tập';
   return project.episode_title ? `${number} · ${project.episode_title}` : number;
+}
+
+function projectDateKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function projectDateLabel(value: string | null | undefined): string {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return 'Chưa rõ ngày';
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
+function projectDateInputLabel(value: string): string {
+  const [year, month, day] = value.split('-');
+  return year && month && day ? `${day}/${month}/${year}` : value;
+}
+
+function projectPickerDateMatches(
+  value: string | null | undefined,
+  filter: ProjectPickerDateFilter,
+  specificDate = '',
+  now = new Date(),
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'specific') {
+    return !specificDate || projectDateKey(value) === specificDate;
+  }
+
+  const projectKey = projectDateKey(value);
+  const todayKey = projectDateKey(now.toISOString());
+  if (!projectKey || !todayKey) return false;
+  if (filter === 'today') return projectKey === todayKey;
+
+  const projectDay = new Date(`${projectKey}T00:00:00`);
+  const today = new Date(`${todayKey}T00:00:00`);
+  const dayDifference = Math.floor((today.getTime() - projectDay.getTime()) / 86_400_000);
+  if (filter === 'yesterday') return dayDifference === 1;
+  if (filter === 'last7') return dayDifference >= 0 && dayDifference < 7;
+  if (filter === 'last30') return dayDifference >= 0 && dayDifference < 30;
+  return dayDifference >= 30;
+}
+
+function compactProjectSummary(value: string | null | undefined): string {
+  const text = (value ?? '').trim().replace(/\s+/g, ' ');
+  return text.length > 180 ? `${text.slice(0, 180).trim()}…` : text;
 }
 
 function groupProjectsBySeries(
@@ -652,9 +857,7 @@ function isFreshVideoPrompt(
  * prompt preview, but it is noise when pasted into a video tool.
  */
 function cleanCopiedVideoPrompt(value: string): string {
-  return value
-    .replace(/^\s*#\s*Prompt gốc để copy sang công cụ tạo video\s*\r?\n?/i, '')
-    .trim();
+  return value.replace(/^\s*#\s*Prompt gốc để copy sang công cụ tạo video\s*\r?\n?/i, '').trim();
 }
 
 function allVideoPromptsText(
@@ -754,9 +957,11 @@ function qualityStatusLabel(status: VideoQualityStatus | string | null | undefin
 }
 
 function qualityStatusClass(status: VideoQualityStatus | string | null | undefined): string {
-  if (status === 'passed') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+  if (status === 'passed')
+    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
   if (status === 'blocked') return 'border-destructive/40 bg-destructive/10 text-destructive';
-  if (status === 'stale') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300';
+  if (status === 'stale')
+    return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300';
   if (status === 'not_checked') return 'border-border bg-muted/30 text-muted-foreground';
   return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300';
 }
@@ -776,6 +981,7 @@ const AUTO_RUN_STEPS: Array<{ step: VideoAutoRunStep; label: string }> = [
   { step: 'waiting_planning', label: 'Chờ Codex' },
   { step: 'review_character_proposals', label: 'Duyệt nhân vật mới' },
   { step: 'review_story', label: 'Duyệt kịch bản' },
+  { step: 'quality_gate', label: 'Kiểm tra chất lượng nội dung' },
   { step: 'generate_shots', label: 'Phân đoạn' },
   { step: 'generate_prompts', label: 'Câu lệnh video' },
   { step: 'generate_publishing_metadata', label: 'Nội dung đăng' },
@@ -911,11 +1117,14 @@ function autoRunReviewLabel(stage: VideoAutoRunResponse['review_stage']): string
   if (stage === 'story') return 'chiến lược, tính nhất quán và kịch bản';
   if (stage === 'prompts') return 'câu lệnh video và nội dung đăng';
   if (stage === 'character_proposals') return 'nhân vật mới trong series';
+  if (stage === 'longform_outline') return 'dàn ý video dài';
   return 'nội dung';
 }
 
 function autoRunStepLabel(step: string | null | undefined): string {
-  return AUTO_RUN_STEPS.find((item) => item.step === step)?.label ?? (step ? 'Đang xử lý' : 'Chưa chạy');
+  return (
+    AUTO_RUN_STEPS.find((item) => item.step === step)?.label ?? (step ? 'Đang xử lý' : 'Chưa chạy')
+  );
 }
 
 function voiceStatusLabel(status: string | null | undefined): string {
@@ -1124,15 +1333,15 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
         ? 'kịch bản và hướng kể chuyện'
         : run.review_stage === 'character_proposals'
           ? 'nhân vật mới ảnh hưởng canon series'
-        : run.review_stage === 'prompts'
-          ? promptsOnly
-            ? 'câu lệnh video trước khi tải ảnh'
-            : publishingKit
-              ? 'câu lệnh video và nội dung đăng'
-            : videoClips
-              ? 'câu lệnh video và nội dung đăng trước khi gửi sang Veo'
-              : 'câu lệnh video và nội dung đăng trước khi tạo giọng'
-          : 'nội dung vừa tạo';
+          : run.review_stage === 'prompts'
+            ? promptsOnly
+              ? 'câu lệnh video trước khi tải ảnh'
+              : publishingKit
+                ? 'câu lệnh video và nội dung đăng'
+                : videoClips
+                  ? 'câu lệnh video và nội dung đăng trước khi gửi sang Veo'
+                  : 'câu lệnh video và nội dung đăng trước khi tạo giọng'
+            : 'nội dung vừa tạo';
     return {
       title: `Cần bạn duyệt ${reviewTarget}`,
       detail: 'Hệ thống đã dừng lại để bạn kiểm tra nội dung trước khi đi tiếp.',
@@ -1255,7 +1464,9 @@ function autoRunPlainSummary(run: VideoAutoRunResponse): {
       };
     case 'review_prompts':
       return {
-        title: promptsOnly ? 'Đang chờ duyệt câu lệnh video' : 'Đang chờ duyệt câu lệnh và nội dung đăng',
+        title: promptsOnly
+          ? 'Đang chờ duyệt câu lệnh video'
+          : 'Đang chờ duyệt câu lệnh và nội dung đăng',
         detail: promptsOnly
           ? `Câu lệnh hiện tại: ${promptCount}. Giọng đọc và phụ đề sẽ không chạy trong chế độ tự chạy này.`
           : publishingKit
@@ -1360,7 +1571,8 @@ function proposalStatusLabel(status: string | null | undefined): string {
 function canonImpactLabel(value: string | null | undefined): string {
   const normalized = (value || '').trim().toLowerCase();
   if (!normalized || normalized === 'unknown') return 'Chưa rõ';
-  if (['none', 'background', 'background_extra', 'non_canon'].includes(normalized)) return 'Không ảnh hưởng canon';
+  if (['none', 'background', 'background_extra', 'non_canon'].includes(normalized))
+    return 'Không ảnh hưởng canon';
   if (normalized === 'episode_only') return 'Chỉ trong tập';
   if (normalized === 'low') return 'Thấp';
   if (normalized === 'medium') return 'Trung bình';
@@ -1368,14 +1580,24 @@ function canonImpactLabel(value: string | null | undefined): string {
   return value || 'Chưa rõ';
 }
 
-function proposalDetailList(proposal: NewCharacterProposal): Array<{ label: string; value: string }> {
+function proposalDetailList(
+  proposal: NewCharacterProposal,
+): Array<{ label: string; value: string }> {
   return [
-    { label: 'Ngoại hình', value: [proposal.face_description, proposal.hair_description, proposal.body_description].filter(Boolean).join(' · ') },
+    {
+      label: 'Ngoại hình',
+      value: [proposal.face_description, proposal.hair_description, proposal.body_description]
+        .filter(Boolean)
+        .join(' · '),
+    },
     { label: 'Trang phục', value: proposal.signature_outfit || '' },
     { label: 'Tính cách', value: proposal.personality || '' },
     { label: 'Cách nói', value: proposal.speech_style || '' },
     { label: 'Khóa nhận diện', value: proposal.fixed_traits || '' },
-    { label: 'Artifact', value: proposal.affected_artifacts?.length ? proposal.affected_artifacts.join(', ') : '' },
+    {
+      label: 'Artifact',
+      value: proposal.affected_artifacts?.length ? proposal.affected_artifacts.join(', ') : '',
+    },
   ].filter((item) => item.value.trim());
 }
 
@@ -1491,9 +1713,15 @@ function CharacterProposalReviewPanel({
                     <Button
                       size="sm"
                       disabled={!pending || Boolean(decisionPendingId)}
-                      onClick={() => onDecision(proposal.proposal_id, 'approve_as_series_character')}
+                      onClick={() =>
+                        onDecision(proposal.proposal_id, 'approve_as_series_character')
+                      }
                     >
-                      {deciding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                      {deciding ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Users className="h-4 w-4" />
+                      )}
                       Thêm vào Series
                     </Button>
                     <Button
@@ -1538,7 +1766,11 @@ function CharacterProposalReviewPanel({
           disabled={!readyToContinue || continuePending || loading || Boolean(error)}
           onClick={onContinue}
         >
-          {continuePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {continuePending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Play className="h-4 w-4" />
+          )}
           Tiếp tục từ {resumeLabel}
         </Button>
         {!readyToContinue ? (
@@ -1676,11 +1908,11 @@ function AutoRunProgressPanel({
                 ? 'Chỉ câu lệnh video'
                 : run.material_target === 'publishing_kit'
                   ? 'Câu lệnh + nội dung đăng'
-                : run.material_target === 'video_clips'
-                  ? 'Veo + MP4'
-                  : usesVeoNativeVietnameseSpeech
-                    ? 'Câu lệnh + audio Veo + SRT'
-                    : 'Câu lệnh + giọng đọc + SRT'}
+                  : run.material_target === 'video_clips'
+                    ? 'Veo + MP4'
+                    : usesVeoNativeVietnameseSpeech
+                      ? 'Câu lệnh + audio Veo + SRT'
+                      : 'Câu lệnh + giọng đọc + SRT'}
             </span>
             <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">
               {run.mode === 'review_gated' ? 'Duyệt từng chặng' : 'Tự chạy hết'}
@@ -1832,9 +2064,7 @@ function CreativeDirectionSummary({ project }: { project: VideoProjectDetailResp
       </div>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-          <p className="text-xs font-medium uppercase text-muted-foreground">
-            Bản đồ giữ chân
-          </p>
+          <p className="text-xs font-medium uppercase text-muted-foreground">Bản đồ giữ chân</p>
           <p className="mt-2 text-sm leading-relaxed text-foreground/85">
             {retentionReviewVi || userReviewTextFallback('Bản đồ giữ chân')}
           </p>
@@ -1864,9 +2094,7 @@ function CreativeDirectionSummary({ project }: { project: VideoProjectDetailResp
           </p>
         </div>
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
-          <p className="text-xs font-medium uppercase text-muted-foreground">
-            Thiết kế âm thanh
-          </p>
+          <p className="text-xs font-medium uppercase text-muted-foreground">Thiết kế âm thanh</p>
           <p className="mt-2 text-sm leading-relaxed text-foreground/85">
             {soundReviewVi || userReviewTextFallback('Sound design')}
           </p>
@@ -1963,7 +2191,8 @@ function voiceQueueSummary(
   const running = Math.max(0, Number(queue.running) || 0);
   const queued = Math.max(0, Number(queue.queued) || 0);
   const maxConcurrency = Math.max(0, Number(queue.max_concurrency) || 0);
-  const runningText = maxConcurrency > 0 ? `${running}/${maxConcurrency} đang tạo` : `${running} đang tạo`;
+  const runningText =
+    maxConcurrency > 0 ? `${running}/${maxConcurrency} đang tạo` : `${running} đang tạo`;
   return `${runningText} · ${queued} chờ`;
 }
 
@@ -1977,7 +2206,9 @@ function formatStructuredPreview(value: unknown, limit = 900): string {
     }
     if (item && typeof item === 'object') {
       return Object.entries(item as Record<string, unknown>)
-        .filter(([, nested]) => nested !== null && nested !== undefined && String(nested).trim() !== '')
+        .filter(
+          ([, nested]) => nested !== null && nested !== undefined && String(nested).trim() !== '',
+        )
         .slice(0, 10)
         .map(([key, nested]) => `${key}: ${format(nested)}`)
         .join('\n');
@@ -2133,18 +2364,6 @@ function SystemResourcePanel({
   );
 }
 
-function routeSearchValue(search: unknown, key: string): string | null {
-  if (typeof search === 'string') {
-    const text = search.startsWith('?') ? search : `?${search}`;
-    return new URLSearchParams(text).get(key);
-  }
-  if (search && typeof search === 'object') {
-    const value = (search as Record<string, unknown>)[key];
-    return typeof value === 'string' && value.trim() ? value.trim() : null;
-  }
-  return null;
-}
-
 function normalizeVisualStyleInput(value: string | null | undefined): string | null {
   const text = (value || '').trim();
   if (!text) return null;
@@ -2170,12 +2389,16 @@ function sourcesFromAIVideoDraft(draft: AIVideoFormDraft): SourceDraft[] {
 }
 
 export function AIVideoAssistant() {
-  const routerState = useRouterState();
   const platform = usePlatform();
   const queryClient = useQueryClient();
   const { data: profiles } = useProfiles();
   const [form, setForm] = useState<DraftForm>(initialForm);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const {
+    selectedProjectId,
+    incomingDraft,
+    sessionNotice,
+    selectProject: selectSessionProject,
+  } = useAIVideoProjectSession();
   const [notice, setNotice] = useState<string | null>(null);
   const [shortcutToast, setShortcutToast] = useState<string | null>(null);
   const [creationMode, setCreationMode] = useState<ProjectCreationMode>('quick');
@@ -2186,8 +2409,7 @@ export function AIVideoAssistant() {
   const [episodeDraft, setEpisodeDraft] = useState<EpisodeDraft>(emptyEpisodeDraft);
   const [episodeDialogOpen, setEpisodeDialogOpen] = useState(false);
   const [seriesPickerOpen, setSeriesPickerOpen] = useState(false);
-  const [seriesPickerContext, setSeriesPickerContext] =
-    useState<SeriesPickerContext>('view_all');
+  const [seriesPickerContext, setSeriesPickerContext] = useState<SeriesPickerContext>('view_all');
   const [seriesCreateDialogOpen, setSeriesCreateDialogOpen] = useState(false);
   const [seriesCreateContext, setSeriesCreateContext] =
     useState<SeriesPickerContext>('ai_video_direct');
@@ -2195,6 +2417,9 @@ export function AIVideoAssistant() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [projectPickerSearch, setProjectPickerSearch] = useState('');
   const [projectPickerFilter, setProjectPickerFilter] = useState<ProjectPickerFilter>('all');
+  const [projectPickerDateFilter, setProjectPickerDateFilter] =
+    useState<ProjectPickerDateFilter>('all');
+  const [projectPickerDate, setProjectPickerDate] = useState('');
   const [copiedVideoPromptKey, setCopiedVideoPromptKey] = useState<string | null>(null);
   const [editingSeriesId, setEditingSeriesId] = useState<string | null>(null);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
@@ -2204,17 +2429,9 @@ export function AIVideoAssistant() {
   const [playingVoiceKey, setPlayingVoiceKey] = useState<string | null>(null);
   const [qualityOverrideReason, setQualityOverrideReason] = useState('');
   const voicePreviewRef = useRef<HTMLAudioElement | null>(null);
-  const appliedDraftRef = useRef<string | null>(null);
   const shortcutToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const requestedProjectId = useMemo(() => {
-    return routeSearchValue(routerState.location.search, 'projectId');
-  }, [routerState.location.search]);
-  const requestedDraftSource = useMemo(() => {
-    return routeSearchValue(routerState.location.search, 'draft');
-  }, [routerState.location.search]);
-
   const selectProject = (projectId: string | null) => {
-    setSelectedProjectId(projectId);
+    selectSessionProject(projectId);
     setProjectPickerOpen(false);
     setProjectMenuId(null);
     setVoiceSelectorOpen(false);
@@ -2232,6 +2449,11 @@ export function AIVideoAssistant() {
   const seriesQuery = useQuery({
     queryKey: ['ai-video', 'series'],
     queryFn: () => apiClient.listVideoSeries(),
+  });
+  const contentProfileOptionsQuery = useQuery({
+    queryKey: ['ai-video', 'content-profile-options'],
+    queryFn: () => apiClient.getContentProfileOptions(),
+    staleTime: 5 * 60 * 1000,
   });
   const providerQuery = useQuery({
     queryKey: ['ai-video', 'planning-check'],
@@ -2317,7 +2539,8 @@ export function AIVideoAssistant() {
       .filter(
         (project) =>
           project.id !== selectedProjectId &&
-          (isAutoRunBusyStatus(project.active_run_status) || project.active_run_status === 'failed'),
+          (isAutoRunBusyStatus(project.active_run_status) ||
+            project.active_run_status === 'failed'),
       )
       .map((project) => ({
         queryKey: ['ai-video', 'auto-run', 'latest', project.id],
@@ -2366,30 +2589,61 @@ export function AIVideoAssistant() {
     );
   }, [liveAutoRunsByProjectId, projectsQuery.data]);
   const groupedProjects = useMemo(
-    () => groupProjectsBySeries(projectsWithLiveRunState, seriesQuery.data),
+    () =>
+      groupProjectsBySeries(
+        projectsWithLiveRunState.filter((project) => !project.archived),
+        seriesQuery.data,
+      ),
     [projectsWithLiveRunState, seriesQuery.data],
   );
   const projectPickerProjects = useMemo(() => {
     const query = projectPickerSearch.trim().toLocaleLowerCase();
     const filtered = projectsWithLiveRunState.filter((project) => {
-      const matchesQuery = !query ||
+      const matchesQuery =
+        !query ||
         [project.title, project.topic, project.series_title]
           .filter(Boolean)
           .some((value) => value!.toLocaleLowerCase().includes(query));
       if (!matchesQuery) return false;
-      if (projectPickerFilter === 'standalone') return !project.series_id;
-      if (projectPickerFilter === 'series') return Boolean(project.series_id);
-      if (projectPickerFilter === 'running') return isAutoRunActiveStatus(project.active_run_status);
-      if (projectPickerFilter === 'failed') return project.active_run_status === 'failed' || project.status === 'failed';
-      return true;
+      const matchesType =
+        projectPickerFilter === 'archived'
+          ? Boolean(project.archived)
+          : projectPickerFilter === 'standalone'
+          ? !project.series_id
+          : projectPickerFilter === 'series'
+            ? Boolean(project.series_id)
+            : projectPickerFilter === 'running'
+              ? isAutoRunActiveStatus(project.active_run_status)
+              : projectPickerFilter === 'failed'
+                ? project.active_run_status === 'failed' || project.status === 'failed'
+                : true;
+      if (!matchesType) return false;
+      if (projectPickerFilter !== 'archived' && project.archived) return false;
+      return projectPickerDateMatches(
+        project.updated_at,
+        projectPickerDate ? 'specific' : projectPickerDateFilter,
+        projectPickerDate,
+      );
     });
     return filtered.slice().sort((a, b) => {
-      const aPinned = isAutoRunActiveStatus(a.active_run_status) || a.active_run_status === 'failed' || a.status === 'failed';
-      const bPinned = isAutoRunActiveStatus(b.active_run_status) || b.active_run_status === 'failed' || b.status === 'failed';
+      const aPinned =
+        isAutoRunActiveStatus(a.active_run_status) ||
+        a.active_run_status === 'failed' ||
+        a.status === 'failed';
+      const bPinned =
+        isAutoRunActiveStatus(b.active_run_status) ||
+        b.active_run_status === 'failed' ||
+        b.status === 'failed';
       if (aPinned !== bPinned) return aPinned ? -1 : 1;
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
-  }, [projectPickerFilter, projectPickerSearch, projectsWithLiveRunState]);
+  }, [
+    projectPickerDate,
+    projectPickerDateFilter,
+    projectPickerFilter,
+    projectPickerSearch,
+    projectsWithLiveRunState,
+  ]);
   const selectedSeries = useMemo(
     () => seriesQuery.data?.find((series) => series.id === selectedProject?.series_id) ?? null,
     [selectedProject?.series_id, seriesQuery.data],
@@ -2411,6 +2665,10 @@ export function AIVideoAssistant() {
   const usesVeoNativeVietnameseSpeech =
     activeVideoLanguage === 'vi' && (selectedProject?.phase ?? 'phase2') === 'phase2';
   const selectedPurposeOption = purposeOption(form.videoPurpose);
+  const contentProfileOptions = contentProfileOptionsQuery.data ?? FALLBACK_CONTENT_PROFILE_OPTIONS;
+  const selectedGenreTemplate = contentProfileOptions.genres.find(
+    (template) => template.key === form.contentGenre,
+  );
   const activeVoiceProfileId = form.voiceProfileId.trim();
   const hasVoiceProfile = activeVoiceProfileId.length > 0;
   const providerReady = !!providerQuery.data?.ready;
@@ -2478,14 +2736,13 @@ export function AIVideoAssistant() {
     () => allVideoPromptsText(shots, promptByShotId),
     [shots, promptByShotId],
   );
-  const videoPromptReadyCount = shots.filter((shot) =>
-    shot.prompt_status !== 'missing' &&
-    shot.prompt_status !== 'stale' &&
-    promptByShotId[shot.id]?.content?.trim(),
+  const videoPromptReadyCount = shots.filter(
+    (shot) =>
+      shot.prompt_status !== 'missing' &&
+      shot.prompt_status !== 'stale' &&
+      promptByShotId[shot.id]?.content?.trim(),
   ).length;
-  const videoPromptAvailableCount = shots.filter(
-    (shot) => shot.prompt_status !== 'missing',
-  ).length;
+  const videoPromptAvailableCount = shots.filter((shot) => shot.prompt_status !== 'missing').length;
   const qualityReport = qualityReportQuery.data ?? null;
   const qualitySections = qualitySectionEntries(qualityReport);
   const latestRetentionDataset = retentionDatasetsQuery.data?.items[0] ?? null;
@@ -2553,57 +2810,28 @@ export function AIVideoAssistant() {
   const showVoiceSelector = !hasVoiceProfile || voiceSelectorOpen;
 
   useEffect(() => {
-    if (!requestedProjectId || selectedProjectId === requestedProjectId) return;
-    setSelectedProjectId(requestedProjectId);
+    setProjectPickerOpen(false);
     setVoiceSelectorOpen(false);
     setProjectMenuId(null);
-  }, [requestedProjectId, selectedProjectId]);
+    setQualityOverrideReason('');
+  }, [selectedProjectId]);
 
   useEffect(() => {
-    if (requestedDraftSource !== 'video-inspiration') return;
-    let rawDraft: string | null = null;
-    try {
-      rawDraft = window.sessionStorage.getItem(AI_VIDEO_DRAFT_STORAGE_KEY);
-    } catch (error) {
-      setNotice(`Chưa đọc được bản nháp từ Video Inspiration: ${getErrorMessage(error)}`);
-      return;
-    }
-    if (!rawDraft || appliedDraftRef.current === rawDraft) return;
-
-    try {
-      const draft = JSON.parse(rawDraft) as AIVideoFormDraft;
-      if (draft.source !== 'video-inspiration') return;
-      appliedDraftRef.current = rawDraft;
-      setSelectedProjectId(null);
-      setProjectMenuId(null);
-      setVoiceSelectorOpen(false);
-      setCreationMode('manual');
-      setForm((current) => ({
-        ...current,
-        title: draft.title?.trim() || '',
-        ...aiVideoDraftFormConfig(draft),
-        visualStyle: normalizeVisualStyleInput(draft.visualStyle) || current.visualStyle,
-        sources: sourcesFromAIVideoDraft(draft),
-      }));
-      setNotice(
-        draft.notice ||
-          'Đã đưa dữ liệu từ Video Inspiration vào form. Hãy chọn cấu hình rồi mới tạo dự án.',
-      );
-      window.sessionStorage.removeItem(AI_VIDEO_DRAFT_STORAGE_KEY);
-    } catch (error) {
-      setNotice(`Bản nháp từ Video Inspiration không hợp lệ: ${getErrorMessage(error)}`);
-    }
-  }, [requestedDraftSource]);
+    if (sessionNotice) setNotice(sessionNotice);
+  }, [sessionNotice]);
 
   useEffect(() => {
-    if (!selectedProjectId || !projectsQuery.data) return;
-    if (requestedProjectId && selectedProjectId === requestedProjectId) return;
-    if (projectsQuery.data.some((project) => project.id === selectedProjectId)) return;
-    const nextProjectId = projectsQuery.data[0]?.id ?? null;
-    setSelectedProjectId(nextProjectId);
-    setVoiceSelectorOpen(false);
-    setProjectMenuId(null);
-  }, [requestedProjectId, selectedProjectId, projectsQuery.data]);
+    if (!incomingDraft) return;
+    const draft = incomingDraft;
+    setCreationMode('manual');
+    setForm((current) => ({
+      ...current,
+      title: draft.title?.trim() || '',
+      ...aiVideoDraftFormConfig(draft),
+      visualStyle: normalizeVisualStyleInput(draft.visualStyle) || current.visualStyle,
+      sources: sourcesFromAIVideoDraft(draft),
+    }));
+  }, [incomingDraft]);
 
   useEffect(() => {
     if (!selectedProject) return;
@@ -2611,9 +2839,21 @@ export function AIVideoAssistant() {
       ...current,
       targetLanguage: selectedProject.target_language ?? current.targetLanguage,
       videoPurpose: selectedProject.video_purpose ?? current.videoPurpose,
+      contentObjective: selectedProject.content_objective ?? current.contentObjective,
+      contentGenre: selectedProject.content_genre ?? current.contentGenre,
+      audienceAgeBand: selectedProject.audience_age_band ?? current.audienceAgeBand,
+      formatProfile: selectedProject.format_profile ?? current.formatProfile,
+      targetDurationSeconds:
+        selectedProject.target_duration_seconds ?? current.targetDurationSeconds,
+      distributionPlatform: selectedProject.distribution_platform ?? current.distributionPlatform,
+      interactionMode: selectedProject.interaction_mode ?? current.interactionMode,
+      safetyPolicy: selectedProject.safety_policy ?? current.safetyPolicy,
+      madeForKids: selectedProject.made_for_kids ?? current.madeForKids,
+      learningObjective: selectedProject.learning_objective ?? current.learningObjective,
       dialogueMode: selectedProject.dialogue_mode ?? current.dialogueMode,
       narrationDensity: selectedProject.narration_density ?? current.narrationDensity,
       callToActionStyle: selectedProject.call_to_action_style || 'none',
+      ctaAction: selectedProject.cta_action || 'none',
       promptSegmentCount:
         projectPromptCount(selectedProject, shots.length) ?? current.promptSegmentCount,
       promptSegmentDuration: projectPromptDuration(selectedProject),
@@ -2783,10 +3023,20 @@ export function AIVideoAssistant() {
         language: 'en',
         target_language: form.targetLanguage,
         video_purpose: form.videoPurpose,
+        content_objective: form.contentObjective,
+        content_genre: form.contentGenre,
+        audience_age_band: form.audienceAgeBand,
+        format_profile: form.formatProfile,
+        target_duration_seconds: derivedTotalDuration,
+        distribution_platform: form.distributionPlatform,
+        interaction_mode: form.interactionMode,
+        safety_policy: form.safetyPolicy,
+        made_for_kids: form.madeForKids,
+        learning_objective: form.learningObjective.trim() || null,
         dialogue_mode: form.dialogueMode,
         narration_density: form.narrationDensity,
         call_to_action_style: form.callToActionStyle,
-        target_duration_seconds: null,
+        cta_action: form.ctaAction,
         prompt_segment_count: promptSegmentCount,
         prompt_segment_duration_seconds: promptSegmentDuration,
         micro_scenes_per_prompt: microScenesPerPrompt,
@@ -2825,9 +3075,9 @@ export function AIVideoAssistant() {
               ? 'Đã tạo dự án và bắt đầu tự tạo câu lệnh, gửi sang Veo, tải clip, tạo giọng/SRT rồi dựng MP4.'
               : autoRun.material_target === 'full_materials'
                 ? 'Đã tạo dự án và bắt đầu tự chạy tới câu lệnh video, giọng đọc và phụ đề. Chưa chạy Veo/MP4.'
-              : autoRun.mode === 'review_gated'
-                ? 'Đã tạo dự án và bắt đầu dựng nhanh. Hệ thống sẽ dừng ở các điểm cần duyệt.'
-                : 'Đã tạo dự án và bắt đầu dựng nhanh ở chế độ tự chạy hết.',
+                : autoRun.mode === 'review_gated'
+                  ? 'Đã tạo dự án và bắt đầu dựng nhanh. Hệ thống sẽ dừng ở các điểm cần duyệt.'
+                  : 'Đã tạo dự án và bắt đầu dựng nhanh ở chế độ tự chạy hết.',
         );
       } else if (autoRunError) {
         setNotice(`Đã tạo dự án, nhưng chưa bắt đầu dựng nhanh: ${autoRunError}`);
@@ -2863,10 +3113,7 @@ export function AIVideoAssistant() {
   });
 
   const createSeriesFromDialog = useMutation({
-    mutationFn: (variables: {
-      draft: SeriesDraftInput;
-      nextAction: SeriesCreateNextAction;
-    }) =>
+    mutationFn: (variables: { draft: SeriesDraftInput; nextAction: SeriesCreateNextAction }) =>
       apiClient.createVideoSeries({
         title: variables.draft.title.trim(),
         series_mode: variables.draft.series_mode,
@@ -2919,9 +3166,20 @@ export function AIVideoAssistant() {
         episode_title: episodeDraft.episodeTitle.trim() || null,
         target_language: form.targetLanguage,
         video_purpose: form.videoPurpose,
+        content_objective: form.contentObjective,
+        content_genre: form.contentGenre,
+        audience_age_band: form.audienceAgeBand,
+        format_profile: form.formatProfile,
+        target_duration_seconds: derivedTotalDuration,
+        distribution_platform: form.distributionPlatform,
+        interaction_mode: form.interactionMode,
+        safety_policy: form.safetyPolicy,
+        made_for_kids: form.madeForKids,
+        learning_objective: form.learningObjective.trim() || null,
         dialogue_mode: form.dialogueMode,
         narration_density: form.narrationDensity,
         call_to_action_style: form.callToActionStyle,
+        cta_action: form.ctaAction,
         prompt_segment_count: promptSegmentCount,
         prompt_segment_duration_seconds: promptSegmentDuration,
         micro_scenes_per_prompt: microScenesPerPrompt,
@@ -2939,19 +3197,15 @@ export function AIVideoAssistant() {
       selectProject(project.id);
       setEpisodeDialogOpen(false);
       setEpisodeDraft((current) => ({ ...current, episodeTitle: '', topic: '' }));
-      setNotice('Đã tạo tập mới trong series. Dự án này sẽ dùng cùng sổ tay series khi lập kế hoạch.');
+      setNotice(
+        'Đã tạo tập mới trong series. Dự án này sẽ dùng cùng sổ tay series khi lập kế hoạch.',
+      );
       invalidateProject();
     },
   });
 
   const createSeriesResearch = useMutation({
-    mutationFn: async ({
-      seriesId,
-      seriesTitle,
-    }: {
-      seriesId: string;
-      seriesTitle: string;
-    }) => {
+    mutationFn: async ({ seriesId, seriesTitle }: { seriesId: string; seriesTitle: string }) => {
       const normalizedTitle = seriesTitle.trim() || 'Series chưa đặt tên';
       const researchProject = await apiClient.createResearchProject({
         title: truncateProjectText(`Nghiên cứu Series: ${normalizedTitle}`, 200),
@@ -2995,6 +3249,25 @@ export function AIVideoAssistant() {
       if (!project) return;
       setProjectMenuId(null);
       setNotice('Đã đổi tên project video.');
+      invalidateProject();
+    },
+  });
+
+  const archiveProject = useMutation({
+    mutationFn: async (project: VideoProjectResponse) => {
+      const archived = Boolean(project.archived);
+      const ok = window.confirm(
+        archived
+          ? `Khôi phục dự án “${project.title}” khỏi lưu trữ?`
+          : `Lưu trữ dự án “${project.title}”? Dữ liệu và artifact sẽ được giữ lại, chỉ ẩn khỏi danh sách dự án đang làm.`,
+      );
+      if (!ok) return null;
+      return apiClient.updateVideoProject(project.id, { archived: !archived });
+    },
+    onSuccess: (project) => {
+      if (!project) return;
+      setProjectMenuId(null);
+      setNotice(project.archived ? 'Đã lưu trữ dự án video.' : 'Đã khôi phục dự án video.');
       invalidateProject();
     },
   });
@@ -3052,9 +3325,20 @@ export function AIVideoAssistant() {
       return apiClient.localizeVideoProject(project.id, {
         target_language: targetLanguage,
         video_purpose: 'localized_variant',
+        content_profile_version: project.content_profile_version,
+        content_objective: project.content_objective,
+        content_genre: project.content_genre,
+        audience_age_band: project.audience_age_band,
+        format_profile: project.format_profile,
+        distribution_platform: project.distribution_platform,
+        interaction_mode: project.interaction_mode,
+        safety_policy: project.safety_policy,
+        made_for_kids: project.made_for_kids,
+        learning_objective: project.learning_objective,
         dialogue_mode: project.dialogue_mode,
         narration_density: project.narration_density,
         call_to_action_style: project.call_to_action_style ?? 'none',
+        cta_action: project.cta_action ?? 'none',
       });
     },
     onSuccess: (project) => {
@@ -3144,12 +3428,11 @@ export function AIVideoAssistant() {
       return apiClient.generateVideoPublishingMetadata(activeProjectId, { platform, force });
     },
     onSuccess: (metadata) => {
-      queryClient.setQueryData(
-        ['ai-video', 'publishing-metadata', metadata.project_id],
-        metadata,
-      );
+      queryClient.setQueryData(['ai-video', 'publishing-metadata', metadata.project_id], metadata);
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'status', metadata.project_id] });
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'auto-run', 'latest', metadata.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'auto-run', 'latest', metadata.project_id],
+      });
       setNotice('Đã tạo nội dung đăng video cho YouTube, TikTok và Facebook.');
     },
   });
@@ -3160,7 +3443,9 @@ export function AIVideoAssistant() {
       return apiClient.generateVideoPromptPack(activeProjectId!);
     },
     onSuccess: () => {
-      setNotice('Câu lệnh gốc và bản giải thích tiếng Việt đã sẵn sàng để đọc, sao chép hoặc tải xuống.');
+      setNotice(
+        'Câu lệnh gốc và bản giải thích tiếng Việt đã sẵn sàng để đọc, sao chép hoặc tải xuống.',
+      );
       invalidateProject();
       if (activeProjectId) {
         generatePublishingMetadata.mutate({ platform: 'all', force: false });
@@ -3197,18 +3482,38 @@ export function AIVideoAssistant() {
         DraftForm,
         | 'targetLanguage'
         | 'videoPurpose'
+        | 'contentObjective'
+        | 'contentGenre'
+        | 'audienceAgeBand'
+        | 'formatProfile'
+        | 'distributionPlatform'
+        | 'interactionMode'
+        | 'safetyPolicy'
+        | 'madeForKids'
+        | 'learningObjective'
         | 'dialogueMode'
         | 'narrationDensity'
         | 'callToActionStyle'
+        | 'ctaAction'
       >,
     ) => {
       if (!activeProjectId) throw new Error('Chưa chọn dự án.');
       return apiClient.updateVideoProject(activeProjectId, {
         target_language: next.targetLanguage,
         video_purpose: next.videoPurpose,
+        content_objective: next.contentObjective,
+        content_genre: next.contentGenre,
+        audience_age_band: next.audienceAgeBand,
+        format_profile: next.formatProfile,
+        distribution_platform: next.distributionPlatform,
+        interaction_mode: next.interactionMode,
+        safety_policy: next.safetyPolicy,
+        made_for_kids: next.madeForKids,
+        learning_objective: next.learningObjective.trim() || null,
         dialogue_mode: next.dialogueMode,
         narration_density: next.narrationDensity,
         call_to_action_style: next.callToActionStyle,
+        cta_action: next.ctaAction,
       });
     },
     onSuccess: () => {
@@ -3225,9 +3530,19 @@ export function AIVideoAssistant() {
         DraftForm,
         | 'targetLanguage'
         | 'videoPurpose'
+        | 'contentObjective'
+        | 'contentGenre'
+        | 'audienceAgeBand'
+        | 'formatProfile'
+        | 'distributionPlatform'
+        | 'interactionMode'
+        | 'safetyPolicy'
+        | 'madeForKids'
+        | 'learningObjective'
         | 'dialogueMode'
         | 'narrationDensity'
         | 'callToActionStyle'
+        | 'ctaAction'
       >
     >,
   ) => {
@@ -3237,21 +3552,90 @@ export function AIVideoAssistant() {
       saveProjectPurposeSettings.mutate({
         targetLanguage: next.targetLanguage,
         videoPurpose: next.videoPurpose,
+        contentObjective: next.contentObjective,
+        contentGenre: next.contentGenre,
+        audienceAgeBand: next.audienceAgeBand,
+        formatProfile: next.formatProfile,
+        distributionPlatform: next.distributionPlatform,
+        interactionMode: next.interactionMode,
+        safetyPolicy: next.safetyPolicy,
+        madeForKids: next.madeForKids,
+        learningObjective: next.learningObjective,
         dialogueMode: next.dialogueMode,
         narrationDensity: next.narrationDensity,
         callToActionStyle: next.callToActionStyle,
+        ctaAction: next.ctaAction,
       });
     }
+  };
+
+  const saveVideoDuration = useMutation({
+    mutationFn: async (next: Pick<DraftForm, 'formatProfile' | 'promptSegmentCount' | 'promptSegmentDuration' | 'microScenesPerPrompt'>) => {
+      if (!activeProjectId) return;
+      if (projectPlanningBusy) throw new Error('Hãy chờ nội dung đang tạo hoàn tất trước khi đổi thời lượng.');
+      await apiClient.updateVideoProject(activeProjectId, {
+        format_profile: next.formatProfile,
+        target_duration_seconds: next.promptSegmentCount * next.promptSegmentDuration,
+        prompt_segment_count: next.promptSegmentCount,
+        prompt_segment_duration_seconds: next.promptSegmentDuration,
+        micro_scenes_per_prompt: next.microScenesPerPrompt,
+      });
+    },
+    onSuccess: invalidateProject,
+  });
+
+  const updateVideoDuration = (seconds: number, formatProfile = form.formatProfile) => {
+    const target = Math.min(3000, Math.max(5, Math.round(seconds || 5)));
+    const segmentSeconds = Math.min(30, Math.max(promptSegmentDuration, Math.ceil(target / 100)));
+    const segmentCount = Math.min(100, Math.max(1, Math.ceil(target / segmentSeconds)));
+    const next = {
+      ...form,
+      formatProfile,
+      targetDurationSeconds: segmentCount * segmentSeconds,
+      promptSegmentCount: segmentCount,
+      promptSegmentDuration: segmentSeconds,
+    };
+    setForm(next);
+    if (activeProjectId) saveVideoDuration.mutate(next);
+  };
+
+  const handleFormatProfileChange = (value: FormatProfile) => {
+    const durationByFormat: Record<FormatProfile, number> = {
+      short_15s: 15,
+      short_30s: 30,
+      short_60s: 60,
+      explainer_90s: 90,
+      kids_2m: 120,
+      narrative_3m: 180,
+      long_form: Math.max(300, derivedTotalDuration),
+    };
+    updateVideoDuration(durationByFormat[value], value);
   };
 
   const handleVideoPurposeChange = (value: VideoPurpose) => {
     const preset = purposeOption(value);
     updatePurposeSettings({
       videoPurpose: value,
+      ...contentProfileDefaultsForPurpose(value),
       targetLanguage: preset.recommendedTargetLanguage,
       dialogueMode: preset.dialogueMode,
       narrationDensity: preset.narrationDensity,
       callToActionStyle: preset.cta,
+    });
+  };
+
+  const handleContentGenreChange = (value: ContentGenre) => {
+    const template = contentProfileOptions.genres.find((item) => item.key === value);
+    const defaults = template?.defaults ?? {};
+    updatePurposeSettings({
+      contentGenre: value,
+      contentObjective: defaults.content_objective ?? form.contentObjective,
+      audienceAgeBand: defaults.audience_age_band ?? form.audienceAgeBand,
+      formatProfile: defaults.format_profile ?? form.formatProfile,
+      distributionPlatform: defaults.distribution_platform ?? form.distributionPlatform,
+      interactionMode: defaults.interaction_mode ?? form.interactionMode,
+      safetyPolicy: defaults.safety_policy ?? form.safetyPolicy,
+      madeForKids: defaults.made_for_kids ?? form.madeForKids,
     });
   };
 
@@ -3338,13 +3722,13 @@ export function AIVideoAssistant() {
           ? 'Tự chạy đã bắt đầu tới câu lệnh video. Giọng đọc và phụ đề sẽ bỏ qua.'
           : run.material_target === 'publishing_kit'
             ? 'Tự chạy đã bắt đầu tới câu lệnh video và bộ nội dung đăng.'
-          : run.material_target === 'video_clips'
-            ? 'Tự chạy đã bắt đầu: tạo câu lệnh, nội dung đăng, gửi sang Veo, tải clip, tạo giọng/SRT rồi dựng MP4.'
-            : run.material_target === 'full_materials'
-              ? 'Tự chạy đã bắt đầu tới câu lệnh video, giọng đọc và phụ đề. Chưa chạy Veo/MP4.'
-            : run.mode === 'review_gated'
-              ? 'Tự chạy đã bắt đầu và sẽ dừng ở các điểm cần duyệt.'
-              : 'Tự chạy đã bắt đầu ở chế độ tự chạy hết.',
+            : run.material_target === 'video_clips'
+              ? 'Tự chạy đã bắt đầu: tạo câu lệnh, nội dung đăng, gửi sang Veo, tải clip, tạo giọng/SRT rồi dựng MP4.'
+              : run.material_target === 'full_materials'
+                ? 'Tự chạy đã bắt đầu tới câu lệnh video, giọng đọc và phụ đề. Chưa chạy Veo/MP4.'
+                : run.mode === 'review_gated'
+                  ? 'Tự chạy đã bắt đầu và sẽ dừng ở các điểm cần duyệt.'
+                  : 'Tự chạy đã bắt đầu ở chế độ tự chạy hết.',
       );
       refreshAfterAutoRun(run);
     },
@@ -3387,19 +3771,22 @@ export function AIVideoAssistant() {
       setNotice(result.message);
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'series'] });
       queryClient.invalidateQueries({ queryKey: ['ai-video', 'projects'] });
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'project', result.character_flow.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'project', result.character_flow.project_id],
+      });
       queryClient.invalidateQueries({
         queryKey: ['ai-video', 'auto-run', 'latest', result.character_flow.project_id],
       });
     },
   });
   const characterDecisionPendingId = decideCharacterProposal.isPending
-    ? decideCharacterProposal.variables?.proposalId ?? null
+    ? (decideCharacterProposal.variables?.proposalId ?? null)
     : null;
 
   const cancelAutoRun = useMutation({
     mutationFn: () => {
-      if (!activeProjectId || !latestAutoRun) throw new Error('Không tìm thấy lượt tự chạy để hủy.');
+      if (!activeProjectId || !latestAutoRun)
+        throw new Error('Không tìm thấy lượt tự chạy để hủy.');
       return apiClient.cancelVideoAutoRun(activeProjectId, latestAutoRun.id);
     },
     onSuccess: (run) => {
@@ -3410,7 +3797,8 @@ export function AIVideoAssistant() {
 
   const retryAutoRun = useMutation({
     mutationFn: () => {
-      if (!activeProjectId || !latestAutoRun) throw new Error('Không tìm thấy lượt tự chạy để chạy lại.');
+      if (!activeProjectId || !latestAutoRun)
+        throw new Error('Không tìm thấy lượt tự chạy để chạy lại.');
       return apiClient.retryVideoAutoRun(activeProjectId, latestAutoRun.id);
     },
     onSuccess: (run) => {
@@ -3463,7 +3851,9 @@ export function AIVideoAssistant() {
     },
     onSuccess: (snapshot) => {
       setNotice(`Đã lưu context snapshot cho ${snapshot.task_type}.`);
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'context-snapshots', snapshot.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'context-snapshots', snapshot.project_id],
+      });
     },
   });
 
@@ -3474,8 +3864,12 @@ export function AIVideoAssistant() {
     },
     onSuccess: (report) => {
       setNotice(`Báo cáo chất lượng: ${qualityStatusLabel(report.overall_status)}.`);
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'quality-report', report.project_id] });
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'quality-reports', report.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'quality-report', report.project_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'quality-reports', report.project_id],
+      });
     },
   });
 
@@ -3491,8 +3885,12 @@ export function AIVideoAssistant() {
     onSuccess: (report) => {
       setQualityOverrideReason('');
       setNotice('Đã lưu override có lý do cho báo cáo chất lượng.');
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'quality-report', report.project_id] });
-      queryClient.invalidateQueries({ queryKey: ['ai-video', 'quality-reports', report.project_id] });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'quality-report', report.project_id],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['ai-video', 'quality-reports', report.project_id],
+      });
     },
   });
 
@@ -3550,7 +3948,10 @@ export function AIVideoAssistant() {
       const copyTitleShortcut = key === 'n' && event.altKey && !event.shiftKey;
       if (!(event.ctrlKey || event.metaKey) || (!event.shiftKey && !copyTitleShortcut)) return;
       const target = event.target as HTMLElement | null;
-      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
+      if (
+        target?.isContentEditable ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')
+      ) {
         return;
       }
 
@@ -3572,7 +3973,9 @@ export function AIVideoAssistant() {
           showShortcutToast('Chưa có dự án hoặc phân đoạn clip.');
           return;
         }
-        document.getElementById('ai-video-veo-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document
+          .getElementById('ai-video-veo-panel')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         showShortcutToast('Đã chuyển tới khu vực clip video.');
       } else if (key === 'c') {
         event.preventDefault();
@@ -3613,7 +4016,9 @@ export function AIVideoAssistant() {
 
   const copyShotPrompt = async (shot: VideoShotResponse) => {
     if (shot.prompt_status === 'missing') {
-      throw new Error('Câu lệnh video cần được tạo lại theo ngôn ngữ tiếng Anh trước khi copy sang Veo 3.');
+      throw new Error(
+        'Câu lệnh video cần được tạo lại theo ngôn ngữ tiếng Anh trước khi copy sang Veo 3.',
+      );
     }
     const prompt = await apiClient.getVideoShotPrompt(shot.project_id, shot.id);
     if (!prompt.content.trim()) {
@@ -3642,6 +4047,7 @@ export function AIVideoAssistant() {
     generatePublishingMetadata.error ||
     saveProjectVoice.error ||
     saveProjectPurposeSettings.error ||
+    saveVideoDuration.error ||
     generateSceneVoice.error ||
     generateShotVoice.error ||
     generateSubtitle.error ||
@@ -3649,6 +4055,7 @@ export function AIVideoAssistant() {
     saveSeries.error ||
     createEpisode.error ||
     renameProject.error ||
+    archiveProject.error ||
     resetGeneratedData.error ||
     deleteProject.error ||
     localizeProject.error ||
@@ -3830,9 +4237,7 @@ export function AIVideoAssistant() {
               </span>
               <select
                 value={localizeTargetLanguage}
-                onChange={(event) =>
-                  setLocalizeTargetLanguage(event.target.value as VideoLanguage)
-                }
+                onChange={(event) => setLocalizeTargetLanguage(event.target.value as VideoLanguage)}
                 className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-foreground/40"
               >
                 {LANGUAGE_OPTIONS.filter((option) => option.value !== project.target_language).map(
@@ -3860,19 +4265,41 @@ export function AIVideoAssistant() {
               </Button>
             </div>
             <div className="grid gap-1 rounded-md border border-border/60 bg-muted/30 px-2 py-2">
-              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Nguồn lời hiệu lực</span>
+              <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                Nguồn lời hiệu lực
+              </span>
               <select
                 value={project.speech_source ?? ''}
                 onChange={(event) => {
                   const value = event.target.value;
-                  void apiClient.updateVideoProject(project.id, { speech_source: (value || null) as import('@/lib/api/types').NewsSpeechMode | null }).then(() => invalidateProject());
+                  void apiClient
+                    .updateVideoProject(project.id, {
+                      speech_source: (value || null) as
+                        | import('@/lib/api/types').NewsSpeechMode
+                        | null,
+                    })
+                    .then(() => invalidateProject());
                 }}
                 className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-foreground/40"
               >
                 <option value="">Theo ngôn ngữ (legacy)</option>
-                {SPEECH_MODE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                {SPEECH_MODE_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 justify-start rounded-md px-2 text-xs"
+              disabled={archiveProject.isPending || projectRunBusy}
+              onClick={() => archiveProject.mutate(project)}
+            >
+              {project.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+              <span className="truncate">{project.archived ? 'Khôi phục' : 'Lưu trữ'}</span>
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -3911,7 +4338,9 @@ export function AIVideoAssistant() {
               variant="outline"
               className="h-7 gap-1.5 rounded-full border-red-500/35 bg-red-500/10 px-2.5 text-[10px] font-medium uppercase tracking-[0.08em] text-red-700 hover:bg-red-500/20 dark:text-red-200"
               disabled={retryFailedAutoRuns.isPending}
-              onClick={() => retryFailedAutoRuns.mutate(failedProjectRuns.map((project) => project.id))}
+              onClick={() =>
+                retryFailedAutoRuns.mutate(failedProjectRuns.map((project) => project.id))
+              }
               title="Chạy lại tất cả dự án đang dừng vì lỗi"
             >
               {retryFailedAutoRuns.isPending ? (
@@ -3965,14 +4394,19 @@ export function AIVideoAssistant() {
           title="Phím tắt: Ctrl+Shift+V"
           aria-keyshortcuts="Control+Shift+V"
           disabled={!activeProjectId || !shots.length}
-          onClick={() => document.getElementById('ai-video-veo-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          onClick={() =>
+            document
+              .getElementById('ai-video-veo-panel')
+              ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
         >
           <ListVideo className="h-3.5 w-3.5" />
           Chọn nhiều clip video
         </Button>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">
-        Phím tắt: Ctrl+Shift+O đổi dự án · Ctrl+Shift+P mở prompt · Ctrl+Shift+V tới clip · Ctrl+Shift+C copy prompt · Ctrl+Alt+N copy tên dự án
+        Phím tắt: Ctrl+Shift+O đổi dự án · Ctrl+Shift+P mở prompt · Ctrl+Shift+V tới clip ·
+        Ctrl+Shift+C copy prompt · Ctrl+Alt+N copy tên dự án
       </p>
       {currentVoiceQueueSummary ? (
         <div
@@ -4075,8 +4509,7 @@ export function AIVideoAssistant() {
           const seriesId = group.series?.id ?? group.projects[0]?.series_id ?? '';
           const seriesTitle = group.series?.title ?? group.projects[0]?.series_title ?? 'Series';
           const researchingThisSeries =
-            createSeriesResearch.isPending &&
-            createSeriesResearch.variables?.seriesId === seriesId;
+            createSeriesResearch.isPending && createSeriesResearch.variables?.seriesId === seriesId;
 
           return (
             <div
@@ -4192,9 +4625,161 @@ export function AIVideoAssistant() {
             </span>
             <span>Phụ đề: {selectedPurposeOption.subtitle}</span>
             <span>CTA: {callToActionStyleLabel(form.callToActionStyle)}</span>
+            <span>Hành động: {ctaActionLabel(form.ctaAction)}</span>
             <span>Sắc thái: {selectedPurposeOption.tone}</span>
           </div>
         </div>
+        <FieldBlock
+          label="Content Profile"
+          help="Tách mục tiêu, thể loại, audience và chính sách an toàn để AI viết đúng logic nội dung."
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Mục tiêu nội dung
+              <select
+                value={form.contentObjective}
+                onChange={(event) =>
+                  updatePurposeSettings({ contentObjective: event.target.value as ContentObjective })
+                }
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.objectives.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Thời lượng mục tiêu (giây)
+              <input
+                type="number"
+                min={5}
+                max={3000}
+                value={form.targetDurationSeconds}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, targetDurationSeconds: Number(event.target.value) }));
+                }}
+                onBlur={(event) => updateVideoDuration(Number(event.currentTarget.value))}
+                disabled={saveVideoDuration.isPending || projectPlanningBusy}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              />
+              <span className="text-[11px] font-normal text-muted-foreground">
+                Làm tròn theo độ dài mỗi đoạn. Hiện tại: {derivedTotalDuration} giây ({promptSegmentCount} đoạn).
+              </span>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Thể loại
+              <select
+                value={form.contentGenre}
+                onChange={(event) => handleContentGenreChange(event.target.value as ContentGenre)}
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.genres.map((option) => (
+                  <option key={option.key} value={option.key}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Độ tuổi audience
+              <select
+                value={form.audienceAgeBand}
+                onChange={(event) => updatePurposeSettings({ audienceAgeBand: event.target.value as AudienceAgeBand })}
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.audience_age_bands.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Format
+              <select
+                value={form.formatProfile}
+                onChange={(event) => handleFormatProfileChange(event.target.value as FormatProfile)}
+                disabled={saveVideoDuration.isPending || saveProjectPurposeSettings.isPending || projectPlanningBusy}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.format_profiles.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Kênh chính
+              <select
+                value={form.distributionPlatform}
+                onChange={(event) => updatePurposeSettings({ distributionPlatform: event.target.value as DistributionPlatform })}
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.distribution_platforms.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+              Kiểu tương tác
+              <select
+                value={form.interactionMode}
+                onChange={(event) => updatePurposeSettings({ interactionMode: event.target.value as InteractionMode })}
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.interaction_modes.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-xs font-medium text-muted-foreground sm:col-span-2">
+              Chính sách an toàn
+              <select
+                value={form.safetyPolicy}
+                onChange={(event) => updatePurposeSettings({ safetyPolicy: event.target.value as SafetyPolicy })}
+                disabled={saveProjectPurposeSettings.isPending}
+                className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus:border-foreground/40"
+              >
+                {contentProfileOptions.safety_policies.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={form.madeForKids}
+              onChange={(event) => updatePurposeSettings({ madeForKids: event.target.checked })}
+              disabled={saveProjectPurposeSettings.isPending || form.contentGenre.startsWith('kids_')}
+              className="h-4 w-4 rounded border-input"
+            />
+            Nội dung dành cho trẻ em
+          </label>
+          <label className="mt-3 grid gap-1 text-xs font-medium text-muted-foreground">
+            Mục tiêu học tập (không bắt buộc)
+            <textarea
+              value={form.learningObjective}
+              onChange={(event) => setForm((current) => ({ ...current, learningObjective: event.target.value.slice(0, 2000) }))}
+              onBlur={(event) => updatePurposeSettings({ learningObjective: event.currentTarget.value.slice(0, 2000) })}
+              placeholder="Ví dụ: Trẻ nhớ quy tắc dừng ở đèn đỏ và biết vì sao cần an toàn."
+              rows={2}
+              disabled={saveProjectPurposeSettings.isPending}
+              className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/40"
+            />
+          </label>
+          {selectedGenreTemplate ? (
+            <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs leading-relaxed">
+              <p className="font-medium text-foreground">{selectedGenreTemplate.label}</p>
+              <p className="mt-1 text-muted-foreground">{selectedGenreTemplate.description}</p>
+              {selectedGenreTemplate.generation_guidance.length ? (
+                <p className="mt-2 text-muted-foreground">
+                  Gợi ý: {selectedGenreTemplate.generation_guidance.slice(0, 2).join(' · ')}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </FieldBlock>
         <FieldBlock
           label="Ngôn ngữ video"
           help="Đây là ngôn ngữ cuối cùng cho giọng đọc, lời kể, phụ đề và chữ người xem đọc. Có thể chỉnh lại sau khi chọn mục đích video."
@@ -4265,6 +4850,29 @@ export function AIVideoAssistant() {
               <option value="direct">Trực tiếp</option>
               <option value="urgent">Khẩn cấp</option>
             </select>
+          </FieldBlock>
+          <FieldBlock label="Hành động CTA">
+            <select
+              value={form.ctaAction}
+              onChange={(event) =>
+                updatePurposeSettings({
+                  ctaAction: event.target.value as CtaAction,
+                })
+              }
+              disabled={saveProjectPurposeSettings.isPending}
+              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
+            >
+              <option value="none">Không dùng</option>
+              <option value="comment">Mời bình luận</option>
+              <option value="like">Mời nhấn thích</option>
+              <option value="share">Mời chia sẻ</option>
+              <option value="follow">Mời theo dõi</option>
+              <option value="save">Mời lưu video</option>
+              <option value="subscribe">Mời đăng ký</option>
+            </select>
+            <p className="mt-1 text-xs text-muted-foreground">
+              AI sẽ chọn câu nói và hành động hình ảnh theo đúng bối cảnh cảnh cuối, không dùng gesture chung chung.
+            </p>
           </FieldBlock>
         </div>
         <div className="grid min-w-0 gap-2">
@@ -4642,8 +5250,8 @@ export function AIVideoAssistant() {
                       help="Veo 3 tạo trực tiếp lời thoại và âm thanh trong từng clip."
                     >
                       <div className="flex min-h-10 items-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm leading-relaxed text-emerald-800 dark:text-emerald-200">
-                        Không cần chọn hồ sơ TTS. Prompt sẽ kèm câu thoại, chất giọng, cảm xúc,
-                        bối cảnh và yêu cầu khớp môi của từng nhân vật.
+                        Không cần chọn hồ sơ TTS. Prompt sẽ kèm câu thoại, chất giọng, cảm xúc, bối
+                        cảnh và yêu cầu khớp môi của từng nhân vật.
                       </div>
                     </FieldBlock>
                   ) : (
@@ -4691,13 +5299,33 @@ export function AIVideoAssistant() {
                     label="Phong cách hình ảnh"
                     help="Áp dụng cho toàn bộ video: chất liệu hình ảnh, ánh sáng, màu sắc, camera và nhịp animation."
                   >
-                    <textarea
-                      value={form.visualStyle}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, visualStyle: event.target.value }))
-                      }
-                      className="min-h-24 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-3 text-sm leading-relaxed outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
-                    />
+                    <div className="space-y-2">
+                      <textarea
+                        value={form.visualStyle}
+                        onChange={(event) =>
+                          setForm((current) => ({ ...current, visualStyle: event.target.value }))
+                        }
+                        className="min-h-24 w-full min-w-0 rounded-lg border border-input bg-background px-3 py-3 text-sm leading-relaxed outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setForm((current) => ({
+                              ...current,
+                              visualStyle: STRICT_STICK_FIGURE_VISUAL_STYLE,
+                            }))
+                          }
+                        >
+                          Dùng preset người que chuẩn
+                        </Button>
+                        <span className="text-xs text-muted-foreground">
+                          Khóa tay chân dạng que, không sinh bàn tay hoặc bàn chân người.
+                        </span>
+                      </div>
+                    </div>
                   </FieldBlock>
                 </div>
               </div>
@@ -4774,11 +5402,7 @@ export function AIVideoAssistant() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2 md:justify-end">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setProjectPickerOpen(true)}
-                    >
+                    <Button size="sm" variant="outline" onClick={() => setProjectPickerOpen(true)}>
                       <SlidersHorizontal className="h-4 w-4" />
                       Đổi dự án
                     </Button>
@@ -4866,8 +5490,8 @@ export function AIVideoAssistant() {
               {selectedSegmentCountMismatch ? (
                 <p className="mt-3 text-xs leading-relaxed opacity-85">
                   Dữ liệu đang lệch: dự án cấu hình {selectedProject.prompt_segment_count} câu lệnh
-                  nhưng cơ sở dữ liệu còn {shots.length} phân đoạn đã lưu. Tạo lại bản phân đoạn sẽ thay phần
-                  phân đoạn chưa khóa bằng cấu trúc mới.
+                  nhưng cơ sở dữ liệu còn {shots.length} phân đoạn đã lưu. Tạo lại bản phân đoạn sẽ
+                  thay phần phân đoạn chưa khóa bằng cấu trúc mới.
                 </p>
               ) : null}
             </section>
@@ -4882,13 +5506,15 @@ export function AIVideoAssistant() {
                   meta={`${projectMemoryQuery.data?.total ?? 0} thẻ · ${targetTimelineQuery.data?.total ?? 0} beat đích`}
                 />
                 <div className="flex flex-wrap gap-2">
-                  {([
-                    ['story', 'Truyện'],
-                    ['shot', 'Shot'],
-                    ['prompt_video', 'Câu lệnh'],
-                    ['voice', 'Giọng đọc'],
-                    ['subtitle', 'Phụ đề'],
-                  ] as Array<[VideoProjectContextTaskType, string]>).map(([taskType, label]) => (
+                  {(
+                    [
+                      ['story', 'Truyện'],
+                      ['shot', 'Shot'],
+                      ['prompt_video', 'Câu lệnh'],
+                      ['voice', 'Giọng đọc'],
+                      ['subtitle', 'Phụ đề'],
+                    ] as Array<[VideoProjectContextTaskType, string]>
+                  ).map(([taskType, label]) => (
                     <Button
                       key={taskType}
                       type="button"
@@ -4912,12 +5538,17 @@ export function AIVideoAssistant() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="text-sm font-semibold">Thẻ nhớ đã duyệt</h3>
-                    {projectMemoryQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {projectMemoryQuery.isFetching ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
                   </div>
                   {projectMemoryQuery.data?.items.length ? (
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                       {projectMemoryQuery.data.items.slice(0, 12).map((card) => (
-                        <div key={card.id} className="rounded-lg border border-border/70 bg-background/70 p-3">
+                        <div
+                          key={card.id}
+                          className="rounded-lg border border-border/70 bg-background/70 p-3"
+                        >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="truncate text-sm font-semibold">{card.title}</p>
@@ -4937,7 +5568,8 @@ export function AIVideoAssistant() {
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                      Chưa có bộ nhớ dự án. Dự án tạo từ bước chuyển tiếp Video Inspiration sẽ tự sinh thẻ nhớ đã duyệt.
+                      Chưa có bộ nhớ dự án. Dự án tạo từ bước chuyển tiếp Video Inspiration sẽ tự
+                      sinh thẻ nhớ đã duyệt.
                     </div>
                   )}
                 </div>
@@ -4945,12 +5577,17 @@ export function AIVideoAssistant() {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="text-sm font-semibold">Dòng thời gian đích</h3>
-                    {targetTimelineQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {targetTimelineQuery.isFetching ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : null}
                   </div>
                   {targetTimelineQuery.data?.items.length ? (
                     <div className="space-y-3">
                       {targetTimelineQuery.data.items.slice(0, 10).map((beat) => (
-                        <div key={beat.id} className="rounded-lg border border-border/70 bg-background/70 p-3">
+                        <div
+                          key={beat.id}
+                          className="rounded-lg border border-border/70 bg-background/70 p-3"
+                        >
                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             <span className="rounded-full border border-current/20 px-2 py-0.5">
                               #{beat.beat_order}
@@ -4974,7 +5611,8 @@ export function AIVideoAssistant() {
                     </div>
                   ) : (
                     <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                      Chưa có dòng thời gian đích. Bản chuyển tiếp hợp lệ sẽ tái cấu trúc beat theo cấu hình dự án thay vì sao chép dòng thời gian nguồn.
+                      Chưa có dòng thời gian đích. Bản chuyển tiếp hợp lệ sẽ tái cấu trúc beat theo
+                      cấu hình dự án thay vì sao chép dòng thời gian nguồn.
                     </div>
                   )}
                 </div>
@@ -4985,8 +5623,12 @@ export function AIVideoAssistant() {
                   <p className="font-semibold">Context snapshot gần đây</p>
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                     {contextSnapshotsQuery.data.items.slice(0, 8).map((snapshot) => (
-                      <span key={snapshot.id} className="rounded-full border border-border px-2 py-1">
-                        {snapshot.task_type} · {new Date(snapshot.created_at).toLocaleString('vi-VN')}
+                      <span
+                        key={snapshot.id}
+                        className="rounded-full border border-border px-2 py-1"
+                      >
+                        {snapshot.task_type} ·{' '}
+                        {new Date(snapshot.created_at).toLocaleString('vi-VN')}
                       </span>
                     ))}
                   </div>
@@ -5034,18 +5676,33 @@ export function AIVideoAssistant() {
               {qualityReport ? (
                 <div className="mt-4 space-y-4">
                   <div className="grid gap-3 md:grid-cols-4">
-                    <div className={cn('rounded-lg border p-3', qualityStatusClass(qualityReport.overall_status))}>
+                    <div
+                      className={cn(
+                        'rounded-lg border p-3',
+                        qualityStatusClass(qualityReport.overall_status),
+                      )}
+                    >
                       <p className="text-xs font-medium uppercase">Trạng thái</p>
-                      <p className="mt-1 text-lg font-semibold">{qualityStatusLabel(qualityReport.overall_status)}</p>
+                      <p className="mt-1 text-lg font-semibold">
+                        {qualityStatusLabel(qualityReport.overall_status)}
+                      </p>
                     </div>
                     <div className="rounded-lg border border-border/70 bg-background/70 p-3">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Nội dung</p>
-                      <p className="mt-1 text-lg font-semibold">{qualityReport.content_score.toFixed(1)}</p>
+                      <p className="text-xs font-medium uppercase text-muted-foreground">
+                        Nội dung
+                      </p>
+                      <p className="mt-1 text-lg font-semibold">
+                        {qualityReport.content_score.toFixed(1)}
+                      </p>
                       <p className="text-xs text-muted-foreground">Thang chấm mặc định 75%</p>
                     </div>
                     <div className="rounded-lg border border-border/70 bg-background/70 p-3">
-                      <p className="text-xs font-medium uppercase text-muted-foreground">Thể hiện</p>
-                      <p className="mt-1 text-lg font-semibold">{qualityReport.presentation_score.toFixed(1)}</p>
+                      <p className="text-xs font-medium uppercase text-muted-foreground">
+                        Thể hiện
+                      </p>
+                      <p className="mt-1 text-lg font-semibold">
+                        {qualityReport.presentation_score.toFixed(1)}
+                      </p>
                       <p className="text-xs text-muted-foreground">Hình, giọng đọc, phụ đề</p>
                     </div>
                     <div className="rounded-lg border border-border/70 bg-background/70 p-3">
@@ -5054,7 +5711,10 @@ export function AIVideoAssistant() {
                         {qualityBlockingCount} chặn · {qualityWarningCount} cảnh báo
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Rev {qualityReport.revision} · {qualityReport.checked_at ? new Date(qualityReport.checked_at).toLocaleString('vi-VN') : 'chưa có thời gian'}
+                        Rev {qualityReport.revision} ·{' '}
+                        {qualityReport.checked_at
+                          ? new Date(qualityReport.checked_at).toLocaleString('vi-VN')
+                          : 'chưa có thời gian'}
                       </p>
                     </div>
                   </div>
@@ -5069,15 +5729,24 @@ export function AIVideoAssistant() {
                       </div>
                       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                         {qualitySections.map(({ key, label, section }) => (
-                          <div key={key} className="rounded-lg border border-border/70 bg-background/70 p-3">
+                          <div
+                            key={key}
+                            className="rounded-lg border border-border/70 bg-background/70 p-3"
+                          >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
                                 <p className="truncate text-sm font-semibold">{label}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  {section.score.toFixed(1)} điểm · độ tin cậy {Math.round(section.confidence * 100)}%
+                                  {section.score.toFixed(1)} điểm · độ tin cậy{' '}
+                                  {Math.round(section.confidence * 100)}%
                                 </p>
                               </div>
-                              <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-xs', qualityStatusClass(section.status))}>
+                              <span
+                                className={cn(
+                                  'shrink-0 rounded-full border px-2 py-0.5 text-xs',
+                                  qualityStatusClass(section.status),
+                                )}
+                              >
                                 {qualityStatusLabel(section.status)}
                               </span>
                             </div>
@@ -5092,23 +5761,34 @@ export function AIVideoAssistant() {
                     <div className="space-y-3">
                       <div className="rounded-lg border border-border/70 bg-background/70 p-3">
                         <div className="flex items-center justify-between gap-3">
-                          <h3 className="text-sm font-semibold">Dòng thời gian và giữ chân người xem</h3>
+                          <h3 className="text-sm font-semibold">
+                            Dòng thời gian và giữ chân người xem
+                          </h3>
                           <span className="text-xs text-muted-foreground">
                             {latestRetentionDataset ? 'Có dữ liệu thực tế' : 'Dùng dự đoán'}
                           </span>
                         </div>
                         {latestRetentionDataset?.linked_findings_json?.length ? (
                           <div className="mt-3 space-y-2">
-                            {latestRetentionDataset.linked_findings_json.slice(0, 4).map((finding, index) => (
-                              <div key={`${latestRetentionDataset.id}:${index}`} className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs leading-relaxed">
-                                <p className="font-medium">
-                                  Beat {String(finding.beat_order ?? '?')} · {String(finding.finding_type ?? 'retention')}
-                                </p>
-                                <p className="mt-1 text-muted-foreground">
-                                  {String(finding.language_vi ?? 'Có tương quan cần kiểm chứng, không khẳng định nguyên nhân.')}
-                                </p>
-                              </div>
-                            ))}
+                            {latestRetentionDataset.linked_findings_json
+                              .slice(0, 4)
+                              .map((finding, index) => (
+                                <div
+                                  key={`${latestRetentionDataset.id}:${index}`}
+                                  className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs leading-relaxed"
+                                >
+                                  <p className="font-medium">
+                                    Beat {String(finding.beat_order ?? '?')} ·{' '}
+                                    {String(finding.finding_type ?? 'retention')}
+                                  </p>
+                                  <p className="mt-1 text-muted-foreground">
+                                    {String(
+                                      finding.language_vi ??
+                                        'Có tương quan cần kiểm chứng, không khẳng định nguyên nhân.',
+                                    )}
+                                  </p>
+                                </div>
+                              ))}
                           </div>
                         ) : (
                           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -5202,8 +5882,9 @@ export function AIVideoAssistant() {
                 </div>
               ) : (
                 <div className="mt-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                  Chưa có báo cáo. Bấm Chạy kiểm tra để đánh giá gói phân tích, chuyển tiếp, bộ nhớ dự án,
-                  bản nháp, kịch bản, phân đoạn, câu lệnh, giọng đọc, phụ đề và nhất quán toàn luồng trước khi dựng hoặc đóng gói.
+                  Chưa có báo cáo. Bấm Chạy kiểm tra để đánh giá gói phân tích, chuyển tiếp, bộ nhớ
+                  dự án, bản nháp, kịch bản, phân đoạn, câu lệnh, giọng đọc, phụ đề và nhất quán
+                  toàn luồng trước khi dựng hoặc đóng gói.
                 </div>
               )}
             </section>
@@ -5447,7 +6128,9 @@ export function AIVideoAssistant() {
                         flow={characterFlowQuery.data}
                         loading={characterFlowQuery.isLoading || characterFlowQuery.isFetching}
                         error={
-                          characterFlowQuery.error ? getErrorMessage(characterFlowQuery.error) : null
+                          characterFlowQuery.error
+                            ? getErrorMessage(characterFlowQuery.error)
+                            : null
                         }
                         decisionPendingId={characterDecisionPendingId}
                         continuePending={continueAutoRun.isPending}
@@ -5530,9 +6213,9 @@ export function AIVideoAssistant() {
                         ? 'Câu lệnh video đã sẵn sàng. Bạn có thể tải ảnh hoặc sao chép câu lệnh sang Gemini để tạo thoại theo câu lệnh.'
                         : latestAutoRun.material_target === 'publishing_kit'
                           ? 'Câu lệnh video và bộ nội dung đăng đã sẵn sàng. Bạn có thể sao chép riêng từng trường ở phần Nội dung đăng video.'
-                        : latestAutoRun.material_target === 'video_clips'
-                          ? 'MP4 đã dựng xong. Bạn có thể tải video ở bảng dựng hoặc kiểm tra clip trong bảng Veo.'
-                          : 'Nguyên liệu lõi và bộ nội dung đăng đã sẵn sàng. Dựng MP4 vẫn dùng bảng dựng riêng.'}
+                          : latestAutoRun.material_target === 'video_clips'
+                            ? 'MP4 đã dựng xong. Bạn có thể tải video ở bảng dựng hoặc kiểm tra clip trong bảng Veo.'
+                            : 'Nguyên liệu lõi và bộ nội dung đăng đã sẵn sàng. Dựng MP4 vẫn dùng bảng dựng riêng.'}
                     </div>
                   ) : null}
                 </div>
@@ -5547,6 +6230,23 @@ export function AIVideoAssistant() {
                 title="Truyện, nhất quán và kịch bản"
                 meta="Phải duyệt phần này trước khi tạo phân cảnh"
               />
+              {selectedProject?.format_profile === 'long_form' && selectedProject.longform_outline_json ? (
+                <div className="rounded-md border border-blue-500/25 bg-blue-500/5 p-3 text-sm">
+                  <p className="font-medium">Dàn ý video dài</p>
+                  <p className="mt-1">{selectedProject.longform_outline_json.central_question}</p>
+                  <p className="text-muted-foreground">{selectedProject.longform_outline_json.central_promise}</p>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5">
+                    {selectedProject.longform_outline_json.chapters.map((chapter) => (
+                      <li key={chapter.order}>
+                        <span className="font-medium">{chapter.title}</span> · {chapter.duration_seconds}s
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {selectedProject.longform_outline_approved ? 'Đã duyệt dàn ý; tiếp tục phát triển từng chương.' : 'Dàn ý đang chờ duyệt; hãy kiểm tra mạch nội dung trước khi viết chương.'}
+                  </p>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button
                   variant="outline"
@@ -5772,11 +6472,15 @@ export function AIVideoAssistant() {
                                 >
                                   <p className="font-semibold text-foreground">
                                     {cue.speaker_name || 'Người kể'}
-                                    {cue.lip_sync_required ? ' · khớp môi trong hình' : ' · giọng ngoài hình'}
+                                    {cue.lip_sync_required
+                                      ? ' · khớp môi trong hình'
+                                      : ' · giọng ngoài hình'}
                                   </p>
                                   <p className="mt-1 text-foreground/90">“{cue.text}”</p>
                                   <div className="mt-1.5 space-y-0.5 text-muted-foreground">
-                                    {cue.voice_description ? <p>Chất giọng: {cue.voice_description}</p> : null}
+                                    {cue.voice_description ? (
+                                      <p>Chất giọng: {cue.voice_description}</p>
+                                    ) : null}
                                     {cue.delivery ? <p>Cách nói: {cue.delivery}</p> : null}
                                     {cue.emotion ? <p>Cảm xúc: {cue.emotion}</p> : null}
                                     {cue.context ? <p>Bối cảnh: {cue.context}</p> : null}
@@ -5810,8 +6514,8 @@ export function AIVideoAssistant() {
                             </div>
                           ) : (
                             <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                              Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong
-                              câu lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
+                              Giữ chân, chuyển cảnh và âm thanh/SFX của phân đoạn đang nằm trong câu
+                              lệnh gốc tiếng Anh; UI dùng mô tả tiếng Việt phía trên để duyệt.
                             </p>
                           )}
                           {qualityWarnings(shot.retainability_quality_check).length ? (
@@ -5947,7 +6651,9 @@ export function AIVideoAssistant() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing' || !promptContent?.content?.trim()}
+                            disabled={
+                              shot.prompt_status === 'missing' || !promptContent?.content?.trim()
+                            }
                             onClick={() => copyShotPrompt(shot)}
                           >
                             {copiedVideoPromptKey === `shot-${shot.id}` ? (
@@ -5960,7 +6666,9 @@ export function AIVideoAssistant() {
                           <Button
                             size="sm"
                             variant="outline"
-                            disabled={shot.prompt_status === 'missing' || !promptContent?.content?.trim()}
+                            disabled={
+                              shot.prompt_status === 'missing' || !promptContent?.content?.trim()
+                            }
                             onClick={() =>
                               saveDownload(
                                 apiClient.downloadVideoShotPrompt(shot.project_id, shot.id),
@@ -6024,7 +6732,9 @@ export function AIVideoAssistant() {
             disabledReason={publishingMetadataDisabledReason}
             warning={publishingMetadataWarning}
             projectTitle={selectedProject?.title ?? null}
-            onGenerateAll={() => generatePublishingMetadata.mutate({ platform: 'all', force: true })}
+            onGenerateAll={() =>
+              generatePublishingMetadata.mutate({ platform: 'all', force: true })
+            }
             onGeneratePlatform={(platform) =>
               generatePublishingMetadata.mutate({ platform, force: true })
             }
@@ -6054,84 +6764,86 @@ export function AIVideoAssistant() {
                   </p>
                 </div>
               ) : (
-              <div
-                className={cn(
-                  'rounded-lg border p-4',
-                  hasVoiceProfile
-                    ? 'border-border/75 bg-background/70'
-                    : 'border-amber-500/35 bg-amber-500/10',
-                )}
-              >
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">Hồ sơ giọng cho dự án này</p>
-                    <p className="mt-1 truncate text-sm text-foreground/85">{selectedVoiceName}</p>
-                    {hasVoiceProfile ? (
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        Giọng đọc sẽ tạo âm thanh theo ngôn ngữ video: {activeVideoLanguageLabel}.
+                <div
+                  className={cn(
+                    'rounded-lg border p-4',
+                    hasVoiceProfile
+                      ? 'border-border/75 bg-background/70'
+                      : 'border-amber-500/35 bg-amber-500/10',
+                  )}
+                >
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">Hồ sơ giọng cho dự án này</p>
+                      <p className="mt-1 truncate text-sm text-foreground/85">
+                        {selectedVoiceName}
                       </p>
-                    ) : (
-                      <p className="mt-1 text-xs leading-relaxed text-destructive">
-                        Chưa chọn giọng nên chưa thể bấm Tạo giọng.
-                      </p>
-                    )}
-                  </div>
-                  {hasVoiceProfile && !showVoiceSelector ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={saveProjectVoice.isPending}
-                      onClick={() => setVoiceSelectorOpen(true)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Đổi giọng
-                    </Button>
-                  ) : null}
-                  {saveProjectVoice.isPending ? (
-                    <div className="flex h-10 items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Đang lưu giọng
+                      {hasVoiceProfile ? (
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                          Giọng đọc sẽ tạo âm thanh theo ngôn ngữ video: {activeVideoLanguageLabel}.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-xs leading-relaxed text-destructive">
+                          Chưa chọn giọng nên chưa thể bấm Tạo giọng.
+                        </p>
+                      )}
                     </div>
-                  ) : null}
-                </div>
-                {showVoiceSelector ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-                    <FieldBlock
-                      label={hasVoiceProfile ? 'Chọn giọng mới' : 'Hồ sơ giọng'}
-                      help={
-                        hasVoiceProfile
-                          ? 'Chỉ đổi khi muốn thay giọng cho dự án.'
-                          : 'Có thể chọn ở đây hoặc ở phần thiết lập phía trên.'
-                      }
-                    >
-                      <select
-                        value={form.voiceProfileId}
-                        onChange={(event) => handleVoiceProfileChange(event.target.value)}
-                        disabled={saveProjectVoice.isPending}
-                        className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
-                      >
-                        <option value="">Chưa chọn giọng</option>
-                        {profiles?.map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {profile.name}
-                          </option>
-                        ))}
-                      </select>
-                    </FieldBlock>
-                    {hasVoiceProfile ? (
+                    {hasVoiceProfile && !showVoiceSelector ? (
                       <Button
                         type="button"
                         variant="outline"
                         disabled={saveProjectVoice.isPending}
-                        onClick={() => setVoiceSelectorOpen(false)}
+                        onClick={() => setVoiceSelectorOpen(true)}
                       >
-                        <X className="h-4 w-4" />
-                        Huỷ
+                        <Pencil className="h-4 w-4" />
+                        Đổi giọng
                       </Button>
                     ) : null}
+                    {saveProjectVoice.isPending ? (
+                      <div className="flex h-10 items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Đang lưu giọng
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
+                  {showVoiceSelector ? (
+                    <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                      <FieldBlock
+                        label={hasVoiceProfile ? 'Chọn giọng mới' : 'Hồ sơ giọng'}
+                        help={
+                          hasVoiceProfile
+                            ? 'Chỉ đổi khi muốn thay giọng cho dự án.'
+                            : 'Có thể chọn ở đây hoặc ở phần thiết lập phía trên.'
+                        }
+                      >
+                        <select
+                          value={form.voiceProfileId}
+                          onChange={(event) => handleVoiceProfileChange(event.target.value)}
+                          disabled={saveProjectVoice.isPending}
+                          className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40"
+                        >
+                          <option value="">Chưa chọn giọng</option>
+                          {profiles?.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </select>
+                      </FieldBlock>
+                      {hasVoiceProfile ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={saveProjectVoice.isPending}
+                          onClick={() => setVoiceSelectorOpen(false)}
+                        >
+                          <X className="h-4 w-4" />
+                          Huỷ
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               )}
               {usesShotNarration ? (
                 narratedShots.length === 0 ? (
@@ -6160,62 +6872,62 @@ export function AIVideoAssistant() {
                           Không tạo TTS riêng
                         </div>
                       ) : (
-                      <div className="flex shrink-0 flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          disabled={
-                            isShotBusy(shot) ||
-                            !hasVoiceProfile ||
-                            saveProjectVoice.isPending ||
-                            autoRunBusy
-                          }
-                          title={
-                            !hasVoiceProfile
-                              ? 'Chọn hồ sơ giọng trước khi tạo giọng đọc.'
-                              : undefined
-                          }
-                          onClick={() => generateShotVoice.mutate(shot)}
-                        >
-                          {isShotBusy(shot) ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Mic2 className="h-4 w-4" />
-                          )}
-                          Tạo giọng
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={shot.voice_status !== 'completed'}
-                          onClick={() =>
-                            toggleVoicePreview(
-                              `shot:${shot.id}`,
-                              apiClient.getVideoShotVoiceUrl(shot.project_id, shot.id),
-                            )
-                          }
-                        >
-                          {playingVoiceKey === `shot:${shot.id}` ? (
-                            <Pause className="h-4 w-4" />
-                          ) : (
-                            <Play className="h-4 w-4" />
-                          )}
-                          {playingVoiceKey === `shot:${shot.id}` ? 'Dừng nghe' : 'Nghe thử'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={shot.voice_status !== 'completed'}
-                          onClick={() =>
-                            saveDownload(
-                              apiClient.downloadVideoShotVoice(shot.project_id, shot.id),
-                              ['wav', 'mp3'],
-                            )
-                          }
-                        >
-                          <Download className="h-4 w-4" />
-                          Tải âm thanh
-                        </Button>
-                      </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={
+                              isShotBusy(shot) ||
+                              !hasVoiceProfile ||
+                              saveProjectVoice.isPending ||
+                              autoRunBusy
+                            }
+                            title={
+                              !hasVoiceProfile
+                                ? 'Chọn hồ sơ giọng trước khi tạo giọng đọc.'
+                                : undefined
+                            }
+                            onClick={() => generateShotVoice.mutate(shot)}
+                          >
+                            {isShotBusy(shot) ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Mic2 className="h-4 w-4" />
+                            )}
+                            Tạo giọng
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={shot.voice_status !== 'completed'}
+                            onClick={() =>
+                              toggleVoicePreview(
+                                `shot:${shot.id}`,
+                                apiClient.getVideoShotVoiceUrl(shot.project_id, shot.id),
+                              )
+                            }
+                          >
+                            {playingVoiceKey === `shot:${shot.id}` ? (
+                              <Pause className="h-4 w-4" />
+                            ) : (
+                              <Play className="h-4 w-4" />
+                            )}
+                            {playingVoiceKey === `shot:${shot.id}` ? 'Dừng nghe' : 'Nghe thử'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={shot.voice_status !== 'completed'}
+                            onClick={() =>
+                              saveDownload(
+                                apiClient.downloadVideoShotVoice(shot.project_id, shot.id),
+                                ['wav', 'mp3'],
+                              )
+                            }
+                          >
+                            <Download className="h-4 w-4" />
+                            Tải âm thanh
+                          </Button>
+                        </div>
                       )}
                     </div>
                   ))
@@ -6237,8 +6949,8 @@ export function AIVideoAssistant() {
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
                         giọng:{' '}
-                        {scene.no_narration ? 'không lời' : voiceStatusLabel(scene.voice_status)} · phụ đề:{' '}
-                        {subtitleStatusLabel(scene.subtitle_status)}
+                        {scene.no_narration ? 'không lời' : voiceStatusLabel(scene.voice_status)} ·
+                        phụ đề: {subtitleStatusLabel(scene.subtitle_status)}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -6575,8 +7287,8 @@ export function AIVideoAssistant() {
                     </select>
                     {editingSeriesId ? (
                       <p className="text-xs leading-relaxed text-muted-foreground">
-                        Loại series đang là {seriesModeLabel(seriesDraft.series_mode)}. Tạm thời chưa đổi
-                        loại sau khi tạo.
+                        Loại series đang là {seriesModeLabel(seriesDraft.series_mode)}. Tạm thời
+                        chưa đổi loại sau khi tạo.
                       </p>
                     ) : null}
                   </div>
@@ -6689,9 +7401,19 @@ export function AIVideoAssistant() {
           selectedProjectId={selectedProjectId}
           search={projectPickerSearch}
           filter={projectPickerFilter}
+          dateFilter={projectPickerDateFilter}
+          dateValue={projectPickerDate}
           onOpenChange={setProjectPickerOpen}
           onSearchChange={setProjectPickerSearch}
           onFilterChange={setProjectPickerFilter}
+          onDateFilterChange={(value) => {
+            setProjectPickerDateFilter(value);
+            if (value !== 'specific') setProjectPickerDate('');
+          }}
+          onDateChange={(value) => {
+            setProjectPickerDate(value);
+            setProjectPickerDateFilter(value ? 'specific' : 'all');
+          }}
           onSelect={selectProject}
         />
         <SeriesPickerDialog
@@ -6704,7 +7426,9 @@ export function AIVideoAssistant() {
           }
           loading={seriesQuery.isLoading || seriesQuery.isFetching}
           error={seriesQuery.error ? getErrorMessage(seriesQuery.error) : null}
-          disabled={saveSeries.isPending || createSeriesFromDialog.isPending || createEpisode.isPending}
+          disabled={
+            saveSeries.isPending || createSeriesFromDialog.isPending || createEpisode.isPending
+          }
           onSelect={selectSeriesForContext}
           onCreateNew={() => {
             setSeriesPickerOpen(false);
@@ -6725,7 +7449,9 @@ export function AIVideoAssistant() {
               ? ['select', 'create_episode']
               : ['select', 'manage_characters', 'create_episode']
           }
-          defaultNextAction={seriesCreateContext === 'ai_video_direct' ? 'create_episode' : 'select'}
+          defaultNextAction={
+            seriesCreateContext === 'ai_video_direct' ? 'create_episode' : 'select'
+          }
           submitLabel="Tạo series"
           onSubmit={(draft, nextAction) =>
             createSeriesFromDialog.mutate({
@@ -6785,8 +7511,8 @@ export function AIVideoAssistant() {
                   </div>
                   <span>
                     Dùng cấu hình hiện tại: {videoLanguageLabel(form.targetLanguage)} ·{' '}
-                    {promptSegmentCount} câu lệnh x {promptSegmentDuration}s · {microScenesPerPrompt}{' '}
-                    cảnh nhỏ/câu lệnh
+                    {promptSegmentCount} câu lệnh x {promptSegmentDuration}s ·{' '}
+                    {microScenesPerPrompt} cảnh nhỏ/câu lệnh
                   </span>
                 </div>
               ) : null}
@@ -6854,9 +7580,13 @@ function ProjectPickerDialog({
   selectedProjectId,
   search,
   filter,
+  dateFilter,
+  dateValue,
   onOpenChange,
   onSearchChange,
   onFilterChange,
+  onDateFilterChange,
+  onDateChange,
   onSelect,
 }: {
   open: boolean;
@@ -6864,9 +7594,13 @@ function ProjectPickerDialog({
   selectedProjectId: string | null;
   search: string;
   filter: ProjectPickerFilter;
+  dateFilter: ProjectPickerDateFilter;
+  dateValue: string;
   onOpenChange: (open: boolean) => void;
   onSearchChange: (value: string) => void;
   onFilterChange: (value: ProjectPickerFilter) => void;
+  onDateFilterChange: (value: ProjectPickerDateFilter) => void;
+  onDateChange: (value: string) => void;
   onSelect: (projectId: string) => void;
 }) {
   const filters: Array<{ value: ProjectPickerFilter; label: string }> = [
@@ -6875,6 +7609,7 @@ function ProjectPickerDialog({
     { value: 'series', label: 'Series' },
     { value: 'running', label: 'Đang chạy' },
     { value: 'failed', label: 'Lỗi' },
+    { value: 'archived', label: 'Đã lưu trữ' },
   ];
 
   return (
@@ -6887,17 +7622,52 @@ function ProjectPickerDialog({
               Tìm nhanh theo tên hoặc ý tưởng. Dự án đang chạy và dự án lỗi luôn được ghim lên đầu.
             </DialogDescription>
           </DialogHeader>
-          <label className="relative mt-3 block">
-            <span className="sr-only">Tìm dự án</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Tìm theo tên dự án, ý tưởng hoặc series…"
-              className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
-            />
-          </label>
-          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Lọc dự án">
+          <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_150px_145px]">
+            <label className="relative block min-w-0">
+              <span className="sr-only">Tìm dự án</span>
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={search}
+                onChange={(event) => onSearchChange(event.target.value)}
+                placeholder="Tìm theo tên dự án, ý tưởng hoặc series…"
+                className="h-10 w-full min-w-0 rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none transition focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+              />
+            </label>
+            <select
+              aria-label="Lọc theo thời gian"
+              value={dateFilter}
+              onChange={(event) =>
+                onDateFilterChange(event.target.value as ProjectPickerDateFilter)
+              }
+              className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+            >
+              {PROJECT_PICKER_DATE_FILTERS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <label className="relative block min-w-0">
+              <span className="sr-only">Chọn ngày cập nhật cụ thể</span>
+              <input
+                type="date"
+                aria-label="Chọn ngày cập nhật cụ thể"
+                title="Lọc đúng ngày cập nhật"
+                value={dateValue}
+                onChange={(event) => onDateChange(event.target.value)}
+                className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-foreground/40 focus:ring-2 focus:ring-foreground/10"
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground" aria-live="polite">
+            {projects.length} dự án phù hợp
+            {dateValue ? ` · Cập nhật ngày ${projectDateInputLabel(dateValue)}` : null}
+          </p>
+          <div
+            className="mt-3 flex gap-1.5 overflow-x-auto pb-1"
+            role="tablist"
+            aria-label="Lọc dự án"
+          >
             {filters.map((item) => (
               <button
                 key={item.value}
@@ -6917,21 +7687,25 @@ function ProjectPickerDialog({
             ))}
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3 [scrollbar-gutter:stable]">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 [scrollbar-gutter:stable]">
           {projects.length ? (
-            <div className="grid gap-2">
+            <div className="grid min-w-0 gap-2">
               {projects.map((project) => {
                 const selected = selectedProjectId === project.id;
                 const running = isAutoRunActiveStatus(project.active_run_status);
-                const failed = project.active_run_status === 'failed' || project.status === 'failed';
-                const progress = Math.min(100, Math.max(0, Math.round((project.active_run_progress ?? 0) * 100)));
+                const failed =
+                  project.active_run_status === 'failed' || project.status === 'failed';
+                const progress = Math.min(
+                  100,
+                  Math.max(0, Math.round((project.active_run_progress ?? 0) * 100)),
+                );
                 return (
                   <button
                     key={project.id}
                     type="button"
                     onClick={() => onSelect(project.id)}
                     className={cn(
-                      'group flex min-h-14 w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition active:scale-[0.995]',
+                      'group flex min-h-14 min-w-0 w-full items-center gap-3 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition active:scale-[0.995]',
                       selected
                         ? 'border-foreground bg-foreground text-background'
                         : failed
@@ -6944,7 +7718,13 @@ function ProjectPickerDialog({
                     <span
                       className={cn(
                         'flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold',
-                        selected ? 'bg-background/15' : failed ? 'bg-red-500/15 text-red-700 dark:text-red-200' : running ? 'bg-sky-500/15 text-sky-700 dark:text-sky-200' : 'bg-muted text-muted-foreground',
+                        selected
+                          ? 'bg-background/15'
+                          : failed
+                            ? 'bg-red-500/15 text-red-700 dark:text-red-200'
+                            : running
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-200'
+                              : 'bg-muted text-muted-foreground',
                       )}
                     >
                       {project.series_id ? 'S' : 'P'}
@@ -6953,15 +7733,43 @@ function ProjectPickerDialog({
                       <span className="block truncate text-sm font-medium">
                         {project.series_id ? episodeDisplay(project) : project.title}
                       </span>
-                      <span className={cn('mt-0.5 block truncate text-xs', selected ? 'text-background/70' : 'text-muted-foreground')}>
-                        {project.series_id ? project.series_title ?? 'Series' : project.topic || 'Dự án lẻ'}
+                      <span
+                        className={cn(
+                          'mt-0.5 block truncate text-xs',
+                          selected ? 'text-background/70' : 'text-muted-foreground',
+                        )}
+                      >
+                        {project.series_id
+                          ? (project.series_title ?? 'Series')
+                          : compactProjectSummary(project.topic) || 'Dự án lẻ'}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1 text-[10px] uppercase tracking-[0.1em]">
-                      <span className={cn(selected ? 'text-background/80' : failed ? 'text-red-700 dark:text-red-200' : running ? 'text-sky-700 dark:text-sky-200' : 'text-muted-foreground')}>
-                        {failed ? 'Lỗi' : running ? autoRunStatusText(project.active_run_status) : projectStatusLabel(project.status)}
+                      <span
+                        className={cn(
+                          selected
+                            ? 'text-background/80'
+                            : failed
+                              ? 'text-red-700 dark:text-red-200'
+                              : running
+                                ? 'text-sky-700 dark:text-sky-200'
+                                : 'text-muted-foreground',
+                        )}
+                      >
+                        {failed
+                          ? 'Lỗi'
+                          : project.archived
+                            ? 'Đã lưu trữ'
+                          : running
+                            ? autoRunStatusText(project.active_run_status)
+                            : projectStatusLabel(project.status)}
                       </span>
-                      {running ? <span className="font-mono tabular-nums opacity-80">{progress}%</span> : null}
+                      {running ? (
+                        <span className="font-mono tabular-nums opacity-80">{progress}%</span>
+                      ) : null}
+                      <span className="whitespace-nowrap font-normal normal-case tracking-normal opacity-70">
+                        {projectDateLabel(project.updated_at)}
+                      </span>
                     </span>
                   </button>
                 );
@@ -7005,13 +7813,12 @@ function VideoPromptLibraryDialog({
     if (!open) return;
     const promptShotIds = promptShotKey ? promptShotKey.split('|') : [];
     setSelectedPromptShotId((current) =>
-      current && promptShotIds.includes(current)
-        ? current
-        : promptShotIds[0] ?? null,
+      current && promptShotIds.includes(current) ? current : (promptShotIds[0] ?? null),
     );
   }, [open, promptShotKey]);
 
-  const focusedShot = promptShots.find((shot) => shot.id === selectedPromptShotId) ?? promptShots[0];
+  const focusedShot =
+    promptShots.find((shot) => shot.id === selectedPromptShotId) ?? promptShots[0];
   const focusedPrompt = focusedShot ? promptByShotId[focusedShot.id] : undefined;
   const focusedCopyValue = cleanCopiedVideoPrompt(focusedPrompt?.content?.trim() ?? '');
   const focusedCopyKey = focusedShot ? `modal-video-shot-${focusedShot.id}` : '';
@@ -7125,7 +7932,9 @@ function VideoPromptLibraryDialog({
                   <article className="flex min-h-0 flex-1 flex-col rounded-lg border border-border/70 bg-card/70 p-3 sm:p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">{shotLabel(focusedShot)}</p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {shotLabel(focusedShot)}
+                        </p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           {focusedShot.prompt_status === 'stale'
                             ? 'Bản cũ · nên tạo lại trước khi render'
@@ -7173,7 +7982,10 @@ function VideoPromptLibraryDialog({
           )}
         </div>
 
-        <div className="hidden min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable]" aria-hidden="true">
+        <div
+          className="hidden min-h-0 flex-1 overflow-y-auto p-4 [scrollbar-gutter:stable]"
+          aria-hidden="true"
+        >
           {promptShots.length ? (
             <div className="grid gap-4">
               {promptShots.map((shot) => {
@@ -7194,9 +8006,7 @@ function VideoPromptLibraryDialog({
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">
-                          {shotLabel(shot)}
-                        </p>
+                        <p className="text-sm font-semibold text-foreground">{shotLabel(shot)}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
                           Trạng thái câu lệnh: {promptStatusLabel(shot.prompt_status)}
                         </p>
@@ -7205,13 +8015,7 @@ function VideoPromptLibraryDialog({
                         size="sm"
                         variant="outline"
                         disabled={!canCopy}
-                        onClick={() =>
-                          onCopy(
-                            copyKey,
-                            copyValue,
-                            copyNotice,
-                          )
-                        }
+                        onClick={() => onCopy(copyKey, copyValue, copyNotice)}
                       >
                         {copiedPromptKey === copyKey ? (
                           <Check className="h-4 w-4" />

@@ -68,7 +68,7 @@ async def get_research_memory(project_id: str, db: Session = Depends(get_db)):
 async def create_research_source(project_id: str, data: models.ResearchSourceTextCreate, db: Session = Depends(get_db)):
     try:
         source = research.add_text_source(project_id, data, db)
-        if data.source_type == "docs_url" and data.input_url and not data.content:
+        if data.source_type in {"docs_url", "github_repo"} and data.input_url and not data.content:
             worker_db = database_session.SessionLocal()
             try:
                 attached = await run_in_threadpool(
@@ -111,13 +111,15 @@ async def upload_research_source(
     project_id: str,
     source_type: str = Form(...),
     title: str | None = Form(None),
+    repository_url: str | None = Form(None),
+    repository_ref: str | None = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     try:
         limit = (
             research_source_security.MAX_RESEARCH_IMAGE_BYTES
-            if source_type == "image_upload"
+            if source_type in {"image_upload", "screenshot_upload"}
             else research_source_security.MAX_RESEARCH_VIDEO_BYTES
         )
         payload = await file.read(limit + 1)
@@ -129,6 +131,8 @@ async def upload_research_source(
             payload,
             file.content_type,
             db,
+            repository_url=repository_url,
+            repository_ref=repository_ref,
         )
         attached = research.start_source_adapter(project_id, source.id, db)
         return attached or source
