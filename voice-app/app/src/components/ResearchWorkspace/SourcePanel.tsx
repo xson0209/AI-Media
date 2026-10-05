@@ -29,6 +29,8 @@ const sourceOptions: Array<{ type: ResearchSourceType; label: string; icon: type
   { type: 'video_upload', label: 'Tải video', icon: Upload },
   { type: 'story_url', label: 'Link truyện', icon: LinkIcon },
   { type: 'image_upload', label: 'Tải ảnh', icon: FileImage },
+  { type: 'screenshot_upload', label: 'Screenshot repo', icon: FileImage },
+  { type: 'github_repo', label: 'GitHub repo', icon: LinkIcon },
   { type: 'text', label: 'Dán text', icon: FileText },
   { type: 'docs_url', label: 'Link tài liệu', icon: LinkIcon },
   { type: 'series_memory', label: 'Bộ nhớ Series', icon: LibraryBig },
@@ -47,17 +49,19 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
   const [sourceTitle, setSourceTitle] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [sourceText, setSourceText] = useState('');
+  const [repositoryRef, setRepositoryRef] = useState('');
+  const [screenshotRepositoryUrl, setScreenshotRepositoryUrl] = useState('');
   const [seriesId, setSeriesId] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isUrl = sourceType === 'video_url' || sourceType === 'story_url' || sourceType === 'docs_url';
-  const isUpload = sourceType === 'video_upload' || sourceType === 'image_upload';
+  const isUrl = sourceType === 'video_url' || sourceType === 'story_url' || sourceType === 'docs_url' || sourceType === 'github_repo';
+  const isUpload = sourceType === 'video_upload' || sourceType === 'image_upload' || sourceType === 'screenshot_upload';
   const isSeriesMemory = sourceType === 'series_memory';
   const canSubmitSource = sourceType === 'text'
     ? Boolean(sourceText.trim())
     : sourceType === 'docs_url'
       ? Boolean(sourceUrl.trim() || sourceText.trim())
-      : sourceType === 'video_url' || sourceType === 'story_url'
+      : sourceType === 'video_url' || sourceType === 'story_url' || sourceType === 'github_repo'
         ? Boolean(sourceUrl.trim())
         : false;
 
@@ -85,12 +89,15 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
       source_type: sourceType,
       title: sourceTitle.trim() || undefined,
       input_url: isUrl ? sourceUrl.trim() || undefined : undefined,
+      repository_ref: (sourceType === 'github_repo' || sourceType === 'screenshot_upload') ? repositoryRef.trim() || undefined : undefined,
       content: sourceType === 'text' || sourceType === 'docs_url' ? sourceText.trim() || undefined : undefined,
     }),
     onSuccess: () => {
       setSourceTitle('');
       setSourceUrl('');
       setSourceText('');
+      setRepositoryRef('');
+      setScreenshotRepositoryUrl('');
       onNotice('Đã thêm nguồn. Link video/truyện đang chạy pipeline phân tích tương ứng; text có thể review ngay.');
       refresh();
     },
@@ -137,9 +144,14 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
   const handleUpload = async (file: File) => {
     setUploadProgress(12);
     try {
-      await apiClient.uploadResearchSource(projectId, sourceType, file, sourceTitle.trim() || file.name);
+      await apiClient.uploadResearchSource(projectId, sourceType, file, sourceTitle.trim() || file.name, {
+        repository_url: sourceType === 'screenshot_upload' ? screenshotRepositoryUrl.trim() || undefined : undefined,
+        repository_ref: sourceType === 'screenshot_upload' ? repositoryRef.trim() || undefined : undefined,
+      });
       setUploadProgress(100);
-      onNotice('Đã lưu original riêng và chuyển nguồn vào pipeline Video Inspiration hoặc Comic Analysis.');
+      onNotice(sourceType === 'screenshot_upload'
+        ? 'Đã lưu screenshot gốc và chuyển sang pipeline đọc màn hình/repository. Ảnh gốc sẽ được giữ cho bước dựng AI Video.'
+        : 'Đã lưu original riêng và chuyển nguồn vào pipeline Video Inspiration hoặc Comic Analysis.');
       refresh();
     } catch (error) {
       setUploadProgress(0);
@@ -156,6 +168,8 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
     setSourceTitle('');
     setSourceUrl('');
     setSourceText('');
+    setRepositoryRef('');
+    setScreenshotRepositoryUrl('');
     setSeriesId('');
     setUploadProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -190,6 +204,8 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
           <div className="min-w-0 space-y-2">
             {!isSeriesMemory && <Input value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} placeholder="Tên nguồn (không bắt buộc)" aria-label="Tên nguồn" />}
             {isUrl && <Input value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="Dán link HTTP/HTTPS public" aria-label="Link nguồn public" />}
+            {(sourceType === 'github_repo' || sourceType === 'screenshot_upload') && <Input value={repositoryRef} onChange={(event) => setRepositoryRef(event.target.value)} placeholder="Branch/tag/commit (mặc định branch chính)" aria-label="Branch hoặc commit repo" />}
+            {sourceType === 'screenshot_upload' && <Input value={screenshotRepositoryUrl} onChange={(event) => setScreenshotRepositoryUrl(event.target.value)} placeholder="Repo GitHub liên quan (không bắt buộc)" aria-label="Repo GitHub liên quan" />}
             {(sourceType === 'text' || sourceType === 'docs_url') && (
               <Textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} placeholder="Dán nội dung, tài liệu hoặc ghi chú nghiên cứu" className="min-h-28" aria-label="Nội dung nguồn" />
             )}
@@ -227,7 +243,7 @@ export function SourcePanel({ projectId, onNotice }: SourcePanelProps) {
                   ref={fileInputRef}
                   type="file"
                   className="sr-only"
-                  accept={sourceType === 'image_upload' ? 'image/*' : 'video/mp4'}
+                  accept={sourceType === 'image_upload' || sourceType === 'screenshot_upload' ? 'image/*' : 'video/mp4'}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) void handleUpload(file);
@@ -288,7 +304,7 @@ function SourceRow({ source, retrying, approving, onRetry, onApprove }: {
   const canRetry = ['queued', 'partial', 'needs_review', 'failed', 'stale'].includes(source.status);
   const proposalCreated = typeof source.result.memory_proposal_id === 'string';
   const isSeriesMemory = source.source_type === 'series_memory';
-  const Icon = isSeriesMemory ? LibraryBig : source.source_type.includes('video') ? FileVideo : source.source_type.includes('image') ? FileImage : FileText;
+  const Icon = isSeriesMemory ? LibraryBig : source.source_type.includes('video') ? FileVideo : source.source_type.includes('image') || source.source_type === 'screenshot_upload' ? FileImage : source.source_type === 'github_repo' ? LinkIcon : FileText;
   const seriesRevision = numberValue(source.provenance.series_revision);
 
   return (
@@ -303,6 +319,8 @@ function SourceRow({ source, retrying, approving, onRetry, onApprove }: {
               <Badge variant="secondary">r{source.revision}</Badge>
             </div>
             <p className="mt-1 break-words text-sm leading-6 text-muted-foreground">{summary}</p>
+            {source.source_type === 'github_repo' && typeof source.result.repository === 'object' && source.result.repository ? <p className="mt-1 text-xs text-muted-foreground">Commit: {String((source.result.repository as Record<string, unknown>).commit_sha || 'chưa resolve')} · Files: {numberValue((source.result.coverage as Record<string, unknown> | undefined)?.files_read)}</p> : null}
+            {source.source_type === 'screenshot_upload' && Array.isArray(source.result.visual_assets) ? <p className="mt-1 text-xs text-muted-foreground">Ảnh gốc được giữ lại · {numberValue((source.result.visual_assets as unknown[]).length)} asset · {Array.isArray(source.result.evidence_refs) ? source.result.evidence_refs.length : 0} vùng có bằng chứng</p> : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

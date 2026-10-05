@@ -1,5 +1,5 @@
-"""AI Video feature boundary.
+"""AI Video project, auto-run, render, subtitle and artifact-state modules.
 
-The modules in this package bridge existing services while the backend is
-split into API, feature, and data layers.
+Legacy service imports alias these implementations. Public schemas remain
+compatible with backend.models; resource management is shared across features.
 """

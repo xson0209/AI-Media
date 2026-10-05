@@ -685,6 +685,7 @@ def record_project_dependency(project_id: str, dependency_type: str, dependency_
                 "source": "video_inspiration_handoff",
                 "project_id": project_id,
                 "task": suffix,
+                "target_scope": "project",
             },
             created_at=now,
         )

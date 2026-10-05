@@ -1,4 +1,6 @@
-import { QueryClient } from '@tanstack/react-query';
+import { notifyManager, QueryClient } from '@tanstack/react-query';
+
+export { QueryClientProvider } from '@tanstack/react-query';
 
 /**
  * Shared QueryClient instance used across the app.
@@ -17,3 +19,16 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+/** Drop all previous-server data, including server-specific initialData. */
+export function resetServerQueries(): void {
+  notifyManager.batch(() => {
+    for (const query of queryClient.getQueryCache().getAll()) {
+      // reset cancels the previous request; clearing its initialData must
+      // happen before refetch so cancellation cannot restore an old seed.
+      query.reset();
+      query.setState({ data: undefined, dataUpdatedAt: 0, status: 'pending' });
+    }
+  });
+  void queryClient.refetchQueries({ type: 'active' });
+}

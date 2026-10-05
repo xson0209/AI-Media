@@ -29,6 +29,7 @@ from ..database import (
 )
 from . import (
     ai_planning,
+    content_profile,
     series_brain,
     series_references,
     settings as settings_service,
@@ -42,8 +43,11 @@ from . import (
     video_speech,
     video_state,
     video_storage,
+    video_source_visuals,
 )
 from .video_planning import VideoPlanningValidationError, _load_json_object
+from .video_longform import LongFormPlanningError
+from . import video_longform_workflow
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
@@ -333,6 +337,7 @@ class StoryDevelopmentPlan(BaseModel):
     dialogue_mode: str | None = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: str | None = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: str | None = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: str | None = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     input_synthesis: str = Field(default="", max_length=50000)
     story_strategy_vi: str = Field(default="", max_length=50000)
     story_strategy: str = Field(default="", max_length=50000)
@@ -391,12 +396,14 @@ class ShotPlan(BaseModel):
     transition_pack: TransitionPackPlan = Field(default_factory=TransitionPackPlan)
     sound_design: SoundDesignPlan = Field(default_factory=SoundDesignPlan)
     micro_scenes: list[MicroScenePlan] = Field(default_factory=list, max_length=20)
+    source_visual: models.VideoSourceVisualSelection | None = None
 
 class ShotBreakdownPlan(BaseModel):
     video_purpose: str | None = Field(default=None, pattern=video_purpose_service.VIDEO_PURPOSE_PATTERN)
     dialogue_mode: str | None = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: str | None = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: str | None = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: str | None = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     shots: list[ShotPlan] = Field(..., min_length=1, max_length=400)
 
 class VideoPromptPlan(BaseModel):
@@ -432,6 +439,7 @@ class VideoPromptPackPlan(BaseModel):
     dialogue_mode: str | None = Field(default=None, pattern=video_purpose_service.DIALOGUE_MODE_PATTERN)
     narration_density: str | None = Field(default=None, pattern=video_purpose_service.NARRATION_DENSITY_PATTERN)
     call_to_action_style: str | None = Field(default=None, pattern=video_purpose_service.CTA_STYLE_PATTERN)
+    cta_action: str | None = Field(default=None, pattern=video_purpose_service.CTA_ACTION_PATTERN)
     prompts: list[VideoPromptPlan] = Field(..., min_length=1, max_length=400)
 
 STORY_DEVELOPMENT_SCHEMA = StoryDevelopmentPlan.model_json_schema()
@@ -711,6 +719,7 @@ def _normalize_purpose_metadata_payload(payload: dict) -> dict:
             "dialogue_mode": video_purpose_service.DIALOGUE_MODE_FIELD_ALIASES,
             "narration_density": video_purpose_service.NARRATION_DENSITY_FIELD_ALIASES,
             "call_to_action_style": video_purpose_service.CTA_STYLE_FIELD_ALIASES,
+            "cta_action": video_purpose_service.CTA_ACTION_FIELD_ALIASES,
         },
     )
     normalized = dict(payload)
@@ -735,6 +744,9 @@ def _normalize_purpose_metadata_payload(payload: dict) -> dict:
             _planning_value_to_text(cta_value),
             purpose=normalized.get("video_purpose"),
         )
+    action_value = _first_present(normalized, *video_purpose_service.CTA_ACTION_FIELD_ALIASES)
+    if action_value is not None:
+        normalized["cta_action"] = video_purpose_service.normalize_cta_action(_planning_value_to_text(action_value))
     return normalized
 
 def _is_video_prompt_creative_default(field: str, value: str | None) -> bool:
@@ -899,7 +911,7 @@ def _shot_raw_sound_payload(raw_shot: dict):
         return raw_shot
     return None
 
-def _validate_shot_creative_output(raw_plan: dict, plan: ShotBreakdownPlan) -> None:
+def _validate_shot_creative_output(raw_plan: dict, plan: ShotBreakdownPlan, project: DBVideoProject | None = None) -> None:
     raw_shots = _raw_items_from_payload(raw_plan, "shots", "segments", "prompt_segments", "video_segments", "segment_breakdown")
     missing: list[str] = []
     if len(raw_shots) != len(plan.shots):
@@ -926,6 +938,23 @@ def _validate_shot_creative_output(raw_plan: dict, plan: ShotBreakdownPlan) -> N
         )
         quality = _shot_retainability_quality(shot, is_first=index == 1, is_final=index == len(plan.shots))
         missing.extend(f"{prefix}.{field}" for field in quality.get("missing_fields", []))
+        if index == len(plan.shots):
+            project_cta_action = video_purpose_service.normalize_cta_action(
+                getattr(project, "cta_action", None) if project is not None else None
+            )
+            plan_cta_action = video_purpose_service.normalize_cta_action(plan.cta_action)
+            cta_action = project_cta_action if project_cta_action != "none" else plan_cta_action
+            if cta_action != "none":
+                role = (shot.retention_role or "").casefold()
+                if "cta" not in role:
+                    missing.append(f"{prefix}.cta_retention_role")
+                visual_action = (shot.primary_action or "").casefold()
+                if not visual_action:
+                    missing.append(f"{prefix}.cta_visual_action")
+                if any(term in visual_action for term in ("imaginary button", "ui button", "like button", "comment button", "share button")):
+                    missing.append(f"{prefix}.cta_visual_action_context")
+                if not shot.speech_cues:
+                    missing.append(f"{prefix}.cta_speech_cue")
     _raise_missing_required_output("shot breakdown", missing)
 
 def _shot_sound_fallback_fields(raw_plan: dict | None) -> list[str]:
@@ -1363,6 +1392,7 @@ def _normalize_shot_payload(shot, *, index: int, dialogue_mode: str | None = Non
             fallback=_planning_value_to_text(_first_present(shot, "transition_to_next", "transition", "next_transition")),
         ),
         "micro_scenes": _normalize_micro_scenes_from_shot(shot),
+        "source_visual": _first_present(shot, "source_visual", "source_visual_selection", "visual_source") if isinstance(_first_present(shot, "source_visual", "source_visual_selection", "visual_source"), dict) else None,
     }
 
 def _normalize_shot_breakdown_payload(payload: dict, *, dialogue_mode: str | None = None) -> dict:
@@ -1488,10 +1518,67 @@ _VIDEO_RENDER_3D_NEGATIVE_RULE = (
     "no storyboard frame, no line-art-only render"
 )
 
-def _render_safe_video_prompt_text(prompt: str) -> str:
+# A stick figure is a body-structure contract, not merely a simplified 3D
+# character.  Keep this rule opt-in so ordinary human/cartoon prompts retain
+# their requested anatomy while prompts that mention a stick figure cannot be
+# silently expanded into a humanoid body by the provider.
+_STICK_FIGURE_REQUEST_RE = re.compile(
+    r"(?:\bstick[\s-]?figure\b|\bstickman\b|\bstick\s+man\b|\bstick\s+person\b|\bstickperson\b|người\s+que|nguoi\s+que)",
+    re.IGNORECASE,
+)
+_STICK_FIGURE_PROMPT_RULE = (
+    "Strict stick-figure anatomy lock: the character must remain a true non-anatomical stick figure in every frame; "
+    "use a simple round head, a thin line or narrow capsule torso, and uniform thin rod arms and legs with simple joints; "
+    "no human hands, palms, fingers, human feet, toes, soles, heels, muscles, skin, shoulders, hips, chest, pelvis, "
+    "realistic joints, realistic shoes, detailed face, or human body proportions. 3D rendering, shading, depth, and "
+    "cinematic lighting are allowed, but must never turn the stick figure into an anatomically human character."
+)
+_STICK_FIGURE_NEGATIVE_RULE = (
+    "no human anatomy, no humanoid body, no realistic arms or legs, no hands, no palms, no fingers, no feet, no toes, "
+    "no soles, no heels, no muscles, no skin, no shoulders, no hips, no chest, no pelvis, no realistic joints, "
+    "no realistic shoes, no detailed human face, no human proportions, no character redesign"
+)
+
+
+def _stick_figure_requested(prompt: str) -> bool:
+    """Return whether a positive prompt explicitly requests a stick figure."""
+    return bool(_STICK_FIGURE_REQUEST_RE.search(str(prompt or "")))
+
+
+def _project_requests_stick_figure(project: DBVideoProject) -> bool:
+    """Inspect project-level style/canon fields for a stick-figure request."""
+    return _stick_figure_requested(
+        "\n".join(
+            str(getattr(project, field, "") or "")
+            for field in ("title", "visual_style", "style_bible", "continuity_bible", "topic")
+        )
+    )
+
+
+def _stick_figure_generation_instruction(project: DBVideoProject) -> str:
+    if not _project_requests_stick_figure(project):
+        return ""
+    return (
+        "Yêu cầu hình thể người que (bắt buộc ở mọi scene/shot/prompt): "
+        f"{_STICK_FIGURE_PROMPT_RULE} Negative anatomy constraints: {_STICK_FIGURE_NEGATIVE_RULE}."
+    )
+
+
+def _render_safe_video_prompt_text(prompt: str, *, force_stick_figure: bool = False, preserve_source: bool = False) -> str:
     safe = str(prompt or "").strip()
     if not safe:
         return ""
+    if preserve_source:
+        for rule in (_VIDEO_RENDER_3D_PROMPT_RULE, "Do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks in the video."):
+            safe = safe.replace(rule, "").strip()
+        if video_source_visuals.PROMPT_RULE not in safe:
+            safe += " " + video_source_visuals.PROMPT_RULE
+        return safe.strip()
+    wants_stick_figure = force_stick_figure or _stick_figure_requested(prompt)
+    # Reserve room for mandatory safety/style suffixes so a provider response
+    # at the schema limit cannot truncate the anatomy lock away downstream.
+    if wants_stick_figure:
+        safe = _bounded_prompt_field(safe, 18000)
     for pattern, replacement in _VIDEO_RENDER_TEXT_CUE_REPLACEMENTS:
         safe = pattern.sub(replacement, safe)
     safe = re.sub(r"[ \t]+([.,;:])", r"\1", safe)
@@ -1502,10 +1589,27 @@ def _render_safe_video_prompt_text(prompt: str) -> str:
         safe = f"{safe} {text_block_rule}".strip()
     if _VIDEO_RENDER_3D_PROMPT_RULE.casefold() not in safe.casefold():
         safe = f"{safe} {_VIDEO_RENDER_3D_PROMPT_RULE}".strip()
+    if wants_stick_figure and _STICK_FIGURE_PROMPT_RULE.casefold() not in safe.casefold():
+        # Keep a provider's existing constraint text, but give the complete
+        # mandatory rule one label so normalization remains idempotent.
+        safe = re.sub(r"(?i)\bStrict stick-figure anatomy lock:\s*", "", safe).strip()
+        safe = f"{safe} {_STICK_FIGURE_PROMPT_RULE}".strip()
     return safe
 
-def _render_safe_video_negative_prompt_text(negative_prompt: str) -> str:
-    base = _bounded_prompt_field(negative_prompt, 6000)
+
+def _render_safe_video_negative_prompt_text(
+    negative_prompt: str,
+    prompt: str = "",
+    *,
+    force_stick_figure: bool = False,
+    preserve_source: bool = False,
+) -> str:
+    if preserve_source:
+        return video_source_visuals.NEGATIVE_RULE
+    wants_stick_figure = force_stick_figure or _stick_figure_requested(prompt)
+    # Keep mandatory negative constraints inside the schema limit even when a
+    # model returns a very long custom negative prompt.
+    base = _bounded_prompt_field(negative_prompt, 4000 if wants_stick_figure else 6000)
     required_parts = [
         "no subtitles, no captions, no text overlays, no letters, no words, no UI text",
         _VIDEO_RENDER_3D_NEGATIVE_RULE,
@@ -1514,16 +1618,34 @@ def _render_safe_video_negative_prompt_text(negative_prompt: str) -> str:
     for required in required_parts:
         if required.casefold() not in base.casefold():
             parts.append(required)
+    if wants_stick_figure and _STICK_FIGURE_NEGATIVE_RULE.casefold() not in base.casefold():
+        parts.append(_STICK_FIGURE_NEGATIVE_RULE)
     return _bounded_prompt_field(", ".join(part for part in parts if part), 6000)
 
-def _normalize_video_prompt_payload(item, *, index: int, global_negative_prompt: str = "", global_continuity: str = "") -> dict:
+def _normalize_video_prompt_payload(
+    item,
+    *,
+    index: int,
+    global_negative_prompt: str = "",
+    global_continuity: str = "",
+    force_stick_figure: bool = False,
+    preserve_source: bool = False,
+) -> dict:
     if not isinstance(item, dict):
         prompt = _planning_value_to_text(item)
         return {
             "shot_order": index,
-            "prompt": _bounded_prompt_field(_render_safe_video_prompt_text(prompt), 20000),
+            "prompt": _bounded_prompt_field(
+                _render_safe_video_prompt_text(prompt, force_stick_figure=force_stick_figure, preserve_source=preserve_source),
+                20000,
+            ),
             "prompt_explanation_vi": _fallback_prompt_explanation_vi(prompt),
-            "negative_prompt": _render_safe_video_negative_prompt_text(global_negative_prompt),
+            "negative_prompt": _render_safe_video_negative_prompt_text(
+                global_negative_prompt,
+                prompt,
+                force_stick_figure=force_stick_figure,
+                preserve_source=preserve_source,
+            ),
             "continuity_notes": global_continuity,
             "retention_notes": VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["retention_notes"],
             "transition_notes": VIDEO_PROMPT_CREATIVE_NOTE_DEFAULTS["transition_notes"],
@@ -1632,9 +1754,21 @@ def _normalize_video_prompt_payload(item, *, index: int, global_negative_prompt:
     prompt_explanation_vi = prompt_explanation_vi or _fallback_prompt_explanation_vi(prompt, fallback_detail)
     return {
         "shot_order": int(_number_or_default(_first_present(item, "shot_order", "shot_number", "shot", "shotIndex", "segment_order", "segment_number", "segment", "segmentIndex", "order"), index)),
-        "prompt": _bounded_prompt_field(_render_safe_video_prompt_text(prompt or fallback_detail), 20000),
+        "prompt": _bounded_prompt_field(
+            _render_safe_video_prompt_text(
+                prompt or fallback_detail,
+                force_stick_figure=force_stick_figure,
+                preserve_source=preserve_source,
+            ),
+            20000,
+        ),
         "prompt_explanation_vi": _bounded_prompt_field(prompt_explanation_vi, 12000),
-        "negative_prompt": _render_safe_video_negative_prompt_text(negative_prompt),
+        "negative_prompt": _render_safe_video_negative_prompt_text(
+            negative_prompt,
+            prompt,
+            force_stick_figure=force_stick_figure,
+            preserve_source=preserve_source,
+        ),
         "duration_seconds": _number_or_default(_first_present(item, "duration_seconds", "duration", "seconds", "segment_duration_seconds", "clip_duration_seconds", "usable_duration_seconds", "timeline_duration_seconds"), None),
         "aspect_ratio": _bounded_prompt_field(_planning_value_to_text(_first_present(item, "aspect_ratio", "ratio")), 20, "9:16"),
         "shot_type": _bounded_prompt_field(shot_type, 120, "video shot"),
@@ -1708,6 +1842,7 @@ def _normalize_video_prompt_pack_payload(payload: dict, project: DBVideoProject 
             prompts = flattened
         else:
             prompts = []
+    force_stick_figure = bool(project is not None and _project_requests_stick_figure(project))
     normalized = dict(payload)
     normalized["prompts"] = [
             _normalize_video_prompt_payload(
@@ -1715,6 +1850,8 @@ def _normalize_video_prompt_pack_payload(payload: dict, project: DBVideoProject 
                 index=index,
                 global_negative_prompt=global_negative_prompt,
                 global_continuity=global_continuity,
+                force_stick_figure=force_stick_figure,
+                preserve_source=bool(project is not None and video_source_visuals.preserves_source(project)),
             )
             for index, item in enumerate(prompts, start=1)
         ]
@@ -2080,6 +2217,7 @@ def _fallback_story_development_payload(project: DBVideoProject, db: Session, *,
         "dialogue_mode": project.dialogue_mode or "character_lines",
         "narration_density": project.narration_density or "dense",
         "call_to_action_style": project.call_to_action_style or "direct",
+        "cta_action": getattr(project, "cta_action", None) or "none",
         "input_synthesis": synthesis,
         "story_strategy_vi": strategy,
         "story_strategy": strategy,
@@ -2193,6 +2331,7 @@ def _fallback_shot_breakdown_payload(
         "dialogue_mode": project.dialogue_mode or "character_lines",
         "narration_density": project.narration_density or "dense",
         "call_to_action_style": project.call_to_action_style or "direct",
+        "cta_action": getattr(project, "cta_action", None) or "none",
         "shots": [
             ({**shot, "english_narration": "", "speech_cues": []}
              if not _production_narration_valid(shot.get("english_narration"), target_language=project.target_language)
@@ -2200,6 +2339,33 @@ def _fallback_shot_breakdown_payload(
             for shot in shots
         ],
     }
+
+def _fallback_cta_text(project: DBVideoProject, shot: DBVideoShot, *, is_final: bool) -> str:
+    """Return one fallback CTA sentence for the final shot only."""
+    action = video_purpose_service.normalize_cta_action(getattr(project, "cta_action", None))
+    if action == "none" or not is_final:
+        return ""
+    language = video_language.normalize_video_language(getattr(project, "target_language", None))
+    if language == "vi":
+        phrases = {
+            "comment": "Hãy để lại bình luận của bạn về điều này.",
+            "like": "Nếu thấy video hữu ích, hãy nhấn thích.",
+            "share": "Nếu điều này hữu ích, hãy chia sẻ video.",
+            "follow": "Theo dõi để xem phần tiếp theo.",
+            "save": "Lưu video này để xem lại khi cần.",
+            "subscribe": "Đăng ký kênh để không bỏ lỡ phần tiếp theo.",
+        }
+    else:
+        phrases = {
+            "comment": "What do you think? Leave your answer in the comments.",
+            "like": "If this was useful, tap like.",
+            "share": "If this helped you, share the video.",
+            "follow": "Follow for the next part.",
+            "save": "Save this video for later.",
+            "subscribe": "Subscribe so you do not miss the next part.",
+        }
+    return phrases.get(action, "")
+
 
 def _fallback_video_prompt_pack_payload(
     project: DBVideoProject,
@@ -2209,12 +2375,15 @@ def _fallback_video_prompt_pack_payload(
 ) -> dict[str, Any]:
     prompts: list[dict[str, Any]] = []
     style_label = (project.visual_style or "the approved project visual style").strip()
-    for shot in shots:
+    for shot_index, shot in enumerate(shots):
         duration = _clamp_shot_duration(shot.duration_seconds, project, shot_order=shot.shot_order)
         micro_text = _micro_scene_timeline_text(shot.micro_scenes_json or [])
         character_text = video_series_characters.fallback_prompt_character_text(project)
         speech_cues = shot.speech_cues_json if isinstance(shot.speech_cues_json, list) else []
         speech_text = json.dumps(speech_cues, ensure_ascii=False) if speech_cues else (shot.english_narration or "")
+        fallback_cta = _fallback_cta_text(project, shot, is_final=shot_index == len(shots) - 1)
+        if fallback_cta:
+            speech_text = f"{speech_text} {fallback_cta}".strip()
         sound_text = json.dumps(shot.sound_design_json or {}, ensure_ascii=False)
         prompt = (
             f"Create a {duration:g}-second {project.aspect_ratio} high-quality cinematic animation video in this visual style: {style_label}. "
@@ -2227,7 +2396,8 @@ def _fallback_video_prompt_pack_payload(
             f"DIALOGUE / SPEECH (target language {video_language.video_language_label(project.target_language)}): {speech_text}. "
             "Preserve exact dialogue text, speaker, delivery, emotion, context, and lip_sync_required; distinguish visible on-screen speech from off-screen voice-over. "
             f"SOUND DESIGN: {sound_text}. Include ambience, music mood/energy, timed SFX, beat timing, and mixing notes. "
-            "For Veo 3 native-audio rendering, render this dialogue and sound design inside the clip itself; do not replace it with invented language. "
+            + ("For the final CTA, use a natural human delivery grounded in the approved scene and hold the final composition; do not show imaginary platform UI. " if fallback_cta else "")
+            + "For Veo 3 native-audio rendering, render this dialogue and sound design inside the clip itself; do not replace it with invented language. "
             "Do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks in the video."
         )
         negative_prompt = (
@@ -2276,6 +2446,7 @@ def _fallback_video_prompt_pack_payload(
         "dialogue_mode": project.dialogue_mode or "character_lines",
         "narration_density": project.narration_density or "dense",
         "call_to_action_style": project.call_to_action_style or "direct",
+        "cta_action": getattr(project, "cta_action", None) or "none",
         "global_negative_prompt": "No watermark, no logo, no random text, no burned-in subtitles, no distorted faces, no 2D illustration, no flat drawing, no flat comic panel, no static image, no image prompt, no storyboard frame, no line-art-only render.",
         "global_continuity": (
             f"{style_label}. Keep the same approved character identities, proportions, wardrobe logic, props, locations, "
@@ -2613,11 +2784,26 @@ def normalize_phase2_codex_context(project: DBVideoProject, db: Session) -> dict
         dialogue_mode=getattr(project, "dialogue_mode", None),
         narration_density=getattr(project, "narration_density", None),
         call_to_action_style=getattr(project, "call_to_action_style", None),
+        cta_action=getattr(project, "cta_action", None),
     )
     segment_config = _resolve_prompt_segment_config(project)
     source_blocks = _normalized_source_blocks(project, db)
     source_context = "\n\n".join(
         f"[{block['sort_order']}] {block['block_type']}:\n{block['content']}" for block in source_blocks
+    )
+    resolved_profile = content_profile.resolve_content_profile(
+        video_purpose_value=getattr(project, "video_purpose", None),
+        content_profile_version=getattr(project, "content_profile_version", None),
+        content_objective=getattr(project, "content_objective", None),
+        content_genre=getattr(project, "content_genre", None),
+        audience_age_band=getattr(project, "audience_age_band", None),
+        format_profile=getattr(project, "format_profile", None),
+        distribution_platform=getattr(project, "distribution_platform", None),
+        interaction_mode=getattr(project, "interaction_mode", None),
+        safety_policy=getattr(project, "safety_policy", None),
+        made_for_kids=getattr(project, "made_for_kids", None),
+        learning_objective=getattr(project, "learning_objective", None),
+        target_duration_seconds=getattr(project, "target_duration_seconds", None),
     )
     return {
         "project_id": project.id,
@@ -2631,12 +2817,16 @@ def normalize_phase2_codex_context(project: DBVideoProject, db: Session) -> dict
         "dialogue_mode": settings["dialogue_mode"],
         "narration_density": settings["narration_density"],
         "call_to_action_style": settings["call_to_action_style"],
+        "cta_action": settings["cta_action"],
+        "content_profile": resolved_profile,
+        "content_profile_context_lines": content_profile.profile_context_lines(resolved_profile),
         "purpose_context_lines": video_purpose_service.purpose_context_lines(
             video_purpose=str(settings["video_purpose"]),
             target_language=target_language,
             dialogue_mode=str(settings["dialogue_mode"]),
             narration_density=str(settings["narration_density"]),
             call_to_action_style=settings["call_to_action_style"],
+            cta_action=settings["cta_action"],
         ),
         "source_blocks": source_blocks,
         "source_context": source_context,
@@ -2657,15 +2847,34 @@ def _purpose_generation_instructions(project: DBVideoProject) -> str:
         dialogue_mode=getattr(project, "dialogue_mode", None),
         narration_density=getattr(project, "narration_density", None),
         call_to_action_style=getattr(project, "call_to_action_style", None),
+        cta_action=getattr(project, "cta_action", None),
     )
     purpose = str(settings["video_purpose"])
     dialogue_mode = str(settings["dialogue_mode"])
     density = str(settings["narration_density"])
     target_language = video_language.normalize_video_language(getattr(project, "target_language", None))
+    resolved_profile = content_profile.resolve_content_profile(
+        video_purpose_value=getattr(project, "video_purpose", None),
+        content_profile_version=getattr(project, "content_profile_version", None),
+        content_objective=getattr(project, "content_objective", None),
+        content_genre=getattr(project, "content_genre", None),
+        audience_age_band=getattr(project, "audience_age_band", None),
+        format_profile=getattr(project, "format_profile", None),
+        distribution_platform=getattr(project, "distribution_platform", None),
+        interaction_mode=getattr(project, "interaction_mode", None),
+        safety_policy=getattr(project, "safety_policy", None),
+        made_for_kids=getattr(project, "made_for_kids", None),
+        learning_objective=getattr(project, "learning_objective", None),
+        target_duration_seconds=getattr(project, "target_duration_seconds", None),
+    )
     lines = [
+        "Content Profile guidance:\n- " + "\n- ".join(content_profile.profile_context_lines(resolved_profile)),
         f"Áp dụng video_purpose={purpose}, dialogue_mode={dialogue_mode}, narration_density={density}.",
         "target_language luôn là nguồn sự thật cho speech, narration, subtitle và on-screen text người xem đọc.",
     ]
+    stick_figure_instruction = _stick_figure_generation_instruction(project)
+    if stick_figure_instruction:
+        lines.append(stick_figure_instruction)
     if target_language == "en":
         lines.append(
             "English language lock: every viewer-facing field must be written in natural English. "
@@ -2682,6 +2891,11 @@ def _purpose_generation_instructions(project: DBVideoProject) -> str:
     if purpose == "sales_ad":
         cta = settings.get("call_to_action_style") or "direct"
         lines.append(f"Với sales_ad, mở bằng hook, nêu lợi ích chính, giữ nhịp cô đọng và kết bằng CTA kiểu {cta}.")
+    action = settings.get("cta_action") or "none"
+    if action != "none":
+        lines.append(
+            f"CTA interaction intent: {action}. Chỉ dùng một hành động chính và phải suy ra cách thể hiện tự nhiên từ approved final beat, nhân vật, đạo cụ, bối cảnh và cảm xúc; không dùng gesture mạng xã hội chung chung, không cho nhân vật bấm nút UI tưởng tượng."
+        )
     if dialogue_mode == "voiceover":
         lines.append("Với dialogue_mode=voiceover, ưu tiên narrator/voiceover; không bắt buộc tạo câu thoại nhân vật riêng.")
     elif dialogue_mode == "character_lines":
@@ -2709,8 +2923,10 @@ def _project_context(project: DBVideoProject, db: Session) -> str:
         f"Mục đích video: {context['video_purpose']}\n"
         f"Dialogue mode: {context['dialogue_mode']}\n"
         f"Narration density: {context['narration_density']}\n"
-        f"CTA style: {context['call_to_action_style'] or 'none'}\n"
-        "Purpose/preset guidance:\n- " + "\n- ".join(str(line) for line in context["purpose_context_lines"]) + "\n"
+        f"CTA style: {context['call_to_action_style'] or 'none'}\n",
+        f"CTA action: {context['cta_action'] or 'none'}\n",
+        "\n".join(str(line) for line in context["content_profile_context_lines"]) + "\n",
+        "Purpose/preset guidance:\n- " + "\n- ".join(str(line) for line in context["purpose_context_lines"]) + "\n",
         f"Thời lượng mục tiêu: {project.target_duration_seconds or 'tự chọn'} giây\n"
         f"Tỷ lệ khung hình: {project.aspect_ratio}\n"
         f"Kế hoạch shot/prompt: {_shot_duration_preference(project)}\n"
@@ -2719,7 +2935,24 @@ def _project_context(project: DBVideoProject, db: Session) -> str:
     if series_context:
         parts.append(series_context)
     parts.append(f"Nguồn nội dung:\n{context['source_context']}")
+    if video_source_visuals.preserves_source(project):
+        assets = [{"id": asset["id"], "regions": [{"id": region["id"], "label": region.get("label")} for region in asset.get("regions") or []]} for asset in video_source_visuals.list_assets(project.id, db)]
+        parts.append("Nội dung repo: chỉ viết nhận định kỹ thuật từ repository_facts; giữ verification và giới hạn, không tự bịa code đã chạy, benchmark hoặc version. Hook là vấn đề/lợi ích thật và reveal bằng chứng. SFX là click/nhấn reveal nhẹ dưới giọng. " + video_source_visuals.PROMPT_RULE + " Shot phải chọn source_visual gồm asset_id, region_id (null cho toàn ảnh), motion (hold hoặc zoom), highlight; chỉ dùng ID trong danh sách: " + json.dumps(assets, ensure_ascii=False))
     return "\n\n".join(parts)
+
+
+def _bind_source_visuals(shots: list[ShotPlan], project: DBVideoProject, db: Session) -> None:
+    if not video_source_visuals.preserves_source(project):
+        return
+    assets = video_source_visuals.list_assets(project.id, db)
+    if not assets:
+        return
+    for shot in shots:
+        selection = shot.source_visual.model_dump() if shot.source_visual else {"asset_id": assets[(shot.shot_order - 1) % len(assets)]["id"], "motion": "hold"}
+        try:
+            shot.source_visual = models.VideoSourceVisualSelection(**video_source_visuals.validate_selection(selection, assets))
+        except video_source_visuals.SourceVisualError as exc:
+            raise VideoPlanningValidationError(str(exc)) from exc
 
 def _phase2_codex_timeout(settings) -> int:
     try:
@@ -2753,6 +2986,8 @@ def _run_structured_codex(
         "max_retries": attempt_limit,
         **(technical_context or {}),
     }
+
+
     last_error: BaseException | None = None
     with video_planning_pool.planning_slot(
         db,
@@ -2835,6 +3070,7 @@ def develop_story(project_id: str, db: Session, *, force: bool = False) -> model
 
         return video_projects.get_project(project_id, db)
 
+    longform = getattr(project, "format_profile", None) == "long_form"
     prompt = f"""
 Bạn là Script-to-Video-Prompt Studio trong Voicebox. Người dùng có thể nhập nguồn nội dung bằng tiếng Việt, tiếng Anh hoặc lẫn cả hai. Video cuối phải dùng ngôn ngữ video đã chọn.
 
@@ -2847,6 +3083,7 @@ Yêu cầu bắt buộc:
 - {video_language.viewer_language_instruction(project.target_language)}
 - {video_language.narration_field_note(project.target_language)}
 - {_purpose_generation_instructions(project)}
+- Nếu CTA action khác none, final segment phải có CTA delivery phù hợp approved final beat: hành động hình ảnh, cảm xúc và đạo cụ phải nối tiếp cảnh ngay trước đó như một người bình thường; exact CTA wording chỉ nằm trong speech_cues; không tạo nút Like/Comment/Share tưởng tượng hoặc chữ UI trong video.
 - story_strategy_vi, continuity_bible_vi và detailed_script_vi bắt buộc viết bằng tiếng Việt tự nhiên, đủ rõ để người dùng Việt đọc, hiểu, duyệt và chỉnh mà không cần hiểu tiếng Anh.
 - story_strategy, continuity_bible và detailed_script là bản dùng cho sản xuất theo ngôn ngữ video đã chọn; nếu video là tiếng Anh thì viết các field này bằng tiếng Anh.
 - Không được bỏ trống bản tiếng Việt. Mỗi bản tiếng Việt phải giải thích cùng nội dung với bản sản xuất, không chỉ tóm tắt một dòng.
@@ -2864,13 +3101,34 @@ Yêu cầu bắt buộc:
   4. setting_and_lighting: bối cảnh, thời điểm, nguồn sáng, hướng sáng, màu ánh sáng, contrast và atmosphere.
   5. detailed_mood: cảm xúc/mood chi tiết, biểu cảm, năng lượng, nhịp cảm xúc của cảnh.
 - Chia thành scene lớn; chưa tạo shot ở bước này.
+{('- Video dài: tổ chức scene theo các chương có tiến triển. Mỗi chương phải bổ sung thông tin mới, nối state của chương trước và đóng góp vào central promise/payoff; không lặp beat nguồn để đủ thời lượng.' if longform else '')}
 - Không dùng tool/command, không đọc file trong project, không giải thích quá trình; schema đã được truyền qua output_schema.
 - Chỉ trả về đúng JSON theo schema, không thêm markdown.
 """.strip()
     raw_plan: dict | None = None
     normalized_plan: dict | None = None
+    if longform:
+        try:
+            longform_plan = video_longform_workflow.develop(
+                project,
+                db,
+                _project_context(project, db),
+                lambda prompt, schema, step_name: _run_structured_codex(
+                    db, project, prompt, schema, step_name=step_name
+                ),
+                force=force,
+            )
+            if longform_plan is None:
+                from . import video_projects
+                return video_projects.get_project(project_id, db)
+            raw_plan = longform_plan
+        except VideoPlanningValidationError:
+            raise
+        except LongFormPlanningError as exc:
+            raise VideoPlanningValidationError(str(exc)) from exc
     try:
-        raw_plan = _run_structured_codex(db, project, prompt, STORY_DEVELOPMENT_SCHEMA, step_name="story_development")
+        if raw_plan is None:
+            raw_plan = _run_structured_codex(db, project, prompt, STORY_DEVELOPMENT_SCHEMA, step_name="story_development")
         normalized_plan = _normalize_story_development_payload(raw_plan)
         plan = StoryDevelopmentPlan.model_validate(normalized_plan)
         retention_quality = _validate_story_creative_output(raw_plan, plan, project)
@@ -3058,6 +3316,7 @@ def _shot_retention_metadata(shot: ShotPlan) -> dict[str, Any]:
         "visual_surprise": shot.visual_surprise or "Use a visual change before the shot feels static.",
         "cut_reason": shot.cut_reason or "Cut on action, emotion, narration, or sound cue.",
         "visible_characters": _json_safe(shot.visible_characters),
+        **({"source_visual": shot.source_visual.model_dump()} if shot.source_visual else {}),
     }
 
 def _model_dump(value: BaseModel | dict | None) -> dict:
@@ -3177,6 +3436,7 @@ def generate_shots(project_id: str, db: Session) -> list[models.VideoShotRespons
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is None:
         return None
+    video_longform_workflow.require_ready(project, db)
     if not project.story_approved:
         raise VideoPlanningValidationError("Cần duyệt kịch bản trước khi tạo shot.")
     scenes = _ordered_scenes(project_id, db)
@@ -3298,7 +3558,7 @@ Yêu cầu bắt buộc:
             _fit_micro_scenes_to_config(shot, project, shot_order=index)
         _finalize_shot_creative_direction(plan.shots)
         sound_fallback_fields = _shot_sound_fallback_fields(raw_plan)
-        _validate_shot_creative_output(raw_plan, plan)
+        _validate_shot_creative_output(raw_plan, plan, project)
         _validate_shot_micro_scene_output(plan, project)
     except ai_planning.AIPlanningError as exc:
         if not _phase2_should_use_provider_fallback(exc):
@@ -3322,7 +3582,7 @@ Yêu cầu bắt buộc:
             _fit_micro_scenes_to_config(shot, project, shot_order=index)
         _finalize_shot_creative_direction(plan.shots)
         sound_fallback_fields = []
-        _validate_shot_creative_output(raw_plan, plan)
+        _validate_shot_creative_output(raw_plan, plan, project)
         _validate_shot_micro_scene_output(plan, project)
         video_observability.log_event(
             db,
@@ -3369,6 +3629,7 @@ Yêu cầu bắt buộc:
             message=str(exc),
         )
         raise
+    _bind_source_visuals(plan.shots, project, db)
     if not validate_shot_variation(plan.shots) and target_segment_count is not None:
         enriched = _enrich_segment_shot_variation(plan.shots)
         video_observability.log_event(
@@ -3472,6 +3733,15 @@ def update_shot(project_id: str, shot_id: str, data: models.VideoShotUpdate, db:
     if shot is None:
         return None
     changed = data.model_dump(exclude_unset=True)
+    previous_source_visual = (shot.retention_json or {}).get("source_visual")
+    next_source_visual = (changed.get("retention_json") or {}).get("source_visual") if "retention_json" in changed else previous_source_visual
+    if next_source_visual:
+        try:
+            video_source_visuals.validate_selection(next_source_visual, video_source_visuals.list_assets(project_id, db))
+        except video_source_visuals.SourceVisualError as exc:
+            raise VideoPlanningValidationError(str(exc)) from exc
+    if next_source_visual != previous_source_visual or ("duration_seconds" in changed and changed["duration_seconds"] != shot.duration_seconds):
+        db.query(DBVideoShotClip).filter(DBVideoShotClip.project_id == project_id, DBVideoShotClip.shot_id == shot_id, DBVideoShotClip.source == "screenshot", DBVideoShotClip.is_active.is_(True), DBVideoShotClip.status == "ready").update({"status": "stale"}, synchronize_session=False)
     for key, value in changed.items():
         if key == "micro_scenes":
             shot.micro_scenes_json = value or []
@@ -3586,6 +3856,9 @@ def speech_prompt_quality(project: DBVideoProject, shot: DBVideoShot, content: s
     return {"passed": present, "needs_review": required and not present, "reason_vi": None if present else f"Shot {getattr(shot, 'shot_order', '?')} có lời thoại nhưng prompt chưa chứa đúng câu thoại."}
 
 def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, duration_seconds: float) -> str:
+    if video_source_visuals.preserves_source(project):
+        selection = (shot.retention_json or {}).get("source_visual") or {}
+        return f"Edit the original screenshot for {duration_seconds:g} seconds in {project.aspect_ratio}. Source selection: {json.dumps(selection, ensure_ascii=False)}. {video_source_visuals.PROMPT_RULE}"
     config = _resolve_prompt_segment_config(project)
     if config.segment_count is None:
         return ""
@@ -3597,6 +3870,11 @@ def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, durati
             "any remaining generated time should be a clean hold or gentle extension for trimming."
         )
     micro_timeline = _micro_scene_timeline_text(shot.micro_scenes_json or [])
+    stick_figure_rule = (
+        f"\n{_STICK_FIGURE_PROMPT_RULE}\n"
+        if _project_requests_stick_figure(project)
+        else ""
+    )
     return (
         f"Create a {config.prompt_duration_seconds}-second {project.aspect_ratio} high-quality stylized 3D cinematic animation video.\n"
         f"This is segment {shot.shot_order} of {config.segment_count} of a {config.target_duration_seconds or project.target_duration_seconds}-second video "
@@ -3607,6 +3885,7 @@ def _segment_prompt_prefix(project: DBVideoProject, shot: DBVideoShot, *, durati
         f"{video_series_characters.segment_continuity_rule(project)}\n"
         "Animation and text-safe rule: align visible action beats with the usable duration, use clear entry/hold/exit motion, "
         "and do not render subtitles, captions, karaoke lyrics, text overlays, letters, words, UI text, logos, or watermarks.\n"
+        f"{stick_figure_rule}"
         f"Segment structure: use exactly {config.micro_scenes_per_prompt} connected micro-scenes inside this one prompt, all serving one primary visual action.\n"
         f"Micro-scene timeline:\n{micro_timeline}"
     )
@@ -3631,6 +3910,8 @@ def _segment_aware_prompt_text(item: VideoPromptPlan, shot: DBVideoShot, project
 def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoProject) -> str:
     duration_seconds = _clamp_shot_duration(prompt.duration_seconds or shot.duration_seconds, project, shot_order=shot.shot_order)
     prompt_text = _segment_aware_prompt_text(prompt, shot, project, duration_seconds=duration_seconds)
+    if _project_requests_stick_figure(project) and _STICK_FIGURE_PROMPT_RULE.casefold() not in prompt_text.casefold():
+        prompt_text = f"{prompt_text}\n{_STICK_FIGURE_PROMPT_RULE}".strip()
     segment_count = _target_prompt_segment_count(project)
     visible_characters = []
     if isinstance(shot.retention_json, dict) and isinstance(shot.retention_json.get("visible_characters"), list):
@@ -3668,8 +3949,14 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
         ]
     else:
         parts[3:3] = [f"Duration: {duration_seconds} seconds"]
-    if prompt.negative_prompt.strip():
-        parts.extend(["", "Negative prompt:", prompt.negative_prompt.strip()])
+    negative_prompt = _render_safe_video_negative_prompt_text(
+        prompt.negative_prompt,
+        prompt_text,
+        force_stick_figure=_project_requests_stick_figure(project),
+        preserve_source=video_source_visuals.preserves_source(project),
+    )
+    if negative_prompt.strip():
+        parts.extend(["", "Negative prompt:", negative_prompt])
     if prompt.prompt_explanation_vi.strip():
         parts.extend(["", "Bản giải thích tiếng Việt:", prompt.prompt_explanation_vi.strip()])
     # Compose the audio policy at read time so manual Veo copy/download and
@@ -3678,7 +3965,7 @@ def _prompt_text(prompt: VideoPromptPlan, shot: DBVideoShot, project: DBVideoPro
     if mode:
         contract = video_speech.build_provider_prompt(
             "", mode, video_speech.speech_cues_for_shot(shot, project),
-            prompt.negative_prompt, prompt.continuity_notes,
+            negative_prompt, prompt.continuity_notes,
         )
         parts.extend(["", contract["audio_contract"]])
     return "\n".join(part for part in parts if part is not None).strip() + "\n"
@@ -3729,6 +4016,7 @@ def generate_video_prompt_pack(project_id: str, db: Session) -> models.VideoShot
     project = db.query(DBVideoProject).filter(DBVideoProject.id == project_id).first()
     if project is None:
         return None
+    video_longform_workflow.require_ready(project, db)
     shots = [shot for shot in ordered_shots(project_id, db) if not shot.locked or shot.prompt_status != "completed"]
     if not shots:
         shots = ordered_shots(project_id, db)
@@ -3755,10 +4043,16 @@ def generate_video_prompt_pack(project_id: str, db: Session) -> models.VideoShot
         f"- Mỗi main prompt phải bắt đầu hoặc nêu rõ: Create a {segment_config.prompt_duration_seconds}-second {project.aspect_ratio} high-quality stylized 3D cinematic animation video.\n"
         f"- Mỗi prompt phải nhắc `This is segment X of N` và {segment_continuity_requirement}\n"
         f"- Mỗi prompt phải có timeline rõ ràng với đúng {segment_config.micro_scenes_per_prompt} micro-scene liên tục trong một clip {segment_config.prompt_duration_seconds}s, khớp micro_scenes đã liệt kê.\n"
-        "- Cuối mỗi prompt phải có transition sang segment tiếp theo; segment cuối giữ final composition hoặc CTA.\n"
+        "- Cuối mỗi prompt phải có transition sang segment tiếp theo; segment cuối giữ final composition hoặc CTA. Nếu có CTA, CTA phải nối tiếp hành động/cảm xúc của final beat và dùng đúng một viewer action đã chọn; không dùng gesture mạng xã hội chung chung.\n"
         f"- Nếu segment cuối có usable_duration dưới {segment_config.prompt_duration_seconds}s, prompt vẫn tạo clip {segment_config.prompt_duration_seconds}s nhưng phần usable phải nằm ở đầu clip để render có thể trim phần dư."
         if target_segment_count is not None
         else "- Mỗi prompt ứng với một shot đã duyệt."
+    )
+    stick_figure_generation_requirement = (
+        f"- Đây là yêu cầu người que đúng nghĩa. Bắt buộc giữ anatomy lock sau trong mọi prompt: {_STICK_FIGURE_PROMPT_RULE}\n"
+        f"- Negative prompt phải chặn các lỗi giải phẫu người que: {_STICK_FIGURE_NEGATIVE_RULE}."
+        if _project_requests_stick_figure(project)
+        else ""
     )
     reference_package: dict[str, Any] = {"reference_assets": [], "reference_asset_ids": [], "provider_report": {}}
     reference_instruction = ""
@@ -3800,6 +4094,7 @@ Yêu cầu bắt buộc:
 - Prompt phải là prompt tạo video, không phải prompt ảnh.
 - Không nhắc Runway, Kling, Veo, Pika, Luma hoặc provider cụ thể.
 {segment_prompt_requirements}
+{stick_figure_generation_requirement}
 - Tất cả prompt video phải ưu tiên high-quality stylized 3D/cinematic 3D animation: nhân vật có khối, chiều sâu, volumetric lighting, vật liệu có độ dày, parallax và camera movement thật.
 - Nếu source là truyện tranh, webtoon, manga, ảnh, illustration hoặc reference 2D thì chỉ dùng làm căn cứ visual/canon và phải chuyển hóa thành 3D animated video look; không giữ dạng flat 2D illustration, comic panel, storyboard frame hoặc static image.
 - Mỗi prompt có đủ duration, aspect ratio, subject/action, shot type, camera angle, framing, composition, camera movement, subject motion, environment motion, lighting, mood, start frame, end frame, continuity notes.
@@ -3822,6 +4117,16 @@ Yêu cầu bắt buộc:
 - Không dùng tool/command, không đọc file trong project, không giải thích quá trình; schema đã được truyền qua output_schema.
 - Chỉ trả về đúng JSON theo schema, không thêm markdown.
 """.strip()
+    if video_source_visuals.preserves_source(project):
+        prompt = f"""Viết kế hoạch dựng video từ screenshot gốc theo schema VideoPromptPackPlan.
+{_project_context(project, db)}
+Shot cần dựng: {batch_shot_token}
+Tạo đúng {batch_count_token} prompt, mỗi prompt dùng đúng shot_order đã liệt kê và source_visual của shot.
+{video_source_visuals.PROMPT_RULE}
+Mô tả crop/zoom/highlight, duration, aspect ratio, retention_notes, transition_notes và sound_design_notes.
+Không tạo nhân vật, không tái tạo UI/code/chữ, không đổi screenshot thành 3D. Negative prompt chặn chữ/code bịa và sửa nguồn.
+prompt_explanation_vi bằng tiếng Việt. Voicebox và phụ đề ghép ở hậu kỳ; âm thanh/SFX là chỉ dẫn editor cho tới khi có asset.
+Chỉ dùng repository_facts cho nhận định. Không tool/command. Chỉ trả JSON theo schema."""
     raw_pack: dict | None = None
     normalized_pack: dict | None = None
     batch_raw_items: list[dict] = []
@@ -4324,6 +4629,7 @@ Shot trả về phải có retention_role, open_loop, visual_surprise, cut_reaso
         raise VideoPlanningValidationError("AI không trả về shot để cập nhật.")
     _finalize_shot_creative_direction(plan.shots)
     item = plan.shots[0]
+    _bind_source_visuals([item], project, db)
     current_ordered_shots = ordered_shots(project_id, db)
     is_final_shot = bool(current_ordered_shots and current_ordered_shots[-1].id == shot.id)
     quality = _shot_retainability_quality(item, is_first=shot.shot_order == 1, is_final=is_final_shot)

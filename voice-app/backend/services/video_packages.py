@@ -333,6 +333,7 @@ def _manifest(project: DBVideoProject, scenes: list[DBVideoScene], db: Session) 
         dialogue_mode=video_purpose.normalize_dialogue_mode(getattr(project, "dialogue_mode", None), purpose=getattr(project, "video_purpose", None)),
         narration_density=video_purpose.normalize_narration_density(getattr(project, "narration_density", None), purpose=getattr(project, "video_purpose", None)),
         call_to_action_style=getattr(project, "call_to_action_style", None),
+        cta_action=getattr(project, "cta_action", None),
         aspect_ratio=project.aspect_ratio,
         subtitle_filename=video_storage.subtitle_filename(project.title),
         scenes=manifest_scenes,

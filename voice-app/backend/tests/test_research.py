@@ -351,7 +351,7 @@ def test_ai_scoring_uses_script_text_and_keeps_filtered_usage_metadata(db, monke
             },
         )
 
-    monkeypatch.setattr(research_ai, "run_research", fake_run)
+    monkeypatch.setattr(research_ai, "run_content", lambda prompt, settings, **kwargs: fake_run(prompt, **kwargs))
     score = research.score_target(
         project.id,
         models.ResearchScoreRequest(target_type="script", target_id=script.id, run_ai=True),
@@ -407,22 +407,22 @@ def test_completed_run_materializes_candidate_ideas_without_approving_them(db):
 def test_both_mode_uses_research_cli_for_research_and_keeps_provider_metadata(db, monkeypatch):
     project = research.create_project(models.ResearchProjectCreate(title="Provider split"), db)
 
-    def fake_research(prompt: str, *, timeout_seconds: int):
-        assert "nghiên cứu" in prompt.lower()
+    def fake_content(prompt: str, _settings, *, timeout_seconds: int, tools=None, effort=None):
+        role = "research" if tools is None else "creative"
         return research_ai.ResearchCLIResult(
-            output='{"options": [{"title": "Bằng chứng", "summary": "Từ tài liệu", "originality": 8, "feasibility": 8}]}',
-            metadata={"model": "research-test", "usage": {"input_tokens": 10, "output_tokens": 20}, "total_cost_usd": 0.01},
+            output=(
+                '{"options": [{"title": "Bằng chứng", "summary": "Từ tài liệu", "originality": 8, "feasibility": 8}]}'
+                if role == "research"
+                else '{"options": [{"title": "Kịch bản", "summary": "Từ creative", "originality": 7, "feasibility": 8}]}'
+            ),
+            metadata=(
+                {"model": "research-test", "usage": {"input_tokens": 10, "output_tokens": 20}, "total_cost_usd": 0.01}
+                if role == "research"
+                else {"effective_model": "creative-test"}
+            ),
         )
 
-    monkeypatch.setattr(research.research_ai, "run_research", fake_research)
-    monkeypatch.setattr(
-        research.ai_planning,
-        "run_codex_exec",
-        lambda *args, **kwargs: research.ai_planning.CodexExecResult(
-            output='{"options": [{"title": "Kịch bản", "summary": "Từ creative", "originality": 7, "feasibility": 8}]}',
-            metadata={"effective_model": "creative-test"},
-        ),
-    )
+    monkeypatch.setattr(research.research_ai, "run_content", fake_content)
 
     run = research.create_run(project.id, models.ResearchRunCreate(mode="both"), db)
 
@@ -445,24 +445,23 @@ def test_research_run_chat_and_score_honor_configured_timeout_above_180_seconds(
     research.settings_service.update_ai_planning_settings(db, {"timeout_seconds": 420})
     calls: list[tuple[str, int]] = []
 
-    def fake_research(prompt: str, *, timeout_seconds: int, tools=None, **_kwargs):
-        calls.append(("research", timeout_seconds))
+    def fake_content(prompt: str, _settings, *, timeout_seconds: int, tools=None, effort=None):
+        if "phản biện continuity" in prompt:
+            role = "research"
+        elif "viết cấu trúc sản xuất" in prompt:
+            role = "creative"
+        elif "hội đồng đánh giá" in prompt:
+            role = "score"
+        else:
+            role = "research" if tools is None else "creative"
+        calls.append((role, timeout_seconds))
         if "khóa options" in prompt:
             output = '{"options": [{"title": "Tập tiếp theo", "summary": "Giữ canon Người Que"}]}'
         else:
             output = '{"draft": "Bản phản biện continuity", "continuity": {"open_loop": "Tín hiệu trong rừng"}}'
-        return research_ai.ResearchCLIResult(output=output, metadata={"model": "research-test"})
+        return research_ai.ResearchCLIResult(output=output, metadata={"model": f"{role}-test"})
 
-    def fake_codex(_settings, prompt: str, *, timeout_seconds: int, return_metadata: bool):
-        calls.append(("creative", timeout_seconds))
-        if "khóa options" in prompt:
-            output = '{"options": [{"title": "Tập tiếp theo", "summary": "Giữ canon Người Que"}]}'
-        else:
-            output = '{"draft": "Bản phát triển Người Que", "continuity": {"open_loop": "Tín hiệu trong rừng"}}'
-        return research.ai_planning.CodexExecResult(output=output, metadata={"effective_model": "creative-test"})
-
-    monkeypatch.setattr(research.research_ai, "run_research", fake_research)
-    monkeypatch.setattr(research.ai_planning, "run_codex_exec", fake_codex)
+    monkeypatch.setattr(research.research_ai, "run_content", fake_content)
 
     run = research.create_run(project.id, models.ResearchRunCreate(mode="both"), db)
     assert run.status == "completed"
@@ -495,7 +494,7 @@ def test_research_run_chat_and_score_honor_configured_timeout_above_180_seconds(
         models.ResearchScoreRequest(target_type="idea", target_id=idea.id, run_ai=True),
         db,
     )
-    assert calls == [("research", 420)]
+    assert calls == [("score", 420)]
 
 
 def test_handoff_creates_ai_video_project_without_running_plan(db):
@@ -1081,18 +1080,15 @@ def test_media_adapters_project_upstream_packages_without_duplicate_revision(db)
 def test_both_mode_isolates_failed_attempt_and_merge_keeps_success(db, monkeypatch):
     project = research.create_project(models.ResearchProjectCreate(title="Hai attempt"), db)
 
-    def failed_research(_prompt: str, *, timeout_seconds: int):
+    def failed_content(_prompt: str, _settings, *, timeout_seconds: int, tools=None, effort=None):
+        if tools is not None:
+            return research_ai.ResearchCLIResult(
+                output='{"options": [{"title": "Creative còn lại", "summary": "Kết quả vẫn dùng được", "originality": 8, "feasibility": 8}]}',
+                metadata={"effective_model": "creative-test"},
+            )
         raise research_ai.ResearchCLIError("Research timeout", error_code="RESEARCH_TIMEOUT")
 
-    monkeypatch.setattr(research.research_ai, "run_research", failed_research)
-    monkeypatch.setattr(
-        research.ai_planning,
-        "run_codex_exec",
-        lambda *args, **kwargs: research.ai_planning.CodexExecResult(
-            output='{"options": [{"title": "Creative còn lại", "summary": "Kết quả vẫn dùng được", "originality": 8, "feasibility": 8}]}',
-            metadata={"effective_model": "creative-test"},
-        ),
-    )
+    monkeypatch.setattr(research.research_ai, "run_content", failed_content)
     run = research.create_run(project.id, models.ResearchRunCreate(mode="both"), db)
     assert run.status == "partial"
     assert run.output["attempts"]["research"]["status"] == "failed"
@@ -1105,7 +1101,7 @@ def test_route_cancel_drops_late_provider_output_without_promoting_options(db, m
     started = threading.Event()
     release = threading.Event()
 
-    def slow_research(_prompt: str, *, timeout_seconds: int):
+    def slow_content(_prompt: str, _settings, *, timeout_seconds: int, tools=None, effort=None):
         started.set()
         assert release.wait(timeout=5)
         return research_ai.ResearchCLIResult(
@@ -1113,7 +1109,7 @@ def test_route_cancel_drops_late_provider_output_without_promoting_options(db, m
             metadata={"model": "fixture-slow"},
         )
 
-    monkeypatch.setattr(research.research_ai, "run_research", slow_research)
+    monkeypatch.setattr(research.research_ai, "run_content", slow_content)
     app = FastAPI()
     app.include_router(research_router)
     with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as executor:

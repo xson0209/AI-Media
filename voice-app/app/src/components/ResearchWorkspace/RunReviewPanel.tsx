@@ -132,10 +132,22 @@ export function RunReviewPanel({ projectId, selectedProjectIds, runs, ideas, onN
               {!activeRun.output.options?.length && <div className="border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Chưa có phương án hợp nhất để review.</div>}
             </TabsContent>
           </Tabs>
+          {activeRun.output.repository_study && typeof activeRun.output.repository_study === 'object' ? <StudyReview study={activeRun.output.repository_study as Record<string, unknown>} /> : null}
         </section>
       )}
     </div>
   );
+}
+
+function StudyReview({ study }: { study: Record<string, unknown> }) {
+  const facts = Array.isArray(study.facts) ? study.facts : [];
+  const openQuestions = Array.isArray(study.open_questions) ? study.open_questions : [];
+  return <div className="mt-4 border border-primary/30 bg-primary/5 p-3">
+    <div className="flex flex-wrap items-center gap-2"><Badge>Fact preflight</Badge><span className="text-sm font-medium">Nguồn đã được đọc trước khi sáng tạo</span></div>
+    <p className="mt-1 text-sm leading-6 text-muted-foreground">{String(study.summary || '')}</p>
+    <div className="mt-3 space-y-2">{facts.slice(0, 12).map((fact, index) => { const value = typeof fact === 'object' && fact ? fact as Record<string, unknown> : {}; return <div key={String(value.id || index)} className="border border-border bg-background px-3 py-2 text-sm"><div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{String(value.verification || 'reviewed')}</Badge><span className="font-medium">{String(value.id || `fact-${index + 1}`)}</span></div><p className="mt-1 leading-6">{String(value.statement || '')}</p><p className="mt-1 text-xs text-muted-foreground">Bằng chứng: {Array.isArray(value.evidence) ? value.evidence.map((item) => typeof item === 'object' && item ? String((item as Record<string, unknown>).id || '') : '').filter(Boolean).join(', ') : '—'}</p></div>; })}</div>
+    {openQuestions.length ? <p className="mt-2 text-xs leading-5 text-amber-700 dark:text-amber-300">Câu hỏi còn mở: {openQuestions.map(String).join(' · ')}</p> : null}
+  </div>;
 }
 
 function AttemptReview({ attempt, emptyLabel }: { attempt?: { status: string; output: { options?: Array<Record<string, unknown>>; [key: string]: unknown }; error_code?: string | null; error_message?: string | null; duration_ms: number }; emptyLabel: string }) {

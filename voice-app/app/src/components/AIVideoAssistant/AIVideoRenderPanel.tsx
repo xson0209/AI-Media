@@ -10,6 +10,7 @@ import type {
   VideoRenderSettings,
   VideoRenderSfxAssetResponse,
   VideoRenderWatermarkBackendStatus,
+  VideoSourceVisualAsset,
   VideoShotClipBatchResult,
   VideoShotResponse,
 } from '@/lib/api/types';
@@ -136,6 +137,7 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
   const [batchPlan, setBatchPlan] = useState<ClipBatchPlan<File, VideoShotResponse> | null>(null);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [batchResult, setBatchResult] = useState<VideoShotClipBatchResult | null>(null);
+  const [sourceSelections, setSourceSelections] = useState<Record<string, { asset_id: string; region_id?: string; motion: 'hold' | 'zoom'; highlight: boolean }>>({});
   const usesVeoNativeVietnameseSpeech = speechSource
     ? speechSource === 'veo_narration' || speechSource === 'veo_dialogue'
     : targetLanguage === 'vi';
@@ -187,10 +189,18 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
     retry: false,
   });
 
+  const sourceVisualsQuery = useQuery({
+    queryKey: ['ai-video', 'source-visuals', projectId],
+    queryFn: () => apiClient.listVideoSourceVisuals(projectId!, apiPrefix),
+    enabled: !!projectId,
+    retry: false,
+  });
+
   const invalidateRender = () => {
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'render'] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'shot-clip'] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'render-sfx-assets', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['ai-video', 'source-visuals', projectId] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'render-job-latest', projectId] });
     queryClient.invalidateQueries({ queryKey: ['ai-video', 'debug', projectId] });
   };
@@ -237,6 +247,14 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
     mutationFn: (shot: VideoShotResponse) => apiClient.deleteVideoShotClip(shot.project_id, shot.id, apiPrefix),
     onSuccess: (_, shot) => {
       onNotice(`Đã xóa clip video của ${shotLabel(shot)}.`);
+      invalidateRender();
+    },
+  });
+
+  const createScreenshotClip = useMutation({
+    mutationFn: ({ shot, selection }: { shot: VideoShotResponse; selection: { asset_id: string; region_id?: string; motion: 'hold' | 'zoom'; highlight: boolean } }) => apiClient.createVideoScreenshotClip(projectId!, shot.id, selection, apiPrefix),
+    onSuccess: (_, { shot }) => {
+      onNotice(`Đã dựng clip từ screenshot gốc cho ${shotLabel(shot)}; chữ/code trong ảnh được giữ nguyên.`);
       invalidateRender();
     },
   });
@@ -289,7 +307,8 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
   const busy = latestJob?.status === 'queued' || latestJob?.status === 'running';
   const reviewArtifact = latestJob?.enhanced_artifacts_json?.items?.find((item) => item.kind === 'ai_review_report');
   const manifestArtifact = latestJob?.enhanced_artifacts_json?.items?.find((item) => item.kind === 'timeline_manifest');
-  const operationError = uploadClip.error || importBatch.error || deleteClip.error || uploadSfxAsset.error || deleteSfxAsset.error || createRender.error;
+  const sourceVisuals = sourceVisualsQuery.data ?? [];
+  const operationError = uploadClip.error || importBatch.error || deleteClip.error || createScreenshotClip.error || uploadSfxAsset.error || deleteSfxAsset.error || createRender.error;
 
   if (!projectId) {
     return (
@@ -319,6 +338,8 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
             onDismissResult={() => setBatchResult(null)}
           />
         ) : null}
+
+        {sourceVisuals.length ? <SourceVisualSummary assets={sourceVisuals} projectId={projectId} apiPrefix={apiPrefix} /> : null}
 
         {shots.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
@@ -473,6 +494,14 @@ export function AIVideoRenderPanel({ projectId, shots, targetLanguage, apiPrefix
                       {deleteClip.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       Xóa clip video
                     </Button>
+                    {sourceVisuals.length ? <SourceVisualButton
+                      shot={shot}
+                      assets={sourceVisuals}
+                      selection={sourceSelections[shot.id]}
+                      onSelectionChange={(selection) => setSourceSelections((current) => ({ ...current, [shot.id]: selection }))}
+                      busy={createScreenshotClip.isPending}
+                      onCreate={(selection) => createScreenshotClip.mutate({ shot, selection })}
+                    /> : null}
                   </div>
                 </div>
               );
@@ -789,6 +818,33 @@ interface ClipBatchImportProps {
  * shot already holds, so one wrong folder would silently replace every clip that was
  * already correct; the confirm step turns that into a harmless mistake.
  */
+function SourceVisualSummary({ assets, projectId, apiPrefix }: { assets: VideoSourceVisualAsset[]; projectId: string; apiPrefix: string }) {
+  return <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+    <div className="flex items-center gap-2 text-sm font-semibold"><Layers className="h-4 w-4" /> Screenshot/code gốc đã chuyển sang AI Video</div>
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">Chọn ảnh và vùng bên dưới để dựng crop/zoom/highlight bằng FFmpeg. Ảnh, chữ và code gốc không bị AI vẽ lại.</p>
+    <div className="mt-2 flex gap-2 overflow-x-auto pb-1">{assets.map((asset) => <img key={asset.id} src={apiClient.getVideoSourceVisualUrl(projectId, asset.id, apiPrefix)} alt={`Screenshot ${asset.id}`} className="h-16 w-28 rounded border border-border object-cover" loading="lazy" />)}</div>
+  </div>;
+}
+
+function SourceVisualButton({ shot, assets, selection, onSelectionChange, busy, onCreate }: { shot: VideoShotResponse; assets: VideoSourceVisualAsset[]; selection?: { asset_id: string; region_id?: string; motion: 'hold' | 'zoom'; highlight: boolean }; onSelectionChange: (selection: { asset_id: string; region_id?: string; motion: 'hold' | 'zoom'; highlight: boolean }) => void; busy: boolean; onCreate: (selection: { asset_id: string; region_id?: string; motion: 'hold' | 'zoom'; highlight: boolean }) => void }) {
+  const current = selection ?? { asset_id: assets[0].id, region_id: assets[0].regions[0]?.id, motion: 'hold' as const, highlight: Boolean(assets[0].regions[0]) };
+  const asset = assets.find((item) => item.id === current.asset_id) ?? assets[0];
+  return <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+    <p className="text-xs font-medium">Dựng từ screenshot gốc</p>
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <select aria-label={`${shotLabel(shot)} screenshot`} className="min-h-9 rounded-md border border-input bg-background px-2 text-xs" value={current.asset_id} onChange={(event) => { const next = assets.find((item) => item.id === event.target.value) ?? assets[0]; onSelectionChange({ ...current, asset_id: next.id, region_id: next.regions[0]?.id, highlight: Boolean(next.regions[0]) }); }}>
+        {assets.map((item) => <option key={item.id} value={item.id}>{item.id}</option>)}
+      </select>
+      <select aria-label={`${shotLabel(shot)} vùng screenshot`} className="min-h-9 rounded-md border border-input bg-background px-2 text-xs" value={current.region_id ?? ''} onChange={(event) => onSelectionChange({ ...current, region_id: event.target.value || undefined, highlight: Boolean(event.target.value) })}>
+        <option value="">Toàn ảnh</option>
+        {asset.regions.map((region) => <option key={region.id} value={region.id}>{region.label || region.id}</option>)}
+      </select>
+      <select aria-label={`${shotLabel(shot)} chuyển động screenshot`} className="min-h-9 rounded-md border border-input bg-background px-2 text-xs" value={current.motion} onChange={(event) => onSelectionChange({ ...current, motion: event.target.value as 'hold' | 'zoom' })}><option value="hold">Giữ khung</option><option value="zoom">Zoom nhẹ</option></select>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => onCreate(current)}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />} Dựng clip gốc</Button>
+    </div>
+  </div>;
+}
+
 function ClipBatchImport({
   plan,
   progress,

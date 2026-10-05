@@ -34,6 +34,9 @@ import type {
   ComicAnalysisPackage,
   ComicJobListResponse,
   ComicUrlJobRequest,
+  ContentProfileOptionsResponse,
+  ContentToolsGenerateRequest,
+  ContentToolsGenerateResponse,
   CaptureListResponse,
   CaptureReadinessResponse,
   CaptureRefineRequest,
@@ -652,6 +655,16 @@ class ApiClient {
     return response.json();
   }
 
+  // Content Tools
+  async generateContentTool(
+    data: ContentToolsGenerateRequest,
+  ): Promise<ContentToolsGenerateResponse> {
+    return this.request<ContentToolsGenerateResponse>('/content-tools/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Video Inspiration
   async listVideoInspirationJobs(limit = 20, offset = 0): Promise<VideoInspirationListResponse> {
     return this.request<VideoInspirationListResponse>(
@@ -1016,6 +1029,10 @@ class ApiClient {
 
   async listVideoProjects(): Promise<VideoProjectResponse[]> {
     return this.request<VideoProjectResponse[]>('/ai-video/projects');
+  }
+
+  async getContentProfileOptions(): Promise<ContentProfileOptionsResponse> {
+    return this.request<ContentProfileOptionsResponse>('/ai-video/content-profile/options');
   }
 
   async listNewsVideoProjects(): Promise<VideoProjectResponse[]> {
@@ -2184,6 +2201,13 @@ class ApiClient {
     });
   }
 
+  async approveVideoStoryOutline(projectId: string, approved: boolean): Promise<VideoProjectDetailResponse> {
+    return this.request<VideoProjectDetailResponse>(`/ai-video/projects/${projectId}/story/outline/approval`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    });
+  }
+
   async generateVideoShots(projectId: string): Promise<VideoShotResponse[]> {
     return this.request<VideoShotResponse[]>(`/ai-video/projects/${projectId}/shots`, {
       method: 'POST',
@@ -2290,6 +2314,18 @@ class ApiClient {
     return this.request<VideoShotClipResponse | null>(
       `${routePrefix}/projects/${projectId}/shots/${shotId}/clip`,
     );
+  }
+
+  async listVideoSourceVisuals(projectId: string, routePrefix = '/ai-video'): Promise<import('./types').VideoSourceVisualAsset[]> {
+    return this.request<import('./types').VideoSourceVisualAsset[]>(`${routePrefix}/projects/${projectId}/source-visuals`);
+  }
+
+  getVideoSourceVisualUrl(projectId: string, assetId: string, routePrefix = '/ai-video'): string {
+    return `${this.getBaseUrl()}${routePrefix}/projects/${projectId}/source-visuals/${assetId}/image`;
+  }
+
+  async createVideoScreenshotClip(projectId: string, shotId: string, data: { asset_id: string; region_id?: string; motion?: 'hold' | 'zoom'; highlight?: boolean; resolution?: '720p' | '1080p' }, routePrefix = '/ai-video'): Promise<VideoShotClipResponse> {
+    return this.request<VideoShotClipResponse>(`${routePrefix}/projects/${projectId}/shots/${shotId}/screenshot-clip`, { method: 'POST', body: JSON.stringify(data) });
   }
 
   getVideoShotClipDownloadUrl(projectId: string, shotId: string, routePrefix = '/ai-video'): string {
@@ -3130,7 +3166,7 @@ class ApiClient {
     return this.request<ResearchSourceResponse>(`/research/projects/${projectId}/sources/${sourceId}`);
   }
 
-  async addResearchTextSource(projectId: string, data: { source_type: string; title?: string; content?: string; input_url?: string }): Promise<ResearchSourceResponse> {
+  async addResearchTextSource(projectId: string, data: { source_type: string; title?: string; content?: string; input_url?: string; repository_ref?: string }): Promise<ResearchSourceResponse> {
     return this.request<ResearchSourceResponse>(`/research/projects/${projectId}/sources`, { method: 'POST', body: JSON.stringify(data) });
   }
 
@@ -3144,10 +3180,12 @@ class ApiClient {
     });
   }
 
-  async uploadResearchSource(projectId: string, sourceType: string, file: File, title?: string): Promise<ResearchSourceResponse> {
+  async uploadResearchSource(projectId: string, sourceType: string, file: File, title?: string, options?: { repository_url?: string; repository_ref?: string }): Promise<ResearchSourceResponse> {
     const form = new FormData();
     form.append('source_type', sourceType);
     if (title) form.append('title', title);
+    if (options?.repository_url) form.append('repository_url', options.repository_url);
+    if (options?.repository_ref) form.append('repository_ref', options.repository_ref);
     form.append('file', file);
     return this.request<ResearchSourceResponse>(`/research/projects/${projectId}/sources/upload`, { method: 'POST', body: form });
   }
@@ -3258,7 +3296,7 @@ class ApiClient {
     });
   }
 
-  async handoffResearchToAIVideo(projectId: string, data: { accepted_idea_ids?: string[]; accepted_script_ids?: string[]; selected_target_id?: string; selection_source?: 'user_override' | 'ai' | 'none'; title?: string; target_language?: string; target_duration_seconds?: number; aspect_ratio?: '9:16' | '16:9' | '1:1'; idempotency_key?: string }): Promise<ResearchHandoffResponse> {
+  async handoffResearchToAIVideo(projectId: string, data: { accepted_idea_ids?: string[]; accepted_script_ids?: string[]; selected_target_id?: string; selection_source?: 'user_override' | 'ai' | 'none'; title?: string; target_language?: string; target_duration_seconds?: number; aspect_ratio?: '9:16' | '16:9' | '1:1'; content_genre?: import('./types').ContentGenre; idempotency_key?: string }): Promise<ResearchHandoffResponse> {
     return this.request<ResearchHandoffResponse>(`/research/projects/${projectId}/handoffs/ai-video`, { method: 'POST', body: JSON.stringify(data) });
   }
 

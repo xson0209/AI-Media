@@ -12,6 +12,7 @@ import type {
   ResearchRecommendationResponse,
   ResearchScoreResponse,
   ResearchScriptResponse,
+  ContentGenre,
 } from '@/lib/api/types';
 
 type ResearchVideoAspectRatio = '9:16' | '16:9' | '1:1';
@@ -78,12 +79,14 @@ export function HandoffDialog({ projectId, projectTitle, projectRevision, ideas,
   const [title, setTitle] = useState(projectTitle);
   const [duration, setDuration] = useState('180');
   const [aspectRatio, setAspectRatio] = useState<ResearchVideoAspectRatio>('9:16');
+  const [contentGenre, setContentGenre] = useState<ContentGenre>('general');
 
   useEffect(() => {
     if (!open) return;
     setTitle(projectTitle);
     setDuration('180');
     setAspectRatio('9:16');
+    setContentGenre(ideas.some((idea) => Boolean(idea.content?.repository_study)) || scripts.some((script) => Boolean(script.content_json?.repository_study)) ? 'developer_explainer' : 'general');
     const recommendedTargetId = recommendationTargetIds.find((targetId) => eligibleTargetIds.has(targetId));
     setSelectedTargetId(recommendedTargetId ?? eligibleTargets[0]?.id ?? '');
     setSelectionTouched(false);
@@ -103,7 +106,8 @@ export function HandoffDialog({ projectId, projectTitle, projectRevision, ideas,
       target_language: 'vi',
       target_duration_seconds: Math.max(1, Math.min(3600, Number(duration) || 180)),
       aspect_ratio: aspectRatio,
-      idempotency_key: `${projectId}-${projectRevision}-${selectedTargetId || 'none'}-${duration}-${aspectRatio}`,
+      content_genre: contentGenre,
+      idempotency_key: `${projectId}-${projectRevision}-${selectedTargetId || 'none'}-${duration}-${aspectRatio}-${contentGenre}`,
     }),
     onSuccess: (handoff) => {
       onNotice('Đã tạo AI Video project từ handoff. Đang mở luồng AI Video để tiếp tục với Codex.');
@@ -170,6 +174,7 @@ export function HandoffDialog({ projectId, projectTitle, projectRevision, ideas,
             </p>
           )}
           <div className="grid gap-3 sm:grid-cols-2"><div><label htmlFor="handoff-duration" className="text-sm font-medium">Thời lượng (giây)</label><Input id="handoff-duration" type="number" min={1} max={3600} className="mt-1.5" value={duration} onChange={(event) => setDuration(event.target.value)} /></div><div><label htmlFor="handoff-aspect" className="text-sm font-medium">Tỉ lệ khung hình</label><Select value={aspectRatio} onValueChange={(value) => setAspectRatio(value as ResearchVideoAspectRatio)}><SelectTrigger id="handoff-aspect" className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="9:16">9:16 dọc</SelectItem><SelectItem value="16:9">16:9 ngang</SelectItem><SelectItem value="1:1">1:1 vuông</SelectItem></SelectContent></Select></div></div>
+          <div><label htmlFor="handoff-genre" className="text-sm font-medium">Thể loại nội dung</label><Select value={contentGenre} onValueChange={(value) => setContentGenre(value as ContentGenre)}><SelectTrigger id="handoff-genre" className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="general">Chung</SelectItem><SelectItem value="developer_explainer">Developer / GitHub explainer</SelectItem><SelectItem value="documentary">Documentary</SelectItem><SelectItem value="educational_explainer">Educational explainer</SelectItem><SelectItem value="news">News</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">Luồng repo/screenshot mặc định Developer explainer: hook từ vấn đề thật, fact có evidence, ảnh gốc được giữ và SFX chỉ nhấn reveal.</p></div>
           <p className="text-xs leading-5 text-muted-foreground">AI Video sẽ mở bằng project vừa tạo. Handoff không tự chạy planning, render hoặc generation.</p>
         </div>
         <DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Hủy</Button><Button disabled={!canSubmit} onClick={() => mutation.mutate()}>{mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />} Tạo và mở AI Video</Button></DialogFooter>

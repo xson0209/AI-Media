@@ -24,6 +24,8 @@ NARRATION_DENSITY_VALUES = {"light", "balanced", "dense"}
 NARRATION_DENSITY_PATTERN = "^(light|balanced|dense)$"
 
 CTA_STYLE_PATTERN = "^(none|soft|direct|urgent)$"
+CTA_ACTION_VALUES = {"none", "comment", "like", "share", "follow", "save", "subscribe"}
+CTA_ACTION_PATTERN = "^(none|comment|like|share|follow|save|subscribe)$"
 
 
 @dataclass(frozen=True)
@@ -152,6 +154,7 @@ PURPOSE_FIELD_ALIASES = ("video_purpose", "purpose", "project_purpose", "audienc
 DIALOGUE_MODE_FIELD_ALIASES = ("dialogue_mode", "voice_mode", "speech_mode", "narration_mode")
 NARRATION_DENSITY_FIELD_ALIASES = ("narration_density", "voiceover_density", "speech_density", "talk_density")
 CTA_STYLE_FIELD_ALIASES = ("call_to_action_style", "cta_style", "cta", "sales_cta")
+CTA_ACTION_FIELD_ALIASES = ("cta_action", "call_to_action_action", "interaction_cta", "engagement_action")
 NARRATION_TEXT_FIELD_ALIASES = (
     "english_narration",
     "narration",
@@ -199,6 +202,29 @@ def normalize_call_to_action_style(value: str | None, *, purpose: str | None = N
     return None if fallback in {None, "none"} else fallback
 
 
+def normalize_cta_action(value: str | None, *, default: str = "none") -> str:
+    """Normalize one primary viewer interaction action.
+
+    The action is intentionally separate from CTA tone. Unknown or legacy
+    values become ``none`` so existing projects never gain an unexpected CTA.
+    """
+    token = _token(value or default or "none")
+    aliases = {
+        "commenting": "comment",
+        "comments": "comment",
+        "like_video": "like",
+        "liking": "like",
+        "share_video": "share",
+        "sharing": "share",
+        "follow_channel": "follow",
+        "save_video": "save",
+        "subscribe_channel": "subscribe",
+        "sub": "subscribe",
+    }
+    normalized = aliases.get(token, token)
+    return normalized if normalized in CTA_ACTION_VALUES else "none"
+
+
 def resolve_purpose_settings(
     *,
     video_purpose: str | None,
@@ -206,6 +232,7 @@ def resolve_purpose_settings(
     dialogue_mode: str | None = None,
     narration_density: str | None = None,
     call_to_action_style: str | None = None,
+    cta_action: str | None = None,
 ) -> dict[str, str | None]:
     purpose = normalize_video_purpose(video_purpose)
     preset = purpose_preset(purpose)
@@ -216,6 +243,7 @@ def resolve_purpose_settings(
         "dialogue_mode": normalize_dialogue_mode(dialogue_mode, purpose=purpose),
         "narration_density": normalize_narration_density(narration_density, purpose=purpose),
         "call_to_action_style": normalize_call_to_action_style(call_to_action_style, purpose=purpose),
+        "cta_action": normalize_cta_action(cta_action),
     }
 
 
@@ -226,6 +254,7 @@ def purpose_context_lines(
     dialogue_mode: str | None,
     narration_density: str | None,
     call_to_action_style: str | None,
+    cta_action: str | None = None,
 ) -> list[str]:
     settings = resolve_purpose_settings(
         video_purpose=video_purpose,
@@ -233,6 +262,7 @@ def purpose_context_lines(
         dialogue_mode=dialogue_mode,
         narration_density=narration_density,
         call_to_action_style=call_to_action_style,
+        cta_action=cta_action,
     )
     preset = purpose_preset(str(settings["video_purpose"]))
     lines = [
@@ -245,6 +275,7 @@ def purpose_context_lines(
     ]
     if settings.get("call_to_action_style"):
         lines.append(f"Call to action style: {settings['call_to_action_style']}")
+    lines.append(f"CTA action: {settings.get('cta_action') or 'none'}")
     lines.append(
         "Purpose guidance must never override target_language for viewer-facing speech, subtitles, or on-screen text."
     )

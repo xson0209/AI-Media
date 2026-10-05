@@ -103,7 +103,7 @@ def _execute_attempt(
         return AttemptResult(
             mode=mode,
             status="failed",
-            error_code="RESEARCH_ATTEMPT_FAILED",
+            error_code=getattr(exc, "error_code", "RESEARCH_ATTEMPT_FAILED"),
             error_message=str(exc)[:2000],
             duration_ms=int((time.monotonic() - started) * 1000),
         )

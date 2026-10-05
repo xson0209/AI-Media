@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,40 @@ class ResearchCLIError(RuntimeError):
         super().__init__(message)
         self.error_code = error_code
         self.metadata = metadata or {}
+
+
+def check_provider(*, check_exec: bool = False, timeout_seconds: int = 30, model: str | None = None) -> dict[str, Any]:
+    """Return a safe readiness payload for the configured Claude CLI."""
+    cli_path = _cli_path()
+    settings_path = _settings_path()
+    selected_model = model or "sonnet"
+    payload: dict[str, Any] = {
+        "provider": "claude-cli",
+        "ready": bool(cli_path and settings_path),
+        "message": "Claude CLI sẵn sàng cho nghiên cứu nội dung." if cli_path and settings_path else "Chưa cấu hình Claude CLI hoặc file settings.",
+        "codex_path": cli_path,
+        "requested_model": selected_model,
+        "effective_model": selected_model,
+        "model_source": "content_settings",
+        "model_verified": False,
+    }
+    if not payload["ready"] or not check_exec:
+        payload["error_code"] = None if payload["ready"] else "CLAUDE_CLI_NOT_READY"
+        return payload
+    try:
+        result = run_research(
+            "Trả lời đúng một chữ: OK",
+            timeout_seconds=min(timeout_seconds, 120),
+            tools="",
+            model=selected_model,
+        )
+        payload.update({"ready": bool(result.output), "model_verified": bool(result.output), "request_id": None})
+        payload["message"] = "Claude CLI đã phản hồi với cấu hình nội dung." if result.output else "Claude CLI chạy nhưng không trả về text."
+        if not result.output:
+            payload["error_code"] = "CLAUDE_EMPTY_OUTPUT"
+    except ResearchCLIError as exc:
+        payload.update({"ready": False, "message": str(exc), "error_code": exc.error_code})
+    return payload
 
 
 def _settings_path() -> Path | None:
@@ -84,6 +119,7 @@ def run_research(
     tools: str | None = None,
     effort: str | None = None,
     max_budget_usd: float | None = None,
+    model: str | None = None,
 ) -> ResearchCLIResult:
     """Run the local research CLI in read-only mode using the user's settings."""
     cli_path = _cli_path()
@@ -109,6 +145,8 @@ def run_research(
     ]
     if effort in {"low", "medium", "high", "xhigh", "max"}:
         command.extend(["--effort", effort])
+    if model:
+        command.extend(["--model", model.strip()])
     if max_budget_usd is not None:
         command.extend(["--max-budget-usd", str(max(0.01, min(float(max_budget_usd), 5.0)))])
     command.append("--")
@@ -156,4 +194,58 @@ def run_research(
     return ResearchCLIResult(output=output, metadata=_safe_metadata(envelope))
 
 
-__all__ = ["ResearchCLIError", "ResearchCLIResult", "run_research"]
+def run_content(
+    prompt: str,
+    settings: Any,
+    *,
+    timeout_seconds: int,
+    tools: str | None = None,
+    effort: str | None = None,
+) -> ResearchCLIResult | Any:
+    """Run the provider selected in shared Content settings.
+
+    Research, creative generation, chat, and scoring all use this adapter so
+    one Settings choice controls every content flow. The existing Claude CLI
+    adapter remains read-only; Codex uses the established planning executor.
+    """
+
+    provider = str(getattr(settings, "content_provider", "codex") or "codex").strip().lower()
+    default_models = {"codex": "gpt-5.6-sol", "claude": "sonnet"}
+    model = str(getattr(settings, "content_model", "") or "").strip() or default_models.get(provider)
+    if provider == "claude":
+        result = run_research(
+            prompt,
+            timeout_seconds=timeout_seconds,
+            tools=tools,
+            effort=effort,
+            model=model,
+        )
+        result.metadata.setdefault("provider", "claude")
+        if model:
+            result.metadata.setdefault("configured_model", model)
+        return result
+
+    # Import lazily to keep this low-level CLI module independent at import
+    # time and avoid a circular dependency during backend startup.
+    from . import ai_planning
+
+    codex_settings = copy.copy(settings)
+    if model:
+        # ``content_model`` is the shared content setting; the legacy Codex
+        # planning field remains untouched in the persisted settings row.
+        codex_settings.model = model
+    result = ai_planning.run_codex_exec(
+        codex_settings,
+        prompt,
+        timeout_seconds=timeout_seconds,
+        return_metadata=True,
+    )
+    if isinstance(result, ai_planning.CodexExecResult):
+        result.metadata.setdefault("provider", "codex")
+        if model:
+            result.metadata.setdefault("configured_model", model)
+        return result
+    return result
+
+
+__all__ = ["ResearchCLIError", "ResearchCLIResult", "run_content", "run_research"]

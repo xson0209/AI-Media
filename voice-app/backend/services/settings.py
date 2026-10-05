@@ -28,6 +28,19 @@ SINGLETON_ID = 1
 DEFAULT_CODEX_TIMEOUT_SECONDS = 600
 OLD_DEFAULT_CODEX_TIMEOUT_SECONDS = 60
 CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max", "ultra"}
+CONTENT_PROVIDERS = {"codex", "claude"}
+DEFAULT_CONTENT_PROVIDER = "codex"
+DEFAULT_CONTENT_MODELS = {
+    "codex": "gpt-5.6-sol",
+    # Stable Claude CLI aliases follow the user's entitlement and resolve to
+    # the newest accessible release. Pinned historical IDs can return 404.
+    "claude": "sonnet",
+}
+LEGACY_CLAUDE_MODEL_ALIASES = {
+    "claude-sonnet-4-5": "sonnet",
+    "claude-opus-4-1": "opus",
+    "claude-haiku-3-5": "haiku",
+}
 
 
 def _get_or_create_capture_row(db: Session) -> DBCaptureSettings:
@@ -88,10 +101,10 @@ def _refresh_codex_path_if_needed(row: DBAIPlanningSettings) -> bool:
     if not row.codex_path:
         row.codex_path = detected
         return True
-    if (
-        _looks_like_stale_cross_platform_codex_path(row.codex_path)
-        and not _path_exists_or_resolves(row.codex_path)
-    ):
+    # A persisted CLI path can become stale after npm/node is reinstalled or
+    # the user switches machines.  Refresh it whenever it no longer resolves,
+    # regardless of whether the old path looks cross-platform.
+    if not _path_exists_or_resolves(row.codex_path):
         row.codex_path = detected
         return True
     return False
@@ -123,6 +136,13 @@ def _get_or_create_ai_planning_row(db: Session) -> DBAIPlanningSettings:
             codex_path=_default_codex_path(),
             model=os.environ.get("VOICEBOX_CODEX_MODEL"),
             model_reasoning_effort=_default_codex_reasoning_effort(),
+            content_provider=(os.environ.get("VOICEBOX_CONTENT_PROVIDER") or DEFAULT_CONTENT_PROVIDER).strip().lower()
+            if (os.environ.get("VOICEBOX_CONTENT_PROVIDER") or DEFAULT_CONTENT_PROVIDER).strip().lower() in CONTENT_PROVIDERS
+            else DEFAULT_CONTENT_PROVIDER,
+            content_model=os.environ.get("VOICEBOX_CONTENT_MODEL") or DEFAULT_CONTENT_MODELS.get(
+                (os.environ.get("VOICEBOX_CONTENT_PROVIDER") or DEFAULT_CONTENT_PROVIDER).strip().lower(),
+                DEFAULT_CONTENT_MODELS[DEFAULT_CONTENT_PROVIDER],
+            ),
             timeout_seconds=_default_codex_timeout(),
         )
         db.add(row)
@@ -131,6 +151,15 @@ def _get_or_create_ai_planning_row(db: Session) -> DBAIPlanningSettings:
     else:
         changed = _refresh_codex_path_if_needed(row)
         changed = _refresh_codex_timeout_if_needed(row) or changed
+        if not getattr(row, "content_provider", None) or row.content_provider not in CONTENT_PROVIDERS:
+            row.content_provider = DEFAULT_CONTENT_PROVIDER
+            changed = True
+        if not getattr(row, "content_model", None):
+            row.content_model = DEFAULT_CONTENT_MODELS.get(row.content_provider, DEFAULT_CONTENT_MODELS[DEFAULT_CONTENT_PROVIDER])
+            changed = True
+        elif row.content_provider == "claude" and row.content_model in LEGACY_CLAUDE_MODEL_ALIASES:
+            row.content_model = LEGACY_CLAUDE_MODEL_ALIASES[row.content_model]
+            changed = True
         if changed:
             db.commit()
             db.refresh(row)
@@ -191,6 +220,16 @@ def update_ai_planning_settings(db: Session, patch: dict[str, Any]) -> DBAIPlann
         if effort and effort not in CODEX_REASONING_EFFORTS:
             raise ValueError("model_reasoning_effort must be one of low, medium, high, xhigh, max, ultra")
         patch["model_reasoning_effort"] = effort if effort else None
+    if "content_provider" in patch and isinstance(patch["content_provider"], str):
+        provider = patch["content_provider"].strip().lower()
+        if provider not in CONTENT_PROVIDERS:
+            raise ValueError("content_provider must be one of codex or claude")
+        patch["content_provider"] = provider
+        if "content_model" not in patch:
+            patch["content_model"] = DEFAULT_CONTENT_MODELS[provider]
+    if "content_model" in patch and isinstance(patch["content_model"], str):
+        model = patch["content_model"].strip()
+        patch["content_model"] = LEGACY_CLAUDE_MODEL_ALIASES.get(model, model) or None
     _apply_patch(row, patch)
     db.commit()
     db.refresh(row)

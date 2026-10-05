@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { apiClient } from '@/lib/api/client';
 import type { NewsSpeechMode, VideoLanguage, VideoProjectResponse, VideoPublishingGeneratePlatform } from '@/lib/api/types';
+import { usePlatform } from '@/platform/PlatformContext';
 
 const speechOptions: Array<{ value: NewsSpeechMode; label: string }> = [
   { value: 'veo_dialogue', label: 'Presenter/nhân vật thoại trong Veo 3' },
@@ -20,6 +21,7 @@ const speechOptions: Array<{ value: NewsSpeechMode; label: string }> = [
 
 export function NewsVideo() {
   const queryClient = useQueryClient();
+  const platform = usePlatform();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
   const [sourceNote, setSourceNote] = useState('');
@@ -40,6 +42,14 @@ export function NewsVideo() {
   });
   const plan = useMutation({ mutationFn: () => apiClient.planNewsVideoProject(selectedId as string), onSuccess: () => { setNotice('Đã sinh shot. Tiếp theo hãy tạo prompt Veo 3.'); void detail.refetch(); }, onError: (error) => setNotice(error instanceof Error ? error.message : 'Không sinh được shot.') });
   const prompts = useMutation({ mutationFn: () => apiClient.generateNewsVideoPrompts(selectedId as string), onSuccess: () => { setNotice('Đã tạo prompt provider-ready. Bạn có thể copy sang Veo 3.'); void detail.refetch(); }, onError: (error) => setNotice(error instanceof Error ? error.message : 'Không tạo được prompt.') });
+  const downloadPromptPack = useMutation({
+    mutationFn: async (projectId: string) => {
+      const result = await apiClient.downloadNewsVideoPromptPack(projectId);
+      await platform.filesystem.saveFile(result.filename, result.blob, [{ name: 'Prompt UTF-8', extensions: ['txt'] }]);
+    },
+    onMutate: () => setNotice(null),
+    onError: (error) => setNotice(`Không tải được prompt pack: ${error instanceof Error ? error.message : 'Hãy thử lại.'}`),
+  });
   const project = detail.data;
   const copyShotPrompt = async (shotId: string) => {
     if (!selectedId) return;
@@ -70,7 +80,7 @@ export function NewsVideo() {
         <Card><CardHeader><CardTitle>Luồng thủ công Veo 3</CardTitle></CardHeader><CardContent className="space-y-4">
           {!project ? <p className="text-sm text-muted-foreground">Chọn hoặc tạo dự án để bắt đầu.</p> : <>
             <div className="flex flex-wrap gap-2"><Badge>{project.aspect_ratio}</Badge><Badge>Tiếng Việt</Badge><Badge>{speechOptions.find((x) => x.value === (project.speech_source ?? speechSource))?.label}</Badge></div>
-            <div className="flex flex-wrap gap-2"><Button disabled={plan.isPending} onClick={() => plan.mutate()}>1. Sinh shot</Button><Button disabled={prompts.isPending} onClick={() => prompts.mutate()}>2. Sinh prompt Veo 3</Button><Button variant="outline" onClick={() => setNotice('Copy prompt từng shot sau khi prompt pack hoàn tất.') }><Copy className="mr-2 h-4 w-4" />Hướng dẫn copy</Button><Button variant="outline" onClick={() => void apiClient.downloadNewsVideoPromptPack(selectedId!)}>Tải prompt pack UTF-8</Button></div>
+            <div className="flex flex-wrap gap-2"><Button disabled={plan.isPending} onClick={() => plan.mutate()}>1. Sinh shot</Button><Button disabled={prompts.isPending} onClick={() => prompts.mutate()}>2. Sinh prompt Veo 3</Button><Button variant="outline" onClick={() => setNotice('Copy prompt từng shot sau khi prompt pack hoàn tất.') }><Copy className="mr-2 h-4 w-4" />Hướng dẫn copy</Button><Button variant="outline" disabled={!selectedId || downloadPromptPack.isPending} onClick={() => selectedId && downloadPromptPack.mutate(selectedId)}>{downloadPromptPack.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{downloadPromptPack.isPending ? 'Đang tải prompt pack…' : 'Tải prompt pack UTF-8'}</Button></div>
             <p className="rounded-md bg-muted p-3 text-sm">3. Copy provider-ready prompt sang Veo 3, tự render và tải MP4. 4. Quay lại chọn đúng shot để upload clip thủ công. Hệ thống không tự mở Veo và không tự tiêu credit.</p>
             {notice && <p className="text-sm text-amber-600">{notice}</p>}
             <div className="space-y-2">{project.shots?.map((shot) => <div key={shot.id} className="rounded border p-3 text-sm"><div className="flex items-center justify-between"><span>Shot {String(shot.shot_order).padStart(2, '0')}</span><div className="flex items-center gap-2"><Badge variant="outline">{shot.prompt_status}</Badge><Button size="sm" variant="outline" onClick={() => void copyShotPrompt(shot.id)}><Copy className="mr-1 h-3 w-3" />Copy prompt</Button></div></div><p className="mt-1 text-muted-foreground">{shot.vietnamese_description || shot.english_narration || 'Chưa có mô tả'}</p></div>)}</div>
